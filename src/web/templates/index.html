@@ -1514,28 +1514,28 @@
         </div>
 
         <!-- Admin Panel (v7.0.0) -->
-        <div v-if="showAdminPanel" class="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4">
-            <div class="bg-gray-800 rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div v-if="showAdminPanel" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+            <div class="rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col" style="background: var(--tg-sidebar);">
                 <!-- Header -->
-                <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
-                    <h2 class="text-lg font-semibold text-white">Admin Settings</h2>
-                    <button @click="showAdminPanel = false" class="text-gray-400 hover:text-white">
+                <div class="flex items-center justify-between px-6 py-4" style="border-bottom: 1px solid var(--tg-border);">
+                    <h2 class="text-lg font-semibold" style="color: var(--tg-text);">Admin Settings</h2>
+                    <button @click="showAdminPanel = false" class="hover:opacity-80" style="color: var(--tg-muted);">
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
 
                 <!-- Tabs -->
-                <div class="flex border-b border-gray-700 px-6">
-                    <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200'" class="px-4 py-2 border-b-2 text-sm font-medium">
+                <div class="flex px-6" style="border-bottom: 1px solid var(--tg-border);">
+                    <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         Viewer Accounts
                     </button>
-                    <button @click="adminActiveTab = 'tokens'; loadAdminTokens()" :class="adminActiveTab === 'tokens' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200'" class="px-4 py-2 border-b-2 text-sm font-medium">
+                    <button @click="adminActiveTab = 'tokens'; loadAdminTokens()" :class="adminActiveTab === 'tokens' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         Share Tokens
                     </button>
-                    <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200'" class="px-4 py-2 border-b-2 text-sm font-medium">
+                    <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         Audit Log
                     </button>
-                    <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200'" class="px-4 py-2 border-b-2 text-sm font-medium">
+                    <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         Listener
                     </button>
                 </div>
@@ -1545,39 +1545,40 @@
                     <!-- Viewers Tab -->
                     <div v-if="adminActiveTab === 'viewers'">
                         <!-- Create/Edit Form -->
-                        <div class="bg-gray-900 rounded-lg p-4 mb-4">
-                            <h3 class="text-sm font-medium text-gray-300 mb-3">{{ adminEditingId ? 'Edit Viewer' : 'Create Viewer' }}</h3>
+                        <div class="rounded-lg p-4 mb-4" style="background: var(--tg-bg);">
+                            <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">{{ adminEditingId ? 'Edit Viewer' : 'Create Viewer' }}</h3>
                             <div v-if="adminError" class="text-red-400 text-sm mb-3">{{ adminError }}</div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <input v-model="adminViewerForm.username" :disabled="!!adminEditingId" placeholder="Username" class="bg-gray-700 text-white rounded px-3 py-2 text-sm" />
-                                <input v-model="adminViewerForm.password" type="password" :placeholder="adminEditingId ? 'New password (leave empty to keep)' : 'Password'" class="bg-gray-700 text-white rounded px-3 py-2 text-sm" />
+                                <input v-model="adminViewerForm.username" :disabled="!!adminEditingId" placeholder="Username" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                <input v-model="adminViewerForm.password" type="password" :placeholder="adminEditingId ? 'New password (leave empty to keep)' : 'Password'" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
                             </div>
                             <div class="mt-3">
-                                <label class="text-xs text-gray-400 block mb-1">Allowed Chats (none selected = access to all chats)</label>
+                                <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats (none selected = access to all chats)</label>
                                 <input v-model="adminChatFilter" type="text" placeholder="Filter chats..."
-                                    class="w-full bg-gray-800 text-white rounded px-3 py-1.5 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    class="w-full rounded px-3 py-1.5 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"
                                     autocomplete="off" spellcheck="false">
                                 <div class="flex gap-2 mb-1">
                                     <button type="button" @click="adminViewerForm.allowed_chat_ids = adminChats.map(c => c.id)" class="text-xs text-blue-400 hover:text-blue-300">Select all</button>
-                                    <button type="button" @click="adminViewerForm.allowed_chat_ids = []" class="text-xs text-gray-400 hover:text-gray-300">Deselect all</button>
-                                    <span class="text-xs text-gray-500 ml-auto">{{ adminViewerForm.allowed_chat_ids.length }} of {{ adminChats.length }} selected</span>
+                                    <button type="button" @click="adminViewerForm.allowed_chat_ids = []" class="text-xs hover:opacity-80" style="color: var(--tg-muted);">Deselect all</button>
+                                    <span class="text-xs ml-auto" style="color: var(--tg-muted);">{{ adminViewerForm.allowed_chat_ids.length }} of {{ adminChats.length }} selected</span>
                                 </div>
-                                <div class="flex flex-wrap gap-1 bg-gray-700 rounded p-2 max-h-48 overflow-y-auto">
-                                    <label v-for="chat in filteredAdminChats" :key="chat.id" class="flex items-center gap-1 text-xs text-gray-300 bg-gray-600 rounded px-2 py-1 cursor-pointer hover:bg-gray-500">
+                                <div class="flex flex-wrap gap-1 rounded p-2 max-h-48 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                    <label v-for="chat in filteredAdminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
                                         <input type="checkbox" :value="chat.id" v-model="adminViewerForm.allowed_chat_ids" class="rounded" />
                                         {{ chat.title || chat.id }}
                                     </label>
                                 </div>
                             </div>
                             <div class="mt-3 flex items-center gap-4">
-                                <label class="flex items-center gap-2 text-sm text-gray-300">
+                                <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
                                     <input type="checkbox" v-model="adminViewerForm.is_active" class="rounded" /> Active
                                 </label>
-                                <label class="flex items-center gap-2 text-sm text-gray-300">
+                                <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
                                     <input type="checkbox" v-model="adminViewerForm.no_download" class="rounded" /> No Downloads
                                 </label>
                                 <div class="flex-1"></div>
-                                <button v-if="adminEditingId" @click="cancelEdit" class="px-3 py-1.5 text-sm text-gray-400 hover:text-white">Cancel</button>
+                                <button v-if="adminEditingId" @click="cancelEdit" class="px-3 py-1.5 text-sm" style="color: var(--tg-muted);">Cancel</button>
                                 <button @click="saveViewer" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">
                                     {{ adminEditingId ? 'Update' : 'Create' }}
                                 </button>
@@ -1586,10 +1587,10 @@
 
                         <!-- Viewers List -->
                         <div class="space-y-2">
-                            <div v-for="viewer in adminViewers" :key="viewer.id" class="flex items-center gap-3 bg-gray-900 rounded-lg p-3">
+                            <div v-for="viewer in adminViewers" :key="viewer.id" class="flex items-center gap-3 rounded-lg p-3" style="background: var(--tg-bg);">
                                 <div class="flex-1">
-                                    <div class="text-sm text-white font-medium">{{ viewer.username }}</div>
-                                    <div class="text-xs text-gray-400">
+                                    <div class="text-sm font-medium" style="color: var(--tg-text);">{{ viewer.username }}</div>
+                                    <div class="text-xs" style="color: var(--tg-muted);">
                                         <template v-if="viewer.allowed_chat_ids && viewer.allowed_chat_ids.length">
                                             {{ viewer.allowed_chat_ids.map(id => { const c = adminChats.find(ch => ch.id === id); return c ? c.title : id }).join(', ') }}
                                         </template>
@@ -1598,34 +1599,34 @@
                                         <template v-if="viewer.no_download"> · <span class="text-amber-400">No DL</span></template>
                                     </div>
                                 </div>
-                                <button @click="editViewer(viewer)" class="text-gray-400 hover:text-blue-400 p-1"><i class="fas fa-edit"></i></button>
-                                <button @click="deleteViewer(viewer)" class="text-gray-400 hover:text-red-400 p-1"><i class="fas fa-trash"></i></button>
+                                <button @click="editViewer(viewer)" class="p-1 hover:text-blue-400" style="color: var(--tg-muted);"><i class="fas fa-edit"></i></button>
+                                <button @click="deleteViewer(viewer)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);"><i class="fas fa-trash"></i></button>
                             </div>
-                            <div v-if="adminViewers.length === 0" class="text-gray-500 text-sm text-center py-4">No viewer accounts yet</div>
+                            <div v-if="adminViewers.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No viewer accounts yet</div>
                         </div>
                     </div>
 
                     <!-- Share Tokens Tab (v7.2.0) -->
                     <div v-if="adminActiveTab === 'tokens'">
                         <!-- Create Token Form -->
-                        <div class="bg-gray-900 rounded-lg p-4 mb-4">
-                            <h3 class="text-sm font-medium text-gray-300 mb-3">Create Share Token</h3>
+                        <div class="rounded-lg p-4 mb-4" style="background: var(--tg-bg);">
+                            <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Create Share Token</h3>
                             <div v-if="adminTokenError" class="text-red-400 text-sm mb-3">{{ adminTokenError }}</div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <input v-model="adminTokenForm.label" placeholder="Label (optional)" class="bg-gray-700 text-white rounded px-3 py-2 text-sm" />
-                                <input v-model="adminTokenForm.expires_at" type="datetime-local" class="bg-gray-700 text-white rounded px-3 py-2 text-sm" />
+                                <input v-model="adminTokenForm.label" placeholder="Label (optional)" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                <input v-model="adminTokenForm.expires_at" type="datetime-local" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
                             </div>
                             <div class="mt-3">
-                                <label class="text-xs text-gray-400 block mb-1">Allowed Chats (required — tokens must be scoped)</label>
-                                <div class="flex flex-wrap gap-1 bg-gray-700 rounded p-2 max-h-32 overflow-y-auto">
-                                    <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs text-gray-300 bg-gray-600 rounded px-2 py-1 cursor-pointer hover:bg-gray-500">
+                                <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats (required — tokens must be scoped)</label>
+                                <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                    <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
                                         <input type="checkbox" :value="chat.id" v-model="adminTokenForm.allowed_chat_ids" class="rounded" />
                                         {{ chat.title || chat.id }}
                                     </label>
                                 </div>
                             </div>
                             <div class="mt-3 flex items-center gap-4">
-                                <label class="flex items-center gap-2 text-sm text-gray-300">
+                                <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
                                     <input type="checkbox" v-model="adminTokenForm.no_download" class="rounded" /> No Downloads
                                 </label>
                                 <div class="flex-1"></div>
@@ -1658,26 +1659,53 @@
 
                         <!-- Tokens List -->
                         <div class="space-y-2">
-                            <div v-for="token in adminTokens" :key="token.id" class="bg-gray-900 rounded-lg p-3">
-                                <div class="flex items-center gap-3">
-                                    <div class="flex-1">
-                                        <div class="text-sm text-white font-medium">{{ token.label || `Token #${token.id}` }}</div>
-                                        <div class="text-xs text-gray-400">
-                                            <template v-if="token.allowed_chat_ids && token.allowed_chat_ids.length">
-                                                {{ token.allowed_chat_ids.map(id => { const c = adminChats.find(ch => ch.id === id); return c ? c.title : id }).join(', ') }}
-                                            </template>
-                                            · Used {{ token.use_count || 0 }}x
-                                            <template v-if="token.last_used_at"> · Last: {{ new Date(token.last_used_at).toLocaleDateString() }}</template>
-                                            <template v-if="token.expires_at"> · Exp: {{ new Date(token.expires_at).toLocaleDateString() }}</template>
-                                            <template v-if="token.no_download"> · <span class="text-amber-400">No DL</span></template>
-                                            <template v-if="token.is_revoked"> · <span class="text-red-400">Revoked</span></template>
+                            <div v-for="token in adminTokens" :key="token.id" class="rounded-lg p-3" style="background: var(--tg-bg);">
+                                <!-- View mode -->
+                                <div v-if="editingTokenId !== token.id">
+                                    <div class="flex items-center gap-3">
+                                        <div class="flex-1 min-w-0">
+                                            <div class="text-sm font-medium" style="color: var(--tg-text);">{{ token.label || `Token #${token.id}` }}</div>
+                                            <div class="text-xs" style="color: var(--tg-muted);">
+                                                <template v-if="token.allowed_chat_ids && token.allowed_chat_ids.length">
+                                                    {{ token.allowed_chat_ids.map(id => { const c = adminChats.find(ch => ch.id === id); return c ? c.title : id }).join(', ') }}
+                                                </template>
+                                                · Used {{ token.use_count || 0 }}x
+                                                <template v-if="token.last_used_at"> · Last: {{ new Date(token.last_used_at).toLocaleDateString() }}</template>
+                                                <template v-if="token.expires_at"> · Exp: {{ new Date(token.expires_at).toLocaleDateString() }}</template>
+                                                <template v-if="token.no_download"> · <span class="text-amber-400">No DL</span></template>
+                                                <template v-if="token.is_revoked"> · <span class="text-red-400">Revoked</span></template>
+                                            </div>
+                                        </div>
+                                        <button @click="startEditToken(token)" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Edit"><i class="fas fa-pen text-xs"></i></button>
+                                        <button v-if="!token.is_revoked" @click="revokeToken(token)" class="p-1 hover:text-amber-400" style="color: var(--tg-muted);" title="Revoke"><i class="fas fa-ban"></i></button>
+                                        <button @click="deleteToken(token)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);" title="Delete"><i class="fas fa-trash"></i></button>
+                                    </div>
+                                </div>
+                                <!-- Edit mode -->
+                                <div v-else>
+                                    <div class="space-y-2">
+                                        <input v-model="editTokenForm.label" placeholder="Label" class="w-full rounded px-3 py-1.5 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                        <div>
+                                            <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats</label>
+                                            <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                                <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
+                                                    <input type="checkbox" :value="chat.id" v-model="editTokenForm.allowed_chat_ids" class="rounded" />
+                                                    {{ chat.title || chat.id }}
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-4">
+                                            <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
+                                                <input type="checkbox" v-model="editTokenForm.no_download" class="rounded" /> No Downloads
+                                            </label>
+                                            <div class="flex-1"></div>
+                                            <button @click="editingTokenId = null" class="px-3 py-1 text-sm rounded" style="color: var(--tg-muted);">Cancel</button>
+                                            <button @click="saveEditToken(token.id)" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">Save</button>
                                         </div>
                                     </div>
-                                    <button v-if="!token.is_revoked" @click="revokeToken(token)" class="text-gray-400 hover:text-amber-400 p-1" title="Revoke"><i class="fas fa-ban"></i></button>
-                                    <button @click="deleteToken(token)" class="text-gray-400 hover:text-red-400 p-1" title="Delete"><i class="fas fa-trash"></i></button>
                                 </div>
                             </div>
-                            <div v-if="adminTokens.length === 0" class="text-gray-500 text-sm text-center py-4">No share tokens yet</div>
+                            <div v-if="adminTokens.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No share tokens yet</div>
                         </div>
                     </div>
 
@@ -1685,7 +1713,7 @@
                     <div v-if="adminActiveTab === 'audit'">
                         <!-- Action filter -->
                         <div class="flex gap-2 mb-3">
-                            <select v-model="adminAuditAction" @change="loadAdminAudit()" class="bg-gray-700 text-white rounded px-3 py-1.5 text-sm">
+                            <select v-model="adminAuditAction" @change="loadAdminAudit()" class="rounded px-3 py-1.5 text-sm" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                 <option value="">All actions</option>
                                 <option value="login_success">Login success</option>
                                 <option value="login_failed">Login failed</option>
@@ -1702,14 +1730,14 @@
                             </select>
                         </div>
                         <div class="space-y-1">
-                            <div v-for="log in adminAuditLogs" :key="log.id" class="flex items-center gap-3 text-xs bg-gray-900 rounded px-3 py-2">
-                                <span class="text-gray-500 w-36 shrink-0">{{ new Date(log.created_at).toLocaleString() }}</span>
+                            <div v-for="log in adminAuditLogs" :key="log.id" class="flex items-center gap-3 text-xs rounded px-3 py-2" style="background: var(--tg-bg);">
+                                <span class="w-36 shrink-0" style="color: var(--tg-muted);">{{ new Date(log.created_at).toLocaleString() }}</span>
                                 <span :class="{'text-yellow-400': log.role === 'master', 'text-blue-400': log.role === 'viewer', 'text-purple-400': log.role === 'token'}" class="w-16 shrink-0">{{ log.role }}</span>
-                                <span class="text-gray-300 w-24 shrink-0 truncate">{{ log.username }}</span>
-                                <span class="text-gray-400 flex-1 truncate">{{ log.action }}</span>
-                                <span class="text-gray-600 truncate w-28">{{ log.ip_address }}</span>
+                                <span class="w-24 shrink-0 truncate" style="color: var(--tg-text);">{{ log.username }}</span>
+                                <span class="flex-1 truncate" style="color: var(--tg-muted);">{{ log.action }}</span>
+                                <span class="truncate w-28" style="color: var(--tg-muted); opacity: 0.6;">{{ log.ip_address }}</span>
                             </div>
-                            <div v-if="adminAuditLogs.length === 0" class="text-gray-500 text-sm text-center py-4">No audit logs yet</div>
+                            <div v-if="adminAuditLogs.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No audit logs yet</div>
                         </div>
                     </div>
 
@@ -1717,40 +1745,40 @@
                     <div v-if="adminActiveTab === 'listener'">
                         <div class="space-y-4">
                             <!-- Status display -->
-                            <div class="bg-gray-900 rounded-lg p-4">
-                                <h3 class="text-sm font-medium text-gray-300 mb-3">Listener Status</h3>
+                            <div class="rounded-lg p-4" style="background: var(--tg-bg);">
+                                <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Listener Status</h3>
                                 <div class="grid grid-cols-2 gap-3">
                                     <div>
-                                        <span class="text-xs text-gray-500">Status</span>
+                                        <span class="text-xs" style="color: var(--tg-muted);">Status</span>
                                         <div class="flex items-center gap-2 mt-1">
                                             <span class="w-2 h-2 rounded-full" :class="{
                                                 'bg-green-500': listenerInfo.status === 'running',
                                                 'bg-yellow-500 animate-pulse': listenerInfo.status === 'grace_period' || listenerInfo.status === 'starting',
                                                 'bg-gray-500': listenerInfo.status === 'stopped' || listenerInfo.status === 'stopping'
                                             }"></span>
-                                            <span class="text-sm text-white capitalize">{{ listenerInfo.status || 'unknown' }}</span>
+                                            <span class="text-sm capitalize" style="color: var(--tg-text);">{{ listenerInfo.status || 'unknown' }}</span>
                                         </div>
                                     </div>
                                     <div>
-                                        <span class="text-xs text-gray-500">Active Viewers</span>
-                                        <div class="text-sm text-white mt-1">{{ listenerInfo.viewer_count ?? 0 }}</div>
+                                        <span class="text-xs" style="color: var(--tg-muted);">Active Viewers</span>
+                                        <div class="text-sm mt-1" style="color: var(--tg-text);">{{ listenerInfo.viewer_count ?? 0 }}</div>
                                     </div>
                                     <div>
-                                        <span class="text-xs text-gray-500">Mode</span>
-                                        <div class="text-sm text-white mt-1 capitalize">{{ listenerInfo.mode || 'off' }}</div>
+                                        <span class="text-xs" style="color: var(--tg-muted);">Mode</span>
+                                        <div class="text-sm mt-1 capitalize" style="color: var(--tg-text);">{{ listenerInfo.mode || 'off' }}</div>
                                     </div>
                                     <div>
-                                        <span class="text-xs text-gray-500">Grace Period</span>
-                                        <div class="text-sm text-white mt-1">{{ listenerInfo.grace_period ?? 300 }}s</div>
+                                        <span class="text-xs" style="color: var(--tg-muted);">Grace Period</span>
+                                        <div class="text-sm mt-1" style="color: var(--tg-text);">{{ listenerInfo.grace_period ?? 300 }}s</div>
                                     </div>
                                 </div>
                             </div>
                             <!-- Mode info -->
-                            <div class="bg-gray-900/50 rounded-lg p-4 text-xs text-gray-400">
-                                <p class="mb-2"><strong class="text-gray-300">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
-                                <p class="mb-2"><strong class="text-gray-300">always</strong> — Listener always runs (legacy behavior)</p>
-                                <p><strong class="text-gray-300">off</strong> — Listener never runs</p>
-                                <p class="mt-3 text-gray-500">Mode is configured via <code class="bg-gray-800 px-1 rounded">LISTENER_MODE</code> env var</p>
+                            <div class="rounded-lg p-4 text-xs" style="background: var(--tg-bg); color: var(--tg-muted);">
+                                <p class="mb-2"><strong style="color: var(--tg-text);">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
+                                <p class="mb-2"><strong style="color: var(--tg-text);">always</strong> — Listener always runs (legacy behavior)</p>
+                                <p><strong style="color: var(--tg-text);">off</strong> — Listener never runs</p>
+                                <p class="mt-3" style="opacity: 0.6;">Mode is configured via <code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> env var</p>
                             </div>
                         </div>
                     </div>
@@ -4396,6 +4424,42 @@
                     } catch (e) { adminTokenError.value = 'Network error' }
                 }
 
+                const editingTokenId = ref(null)
+                const editTokenForm = ref({ label: '', allowed_chat_ids: [], no_download: false })
+                const startEditToken = (token) => {
+                    editingTokenId.value = token.id
+                    editTokenForm.value = {
+                        label: token.label || '',
+                        allowed_chat_ids: token.allowed_chat_ids ? [...token.allowed_chat_ids] : [],
+                        no_download: !!token.no_download,
+                    }
+                }
+                const saveEditToken = async (tokenId) => {
+                    if (!editTokenForm.value.allowed_chat_ids.length) {
+                        alert('Select at least one chat')
+                        return
+                    }
+                    try {
+                        const res = await fetch(`/api/admin/tokens/${tokenId}`, {
+                            method: 'PUT', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                label: editTokenForm.value.label || null,
+                                allowed_chat_ids: editTokenForm.value.allowed_chat_ids,
+                                no_download: editTokenForm.value.no_download,
+                            })
+                        })
+                        if (res.ok) {
+                            editingTokenId.value = null
+                            await loadAdminTokens()
+                            showToast('Token updated')
+                        } else {
+                            const err = await res.json()
+                            alert(err.detail || 'Failed to update token')
+                        }
+                    } catch (e) { alert('Network error') }
+                }
+
                 const revokeToken = async (token) => {
                     if (!confirm(`Revoke token "${token.label || token.id}"?`)) return
                     try {
@@ -4529,6 +4593,10 @@
                     createToken,
                     revokeToken,
                     deleteToken,
+                    editingTokenId,
+                    editTokenForm,
+                    startEditToken,
+                    saveEditToken,
                     // Context menu & permalink
                     contextMenu,
                     openContextMenu,
