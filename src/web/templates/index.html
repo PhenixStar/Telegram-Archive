@@ -1134,7 +1134,7 @@
                         <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Next match"><i class="fas fa-chevron-down text-xs"></i></button>
                         <button @click="clearMsgSearch" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Close search"><i class="fas fa-times text-xs"></i></button>
                     </div>
-                    <div ref="messagesContainer" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll" style="will-change: transform">
+                    <div ref="messagesContainer" class="flex-1 h-0 overflow-y-auto overflow-x-hidden p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll">
                         <div v-if="loading && messages.length === 0" class="text-center py-4 text-tg-muted">
                             Loading messages...
                         </div>
