@@ -1897,6 +1897,7 @@
                 }
 
                 // Settings modal
+                const viewerTimezone = ref('Europe/Madrid')  // Default, updated from config or localStorage
                 const showSettingsModal = ref(false)
                 const showAiComingSoon = ref(false)
                 const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
