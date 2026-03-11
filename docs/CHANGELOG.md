@@ -6,6 +6,33 @@ For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
 ## [Unreleased]
 
+## [7.3.0] - 2026-03-11
+
+### Added
+
+- **FTS5 full-text search** — SQLite-native contentless FTS5 virtual table for fast message search across all chats. Queries are sanitized to prevent injection. Background worker rebuilds index asynchronously on startup without blocking the viewer. Falls back to ILIKE when FTS is unavailable
+- **Search API endpoint** — `GET /api/search?q=query&chat_id=X&limit=50&offset=0` returns matching messages with access control, respecting per-user chat whitelists. Returns `method: "fts"` or `method: "ilike"` to indicate search backend
+- **Theme system (7 themes)** — 6 dark themes (Midnight, Telegram Classic, AMOLED Black, Nord, Monokai, Solarized Dark) + 1 light theme (Light Default). Auto-detect mode respects system `prefers-color-scheme` and switches themes dynamically
+- **Light theme support** — Complete theme CSS variables for light backgrounds, form inputs, message bubbles, service messages, and search highlighting
+- **Context menus** — Right-click on messages to copy text, copy permalink, or delete (admin only). Right-click on chats to access chat options. Right-click in lightbox for image operations
+- **Keyboard navigation** — Arrow keys to browse messages (⬆/⬇), j/k shortcuts for navigation, Space/PageDown to scroll faster, Escape to close lightbox and modals
+- **Message permalinks** — Shareable deep links to specific messages (`#/chat/{chat_id}/msg/{msg_id}`). Copy link button in context menu
+- **Advanced accessibility** — Improved focus management, ARIA labels on interactive elements, keyboard-accessible dropdowns and modals
+- **Automatic timezone detection** — Viewer respects `Intl.DateTimeFormat` for local timezone rendering
+- **Background FTS indexing worker** — Non-blocking async task on startup rebuilds FTS index in batches with progress tracking in `app_settings`
+- **Content visibility toggles** — Show/hide buttons for message groups, timestamp display controls
+
+### Changed
+
+- **Search behavior** — Prioritizes FTS5 when available (SQLite only), falls back to ILIKE pattern matching for PostgreSQL or when FTS is unavailable
+- **Theme storage** — Separate localStorage keys: `tg-theme` (current theme), `tg-theme-auto` (auto-detect enabled), `tg-theme-dark` (preferred dark theme), `tg-theme-light` (preferred light theme)
+- **Message rendering** — Enhanced with keyboard shortcuts display and improved context menu triggers
+
+### Fixed
+
+- **Message date grouping** — Fixed collapsing/expanding of date separators to properly group consecutive messages by day
+- **FTS status persistence** — Search index status (`ready`, `building`, `error`) stored in `app_settings` table, survives container restarts
+
 ## [7.2.0] - 2026-03-10
 
 ### Added

@@ -53,6 +53,9 @@ env/
 .DS_Store
 Thumbs.db
 
+# Project journal (per-developer)
+journal.md
+
 # Logs
 *.log
 logs/

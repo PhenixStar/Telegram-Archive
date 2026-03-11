@@ -158,6 +158,22 @@ class Config:
         # in real-time instead of batch-checking on each backup run
         self.enable_listener = os.getenv("ENABLE_LISTENER", "false").lower() == "true"
 
+        # Listener activation mode (takes priority over ENABLE_LISTENER)
+        # 'auto': Start when viewers connect, stop when all disconnect (+ grace period)
+        # 'always': Always run (same as old ENABLE_LISTENER=true)
+        # 'off': Never run listener
+        listener_mode_env = os.getenv("LISTENER_MODE", "").lower()
+        if listener_mode_env in ("auto", "always", "off"):
+            self.listener_mode = listener_mode_env
+        elif self.enable_listener:
+            self.listener_mode = "always"  # Backward compat: ENABLE_LISTENER=true -> always
+        else:
+            self.listener_mode = "off"
+
+        # Grace period before stopping listener after last viewer disconnects (seconds)
+        # Only applies when LISTENER_MODE=auto
+        self.listener_grace_period = int(os.getenv("LISTENER_GRACE_PERIOD", "300"))
+
         # Listener granular controls (only apply when ENABLE_LISTENER=true)
         # LISTEN_EDITS: Apply text edits to backed up messages (safe, just updates text)
         self.listen_edits = os.getenv("LISTEN_EDITS", "true").lower() == "true"
@@ -260,8 +276,14 @@ class Config:
             )
         if self.verify_media:
             logger.info("VERIFY_MEDIA enabled - will check for missing/corrupted media files and re-download them")
+        if self.listener_mode == "auto":
+            logger.info(
+                f"LISTENER_MODE=auto - listener activates on viewer presence "
+                f"(grace: {self.listener_grace_period}s)"
+            )
+        elif self.listener_mode == "always":
+            logger.info("LISTENER_MODE=always - listener always active")
         if self.enable_listener:
-            logger.info("ENABLE_LISTENER enabled - will catch message edits/deletions in real-time")
             logger.info(f"  LISTEN_EDITS: {self.listen_edits}")
             if self.listen_deletions:
                 logger.warning("  ⚠️ LISTEN_DELETIONS: true - Messages will be DELETED from backup!")

@@ -45,7 +45,11 @@
 - **Keyboard navigation** — Arrow keys to browse media, Esc to close
 - **Real-time updates** — WebSocket sync shows new messages instantly
 - **Push notifications** — Get notified even when browser is closed
-- **Chat search** — Find messages by text content
+- **Full-text search** — SQLite FTS5 search across all messages with fallback to pattern matching
+- **7 themes** — Midnight, Telegram Classic, AMOLED Black, Nord, Monokai, Solarized Dark, and Light Default with auto-detect support
+- **Keyboard shortcuts** — j/k navigation, arrow keys, Space/PageDown scrolling, Esc to close lightbox
+- **Context menus** — Right-click on messages for copy, permalink, delete actions
+- **Message permalinks** — Shareable deep links (`#/chat/{id}/msg/{id}`) to specific messages
 - **JSON export** — Download chat history with date range filters
 
 ### 🔒 Security & Privacy

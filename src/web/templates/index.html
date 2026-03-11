@@ -1,16 +1,20 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en" class="dark" data-theme="midnight" style="color-scheme: dark">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <title>Telegram Archive</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://unpkg.com">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
@@ -20,26 +24,190 @@
     <!-- Flatpickr for date picker -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script>
+        /* Apply saved theme before paint to prevent flash */
+        (function() {
+            var auto = localStorage.getItem('tg-theme-auto') === 'true';
+            var t;
+            if (auto) {
+                var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                t = dark ? (localStorage.getItem('tg-theme-dark') || 'midnight') : 'light-default';
+            } else {
+                t = localStorage.getItem('tg-theme') || 'midnight';
+            }
+            document.documentElement.setAttribute('data-theme', t);
+            document.documentElement.style.colorScheme = t.startsWith('light') ? 'light' : 'dark';
+        })();
+    </script>
     <style>
-        /* iOS Safe Area Support */
-        :root {
+        /* ===== Theme System — CSS Custom Properties ===== */
+        :root,
+        [data-theme="midnight"] {
             --sat: env(safe-area-inset-top, 0px);
             --sar: env(safe-area-inset-right, 0px);
             --sab: env(safe-area-inset-bottom, 0px);
             --sal: env(safe-area-inset-left, 0px);
+            --tg-bg: #0f172a;
+            --tg-sidebar: #1e293b;
+            --tg-hover: #334155;
+            --tg-active: #2b5278;
+            --tg-text: #e2e8f0;
+            --tg-muted: #94a3b8;
+            --tg-own-msg: hsla(210, 60%, 28%, 0.95);
+            --tg-other-msg: hsla(220, 20%, 25%, 0.80);
+            --tg-border: #334155;
+            --tg-accent: #3b82f6;
+            --login-gradient-from: #2563eb;
+            --login-gradient-via: #1d4ed8;
+            --login-gradient-to: #1e40af;
         }
-        
+        [data-theme="telegram-classic"] {
+            --tg-bg: #17212b;
+            --tg-sidebar: #0e1621;
+            --tg-hover: #202b36;
+            --tg-active: #2b5278;
+            --tg-text: #e2e8f0;
+            --tg-muted: #8696a7;
+            --tg-own-msg: hsla(210, 50%, 30%, 0.95);
+            --tg-other-msg: hsla(215, 30%, 18%, 0.90);
+            --tg-border: #1c2836;
+            --tg-accent: #5eaddb;
+            --login-gradient-from: #1e3a5f;
+            --login-gradient-via: #17212b;
+            --login-gradient-to: #0e1621;
+        }
+        [data-theme="amoled-black"] {
+            --tg-bg: #000000;
+            --tg-sidebar: #0a0a0a;
+            --tg-hover: #1a1a1a;
+            --tg-active: #1a3a5c;
+            --tg-text: #e0e0e0;
+            --tg-muted: #777777;
+            --tg-own-msg: hsla(210, 55%, 22%, 0.95);
+            --tg-other-msg: hsla(0, 0%, 7%, 0.95);
+            --tg-border: #1a1a1a;
+            --tg-accent: #2196f3;
+            --login-gradient-from: #0a0a0a;
+            --login-gradient-via: #050505;
+            --login-gradient-to: #000000;
+        }
+        [data-theme="nord"] {
+            --tg-bg: #2e3440;
+            --tg-sidebar: #3b4252;
+            --tg-hover: #434c5e;
+            --tg-active: #5e81ac;
+            --tg-text: #eceff4;
+            --tg-muted: #a3b1c5;
+            --tg-own-msg: hsla(213, 32%, 52%, 0.85);
+            --tg-other-msg: hsla(222, 16%, 32%, 0.85);
+            --tg-border: #434c5e;
+            --tg-accent: #88c0d0;
+            --login-gradient-from: #4c566a;
+            --login-gradient-via: #3b4252;
+            --login-gradient-to: #2e3440;
+        }
+        [data-theme="monokai"] {
+            --tg-bg: #272822;
+            --tg-sidebar: #1e1f1a;
+            --tg-hover: #3e3d32;
+            --tg-active: #49483e;
+            --tg-text: #f8f8f2;
+            --tg-muted: #a6a68a;
+            --tg-own-msg: hsla(55, 8%, 30%, 0.90);
+            --tg-other-msg: hsla(60, 10%, 22%, 0.85);
+            --tg-border: #3e3d32;
+            --tg-accent: #a6e22e;
+            --login-gradient-from: #3e3d32;
+            --login-gradient-via: #272822;
+            --login-gradient-to: #1e1f1a;
+        }
+        [data-theme="solarized-dark"] {
+            --tg-bg: #002b36;
+            --tg-sidebar: #073642;
+            --tg-hover: #0a4050;
+            --tg-active: #2aa198;
+            --tg-text: #fdf6e3;
+            --tg-muted: #839496;
+            --tg-own-msg: hsla(175, 59%, 35%, 0.80);
+            --tg-other-msg: hsla(193, 100%, 14%, 0.90);
+            --tg-border: #0a4050;
+            --tg-accent: #2aa198;
+            --login-gradient-from: #073642;
+            --login-gradient-via: #002b36;
+            --login-gradient-to: #001e26;
+        }
+        /* Light themes */
+        [data-theme="light-default"] {
+            --tg-bg: #ffffff;
+            --tg-sidebar: #f0f2f5;
+            --tg-hover: #e4e6eb;
+            --tg-active: #d1e3ff;
+            --tg-text: #1a1a1a;
+            --tg-muted: #65676b;
+            --tg-own-msg: hsla(210, 80%, 92%, 0.95);
+            --tg-other-msg: hsla(0, 0%, 96%, 0.95);
+            --tg-border: #dddfe2;
+            --tg-accent: #2563eb;
+            --login-gradient-from: #2563eb;
+            --login-gradient-via: #3b82f6;
+            --login-gradient-to: #60a5fa;
+        }
+
         html {
-            background-color: #0f172a;
+            background-color: var(--tg-bg);
         }
-        
+
         body {
             font-family: 'Inter', sans-serif;
             padding-top: var(--sat);
             padding-bottom: var(--sab);
             padding-left: var(--sal);
             padding-right: var(--sar);
-            background-color: #0f172a;
+            background-color: var(--tg-bg);
+            touch-action: manipulation;
+        }
+
+        /* ===== Login Animations ===== */
+        @keyframes login-float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+        @keyframes login-fade-in {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes login-bg-shift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .login-logo-float {
+            animation: login-float 3s ease-in-out infinite;
+        }
+        .login-card-enter {
+            animation: login-fade-in 0.5s ease-out both;
+        }
+        .login-bg-animated {
+            background-size: 200% 200%;
+            animation: login-bg-shift 12s ease infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .login-logo-float,
+            .login-card-enter,
+            .login-bg-animated {
+                animation: none !important;
+            }
+        }
+
+        /* ===== Theme-aware message transitions ===== */
+        .message-bubble {
+            transition: background-color 200ms ease, border-radius 200ms ease;
+        }
+
+        /* Sidebar active chat left-border accent */
+        .sidebar-chat-active {
+            border-left: 3px solid var(--tg-accent);
+            padding-left: 9px; /* compensate 3px border */
         }
 
         /* Custom Scrollbar */
@@ -48,7 +216,7 @@
         }
 
         ::-webkit-scrollbar-track {
-            background: #1e293b;
+            background: var(--tg-sidebar);
         }
 
         ::-webkit-scrollbar-thumb {
@@ -63,12 +231,11 @@
         /* Message Bubbles */
         .message-bubble {
             display: inline-block;
-            max-width: calc(100vw - 32px);
-            /* 32px = padding lateral del contenedor */
+            max-width: 85%;
             width: auto;
             word-wrap: break-word;
             overflow-wrap: anywhere;
-            border-radius: 12px;
+            overflow: hidden;
         }
 
         @media (min-width: 768px) {
@@ -92,11 +259,15 @@
         .message-bubble img,
         .message-bubble video,
         .message-bubble audio,
-        .message-bubble a,
         .message-bubble .media-wrapper {
             max-width: 100%;
             width: 100%;
             height: auto;
+        }
+
+        .message-bubble a {
+            max-width: 100%;
+            word-break: break-all;
         }
 
 
@@ -243,6 +414,61 @@
         .album-grid .grid-cols-2:has(.album-item:nth-child(3):last-child) .album-item:first-child {
             grid-row: span 2;
         }
+
+        /* Render optimization for large message lists */
+        .msg-date-group {
+            content-visibility: auto;
+            contain-intrinsic-size: auto 300px;
+        }
+
+        /* Light theme form contrast */
+        [data-theme^="light"] input, [data-theme^="light"] select, [data-theme^="light"] textarea {
+            color: var(--tg-text); background: var(--tg-bg); border-color: var(--tg-border);
+        }
+        [data-theme^="light"] .message-bubble { color: var(--tg-text); }
+        [data-theme^="light"] .service-message { background: rgba(0,0,0,0.08) !important; color: var(--tg-muted) !important; }
+        [data-theme^="light"] .date-separator span { background-color: var(--tg-hover); color: var(--tg-muted); }
+
+        /* Keyboard focus on chat list */
+        .chat-focused { outline: 2px solid var(--tg-accent); outline-offset: -2px; }
+
+        /* Toast notification */
+        .toast-enter { animation: toast-slide-in 0.3s ease-out; }
+        .toast-leave { animation: toast-slide-out 0.3s ease-in forwards; }
+        @keyframes toast-slide-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toast-slide-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(20px); } }
+
+        /* Search highlighting */
+        mark { background: #ffeb3b; color: #000; border-radius: 2px; padding: 0 1px; }
+        mark.current { background: #ff9800; }
+        [data-theme^="light"] mark { background: #ffeb3b; color: #000; }
+
+        /* Image blur-up loading */
+        .img-blur-up {
+            position: relative;
+            overflow: hidden;
+            background: var(--tg-hover);
+        }
+        .img-blur-up img {
+            transition: opacity 0.3s ease;
+        }
+        .img-blur-up img:not([data-loaded]) {
+            opacity: 0;
+        }
+        .img-blur-up .lqip-bg {
+            position: absolute;
+            inset: 0;
+            background-size: cover;
+            background-position: center;
+            filter: blur(20px);
+            transform: scale(1.1);
+            transition: opacity 0.3s ease;
+        }
+        .img-blur-up img[data-loaded] + .lqip-bg,
+        .img-blur-up img[data-loaded] ~ .lqip-bg {
+            opacity: 0;
+            pointer-events: none;
+        }
     </style>
     <script>
         tailwind.config = {
@@ -251,14 +477,14 @@
                 extend: {
                     colors: {
                         tg: {
-                            bg: '#0f172a',
-                            sidebar: '#1e293b',
-                            hover: '#334155',
-                            active: '#2b5278',
-                            text: '#e2e8f0',
-                            muted: '#94a3b8',
-                            own: '#2b5278',
-                            other: '#182533',
+                            bg: 'var(--tg-bg)',
+                            sidebar: 'var(--tg-sidebar)',
+                            hover: 'var(--tg-hover)',
+                            active: 'var(--tg-active)',
+                            text: 'var(--tg-text)',
+                            muted: 'var(--tg-muted)',
+                            own: 'var(--tg-active)',
+                            other: 'var(--tg-sidebar)',
                         }
                     }
                 }
@@ -267,16 +493,22 @@
     </script>
 </head>
 
-<body class="bg-gradient-to-br from-blue-600 via-blue-700 to-blue-800 text-white h-screen overflow-hidden">
+<body class="text-white h-screen overflow-hidden login-bg-animated" style="background-image: linear-gradient(135deg, var(--login-gradient-from), var(--login-gradient-via), var(--login-gradient-to))">
     <div id="app" class="w-full h-full">
         <!-- Login Page -->
         <div v-if="!isAuthenticated" class="w-full h-full flex items-center justify-center">
             <div
-                class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl p-10 w-full max-w-md border border-white/20">
-                <!-- Telegram Logo -->
-                <div class="flex justify-center mb-6">
-                    <div class="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-lg">
-                        <i class="fab fa-telegram-plane text-5xl text-blue-500"></i>
+                class="login-card-enter bg-white/10 backdrop-blur-lg rounded-3xl shadow-2xl p-12 w-full max-w-md border border-white/20">
+                <!-- Telegram Logo (inline SVG) -->
+                <div class="flex justify-center mb-8">
+                    <div class="login-logo-float w-22 h-22 bg-white rounded-full flex items-center justify-center shadow-lg" style="width:5.5rem;height:5.5rem;">
+                        <svg viewBox="0 0 240 240" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
+                            <defs><linearGradient id="tg-grad" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#37AEE2"/><stop offset="100%" stop-color="#1E96C8"/></linearGradient></defs>
+                            <circle cx="120" cy="120" r="120" fill="url(#tg-grad)"/>
+                            <path d="M98 175c-3.9 0-3.2-1.5-4.6-5.2L82 132.2 176 80" fill="#C8DAEA"/>
+                            <path d="M98 175c3 0 4.3-1.4 6-3l16-15.6-20-12" fill="#A9C9DD"/>
+                            <path d="M100 144.4l48.4 35.7c5.5 3 9.5 1.5 10.9-5.1l19.7-93c2-8-3-11.6-8.3-9.2l-116 44.7c-7.8 3.1-7.7 7.5-1.4 9.5l29.7 9.3L152 96c3.2-2 6.2-.9 3.8 1.3" fill="#FFF"/>
+                        </svg>
                     </div>
                 </div>
 
@@ -294,8 +526,8 @@
                 <form @submit.prevent="performLogin" class="space-y-5" v-if="authRequired || authCheckFailed">
                     <!-- Login mode toggle -->
                     <div class="flex rounded-xl overflow-hidden border border-white/30">
-                        <button type="button" @click="loginMode = 'password'" :class="loginMode === 'password' ? 'bg-white/30 text-white' : 'text-blue-200 hover:text-white'" class="flex-1 py-2 text-sm font-medium transition">Password</button>
-                        <button type="button" @click="loginMode = 'token'" :class="loginMode === 'token' ? 'bg-white/30 text-white' : 'text-blue-200 hover:text-white'" class="flex-1 py-2 text-sm font-medium transition">Share Token</button>
+                        <button type="button" @click="loginMode = 'password'" :class="loginMode === 'password' ? 'bg-white/30 text-white' : 'text-blue-200 hover:text-white'" class="flex-1 py-2 text-sm font-medium transition-colors">Password</button>
+                        <button type="button" @click="loginMode = 'token'" :class="loginMode === 'token' ? 'bg-white/30 text-white' : 'text-blue-200 hover:text-white'" class="flex-1 py-2 text-sm font-medium transition-colors">Share Token</button>
                     </div>
 
                     <!-- Password login -->
@@ -324,10 +556,11 @@
                         </div>
                     </template>
 
-                    <p v-if="loginError" class="text-sm text-red-200 bg-red-500/20 rounded-lg p-2 text-center">{{
+                    <p v-if="loginError" class="text-sm text-red-200 bg-red-500/20 rounded-lg p-2 text-center" aria-live="polite">{{
                         loginError }}</p>
                     <button type="submit" :disabled="loadingAuth"
-                        class="w-full bg-white text-blue-600 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-not-allowed rounded-xl py-3 font-semibold transition shadow-lg hover:shadow-xl">
+                        class="w-full text-white disabled:opacity-60 disabled:cursor-not-allowed rounded-xl py-3.5 font-semibold transition shadow-lg hover:shadow-xl hover:brightness-110"
+                        style="background: linear-gradient(135deg, var(--tg-accent), var(--login-gradient-from))">
                         {{ loadingAuth ? 'Signing in...' : 'Sign in' }}
                     </button>
                 </form>
@@ -340,12 +573,72 @@
             <div class="bg-tg-sidebar flex flex-col border-r border-gray-700"
                 :class="{'hidden md:flex': selectedChat, 'w-full md:w-1/4 md:min-w-[300px]': true}">
                 <!-- User bar -->
-                <div v-if="authRequired && isAuthenticated" class="flex items-center gap-2 px-3 py-1 border-b border-gray-700">
-                    <span class="text-xs text-gray-400 truncate flex-1">{{ currentUsername }}</span>
-                    <button v-if="userRole === 'master'" @click="openAdminPanel" class="text-gray-400 hover:text-white p-1" title="Admin Settings">
+                <div class="flex items-center gap-2 px-3 py-1 border-b border-gray-700">
+                    <span v-if="authRequired && isAuthenticated" class="text-xs text-gray-400 truncate flex-1">{{ currentUsername }}</span>
+                    <span v-else class="flex-1"></span>
+                    <!-- Theme Selector -->
+                    <div class="relative">
+                        <button @click="themeDropdownOpen = !themeDropdownOpen" class="text-gray-400 hover:text-white p-1" title="Theme" aria-label="Change theme">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
+                            </svg>
+                        </button>
+                        <div v-if="themeDropdownOpen" @click="themeDropdownOpen = false" class="fixed inset-0 z-40"></div>
+                        <div v-if="themeDropdownOpen" class="absolute right-0 top-full mt-1 z-50 rounded-lg shadow-xl py-1 min-w-[180px]" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                            <!-- Auto detect -->
+                            <button @click="toggleThemeAutoDetect()"
+                                class="w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 hover:bg-white/10"
+                                :style="{ color: themeAutoDetect ? 'var(--tg-accent)' : 'var(--tg-muted)' }">
+                                <i class="fas fa-magic w-3 text-center text-[10px]"></i>
+                                <span>Auto (System)</span>
+                                <svg v-if="themeAutoDetect" class="w-3 h-3 ml-auto" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                </svg>
+                            </button>
+                            <div class="mx-2 my-1 border-t" style="border-color: var(--tg-border);"></div>
+                            <!-- Dark themes -->
+                            <div class="px-3 py-0.5 text-[9px] uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Dark</div>
+                            <button v-for="t in themePresets.filter(x => x.type === 'dark')" :key="t.id" @click="setTheme(t.id)"
+                                class="w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 hover:bg-white/10"
+                                :style="{ color: currentTheme === t.id ? 'var(--tg-text)' : 'var(--tg-muted)' }">
+                                <span class="w-3 h-3 rounded-full shrink-0 border" style="border-color: var(--tg-border);" :style="{ backgroundColor: t.preview }"></span>
+                                <span>{{ t.label }}</span>
+                                <svg v-if="currentTheme === t.id" class="w-3 h-3 ml-auto" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                </svg>
+                            </button>
+                            <div class="mx-2 my-1 border-t" style="border-color: var(--tg-border);"></div>
+                            <!-- Light themes -->
+                            <div class="px-3 py-0.5 text-[9px] uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Light</div>
+                            <button v-for="t in themePresets.filter(x => x.type === 'light')" :key="t.id" @click="setTheme(t.id)"
+                                class="w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 hover:bg-white/10"
+                                :style="{ color: currentTheme === t.id ? 'var(--tg-text)' : 'var(--tg-muted)' }">
+                                <span class="w-3 h-3 rounded-full shrink-0 border" style="border-color: var(--tg-border);" :style="{ backgroundColor: t.preview }"></span>
+                                <span>{{ t.label }}</span>
+                                <svg v-if="currentTheme === t.id" class="w-3 h-3 ml-auto" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- AI Assistant stub -->
+                    <div class="relative">
+                        <button @click="showAiComingSoon = !showAiComingSoon" class="p-1" style="color: var(--tg-muted);" title="AI Assistant" aria-label="AI Assistant">
+                            <i class="fas fa-brain text-xs"></i>
+                        </button>
+                        <div v-if="showAiComingSoon" class="absolute right-0 top-full mt-1 p-3 rounded-lg shadow-lg text-sm w-48 z-30" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border); color: var(--tg-text);">
+                            <div class="font-semibold mb-1">AI Assistant</div>
+                            <div class="text-xs" style="color: var(--tg-muted);">Coming soon.</div>
+                        </div>
+                    </div>
+                    <!-- Settings (all users) -->
+                    <button @click="showSettingsModal = !showSettingsModal" class="p-1" style="color: var(--tg-muted);" title="Settings" aria-label="Display settings">
+                        <i class="fas fa-sliders-h text-xs"></i>
+                    </button>
+                    <button v-if="authRequired && isAuthenticated && userRole === 'master'" @click="openAdminPanel" class="text-gray-400 hover:text-white p-1" title="Admin Settings" aria-label="Admin settings">
                         <i class="fas fa-cog"></i>
                     </button>
-                    <button @click="performLogout" class="text-gray-400 hover:text-red-400 p-1" title="Logout">
+                    <button v-if="authRequired && isAuthenticated" @click="performLogout" class="text-gray-400 hover:text-red-400 p-1" title="Logout" aria-label="Sign out">
                         <i class="fas fa-sign-out-alt"></i>
                     </button>
                 </div>
@@ -357,7 +650,7 @@
                             <!-- Stats Dropdown Button (hidden if SHOW_STATS=false) -->
                             <div class="relative" v-if="showStatsUI && statsData.stats_calculated_at">
                                 <button @click="statsPopupOpen = !statsPopupOpen" 
-                                    class="flex items-center gap-1.5 px-2 py-1 text-xs text-tg-muted hover:text-white hover:bg-gray-700/50 rounded transition">
+                                    class="flex items-center gap-1.5 px-2 py-1 text-xs text-tg-muted hover:text-white hover:bg-gray-700/50 rounded transition-colors">
                                     <span>📊</span>
                                     <span>Stats</span>
                                     <svg :class="{'rotate-180': statsPopupOpen}" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -383,7 +676,7 @@
                                                 Made with ❤️ by <a href="https://geiser.cloud" target="_blank" class="text-blue-400 hover:text-blue-300">Sergio Fernández</a>
                                             </div>
                                             <a href="https://github.com/sponsors/GeiserX" target="_blank" 
-                                                class="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 text-[9px] bg-pink-600/20 hover:bg-pink-600/30 text-pink-300 rounded transition">
+                                                class="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 text-[9px] bg-pink-600/20 hover:bg-pink-600/30 text-pink-300 rounded transition-colors">
                                                 <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
                                                     <path fill-rule="evenodd" d="M4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.565 20.565 0 008 13.393a20.561 20.561 0 003.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.75.75 0 01-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5zM8 14.25l-.345.666-.002-.001-.006-.003-.018-.01a7.643 7.643 0 01-.31-.17 22.075 22.075 0 01-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.08 22.08 0 01-3.744 2.584l-.018.01-.006.003h-.002L8 14.25zm0 0l.345.666a.752.752 0 01-.69 0L8 14.25z"></path>
                                                 </svg>
@@ -408,7 +701,7 @@
                         <input v-model="searchQuery" @input="onSearchInput" type="text" placeholder="Search all chats..."
                             class="w-full bg-gray-900 text-white rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                         <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor"
-                            viewBox="0 0 24 24">
+                            viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                         </svg>
@@ -417,13 +710,13 @@
                     <div v-if="folders.length > 0" class="flex gap-1 mb-3 overflow-x-auto pb-1 scrollbar-thin">
                         <button @click="showAllChats()" 
                             :class="activeTab === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-700/50 text-tg-muted hover:bg-gray-700'"
-                            class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition shrink-0">
+                            class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition-colors shrink-0">
                             All Chats
                         </button>
-                        <button v-for="folder in folders" :key="folder.id" 
+                        <button v-for="folder in folders" :key="folder.id"
                             @click="selectFolder(folder.id)"
                             :class="activeTab === 'folder_' + folder.id ? 'bg-blue-600 text-white' : 'bg-gray-700/50 text-tg-muted hover:bg-gray-700'"
-                            class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition shrink-0">
+                            class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition-colors shrink-0">
                             {{ folder.emoticon || '📁' }} {{ folder.title }}
                             <span class="opacity-70 ml-0.5">({{ folder.chat_count }})</span>
                         </button>
@@ -477,7 +770,7 @@
                         </svg>
                         <span>Enable notifications for new messages</span>
                         <button @click="requestNotificationPermission()" 
-                            class="ml-auto px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition">
+                            class="ml-auto px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors">
                             Enable
                         </button>
                     </div>
@@ -493,7 +786,7 @@
                         </svg>
                         <span>Notifications blocked by browser. Enable in browser settings to receive alerts.</span>
                         <button @click="unsubscribeFromPush()" 
-                            class="ml-auto px-2 py-1 bg-amber-700 hover:bg-amber-600 text-white text-xs rounded transition">
+                            class="ml-auto px-2 py-1 bg-amber-700 hover:bg-amber-600 text-white text-xs rounded transition-colors">
                             Unsubscribe
                         </button>
                     </div>
@@ -505,7 +798,7 @@
                     <template v-if="topicsNavEntry">
                         <!-- Back button + chat name header -->
                         <div class="p-3 border-b border-gray-700/50 flex items-center gap-2 sticky top-0 bg-tg-sidebar z-10">
-                            <button @click="navigateBackToChats()" class="p-1.5 hover:bg-gray-700 rounded-full transition">
+                            <button @click="navigateBackToChats()" class="p-1.5 hover:bg-gray-700 rounded-full transition" aria-label="Go back">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                                 </svg>
@@ -562,7 +855,7 @@
                         <!-- v6.2.0: Back button for archived/folder views -->
                         <div v-if="canGoBack && currentNav.type === 'chatList'" 
                             class="p-3 border-b border-gray-700/50 flex items-center gap-2 sticky top-0 bg-tg-sidebar z-10">
-                            <button @click="navigateBack()" class="p-1.5 hover:bg-gray-700 rounded-full transition">
+                            <button @click="navigateBack()" class="p-1.5 hover:bg-gray-700 rounded-full transition" aria-label="Go back">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                                 </svg>
@@ -608,9 +901,10 @@
                             </div>
                             
                             <!-- Chat items -->
-                            <div v-for="chat in filteredChats" :key="chat.id" @click="selectChat(chat)"
+                            <div v-for="(chat, chatIdx) in filteredChats" :key="chat.id" @click="selectChat(chat)"
+                                @contextmenu.prevent="openContextMenu($event, 'chat', chat)"
                                 class="p-3 cursor-pointer hover:bg-tg-hover transition-colors flex items-center gap-3"
-                                :class="{'bg-tg-active': selectedChat?.id === chat.id}">
+                                :class="{'bg-tg-active sidebar-chat-active': selectedChat?.id === chat.id, 'chat-focused': chatListFocusIndex === chatIdx}">
                                 <!-- Avatar -->
                                 <div
                                     class="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-lg font-bold text-white shrink-0 overflow-hidden relative">
@@ -677,7 +971,7 @@
             </div>
 
             <!-- Main Chat Area - full width on mobile -->
-            <div class="flex-1 flex flex-col bg-tg-bg relative"
+            <div class="flex-1 flex flex-col bg-tg-bg relative min-w-0 overflow-hidden"
                 :class="{'hidden md:flex': !selectedChat, 'flex': selectedChat}">
                 <div v-if="!selectedChat" class="flex-1 flex items-center justify-center text-tg-muted flex-col">
                     <div class="bg-tg-sidebar p-6 rounded-full mb-4">
@@ -693,11 +987,11 @@
                 <template v-else>
                     <!-- Chat Header -->
                     <div
-                        class="px-2 sm:px-4 py-2 sm:py-3 bg-tg-sidebar border-b border-gray-700 flex items-center justify-between shadow-md z-10">
+                        class="px-2 sm:px-4 py-2 sm:py-3 bg-tg-sidebar border-b border-gray-700 flex items-center justify-between shadow-md z-10 overflow-hidden max-w-full">
                         <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                             <!-- Back Button (mobile only) -->
                             <button @click="currentNav.type === 'chat' && currentNav.topicId ? navigateBack() : selectedChat = null"
-                                class="md:hidden p-2 -ml-2 text-gray-400 hover:text-white">
+                                class="md:hidden p-2 -ml-2 text-gray-400 hover:text-white" aria-label="Go back">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M15 19l-7-7 7-7"></path>
@@ -752,7 +1046,7 @@
                                     placeholder="Search..."
                                     class="w-full bg-gray-900 text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
-                                    stroke="currentColor" viewBox="0 0 24 24">
+                                    stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                 </svg>
@@ -760,7 +1054,7 @@
 
                             <!-- Export Button - always visible -->
                             <button @click="exportChat"
-                                class="p-1.5 sm:p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition shrink-0"
+                                class="p-1.5 sm:p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
                                 title="Export Chat to JSON">
                                 <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -782,7 +1076,7 @@
                             </svg>
                         </div>
                         <!-- Message content - click to scroll and cycle -->
-                        <div class="flex-1 min-w-0 cursor-pointer hover:bg-white/5 -my-1 py-1 px-1 rounded transition"
+                        <div class="flex-1 min-w-0 cursor-pointer hover:bg-white/5 -my-1 py-1 px-1 rounded transition-colors"
                             @click="handlePinnedClick">
                             <div class="text-xs text-blue-400 font-semibold mb-0.5 flex items-center gap-2">
                                 <span>Pinned Message</span>
@@ -801,7 +1095,7 @@
                             </div>
                             <!-- Open pinned messages view button -->
                             <button @click.stop="openPinnedView"
-                                class="w-6 h-6 flex items-center justify-center rounded-full bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 transition"
+                                class="w-6 h-6 flex items-center justify-center rounded-full bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 transition-colors"
                                 :title="`View all ${pinnedMessages.length} pinned messages`">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -815,7 +1109,7 @@
                         class="px-4 py-3 bg-tg-sidebar border-b border-gray-700 flex items-center gap-3">
                         <!-- Back button -->
                         <button @click="closePinnedView"
-                            class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-gray-300 transition">
+                            class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-gray-300 transition" aria-label="Go back">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
                             </svg>
@@ -828,8 +1122,19 @@
                     </div>
 
                     <!-- Messages - uses flex-col-reverse for instant scroll-to-bottom -->
-                    <div class="flex-1 relative min-h-0">
-                    <div ref="messagesContainer" class="h-full overflow-y-auto p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll">
+                    <div class="flex-1 relative min-h-0 flex flex-col">
+                    <!-- Search bar (sticky top) -->
+                    <div v-show="searchBarVisible" class="flex items-center gap-2 px-3 py-2 border-b" style="background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 10;">
+                        <i class="fas fa-search text-xs" style="color: var(--tg-muted);"></i>
+                        <input ref="searchInput" v-model="msgSearchQuery" @input="handleSearchInput" @keydown.enter.prevent="navigateSearchMatch(1)" @keydown.escape.prevent="clearMsgSearch" type="text" placeholder="Search messages..." class="flex-1 bg-transparent text-sm outline-none" style="color: var(--tg-text);">
+                        <span v-if="msgSearchQuery && searchMatchCount >= 0" class="text-xs whitespace-nowrap" style="color: var(--tg-muted);">
+                            {{ searchMatchCount > 0 ? `${searchMatchIndex + 1} / ${searchMatchCount}` : 'No matches' }}
+                        </span>
+                        <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(-1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Previous match"><i class="fas fa-chevron-up text-xs"></i></button>
+                        <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Next match"><i class="fas fa-chevron-down text-xs"></i></button>
+                        <button @click="clearMsgSearch" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Close search"><i class="fas fa-times text-xs"></i></button>
+                    </div>
+                    <div ref="messagesContainer" class="flex-1 overflow-y-auto overflow-x-hidden p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll" style="will-change: transform">
                         <div v-if="loading && messages.length === 0" class="text-center py-4 text-tg-muted">
                             Loading messages...
                         </div>
@@ -837,16 +1142,24 @@
                         <template v-for="(msg, index) in sortedMessages" :key="msg.id">
                             <!-- Service Message (chat actions like photo changed, user joined, etc) -->
                             <!-- v6.0.0: Service type moved to raw_data.service_type -->
-                            <div v-if="msg.raw_data?.service_type === 'service'" class="flex justify-center my-2">
+                            <div v-if="msg.raw_data?.service_type === 'service'" class="msg-date-group flex justify-center my-2">
                                 <div class="service-message px-4 py-1.5 rounded-full text-xs text-center max-w-[80%]"
                                     style="background: rgba(0,0,0,0.3); color: rgba(255,255,255,0.8);">
                                     {{ msg.text }}
                                 </div>
                             </div>
                             <!-- Regular Message (hide duplicate album messages - only show first in group) -->
-                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="flex" :class="isOwnMessage(msg) ? 'justify-end' : 'justify-start'">
-                                <div class="message-bubble p-3 text-sm shadow-sm text-gray-100"
-                                    :style="getSenderStyle(msg)">
+                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="msg-date-group flex min-w-0 overflow-hidden" :class="isOwnMessage(msg) ? 'justify-end' : 'justify-start'">
+                                <div class="message-bubble group relative p-3 text-sm shadow-sm text-gray-100"
+                                    :class="isOwnMessage(msg) ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md'"
+                                    :style="getSenderStyle(msg)"
+                                    @contextmenu.prevent="openContextMenu($event, 'message', msg)">
+                                    <!-- Permalink icon (hover) -->
+                                    <button @click.stop="copyPermalink(msg)"
+                                        class="absolute top-1 right-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity p-1 rounded text-[10px]"
+                                        style="color: var(--tg-muted);" title="Copy link to message">
+                                        <i class="fas fa-link"></i>
+                                    </button>
                                     <!-- Sender Name (if group and first in sequence) -->
                                     <div v-if="!isOwnMessage(msg) && isGroup && showSenderName(index)"
                                         class="text-xs font-bold mb-1" :style="{ color: getSenderNameColor(msg) }">
@@ -855,7 +1168,7 @@
 
                                     <!-- Reply Context -->
                                     <div v-if="msg.reply_to_msg_id" @click="scrollToMessage(msg.reply_to_msg_id)"
-                                        class="border-l-2 border-blue-400/50 pl-2 mb-2 text-xs bg-black/20 rounded p-2 cursor-pointer hover:bg-black/30 transition">
+                                        class="border-l-2 border-blue-400/50 pl-2 mb-2 text-xs bg-black/20 rounded p-2 cursor-pointer hover:bg-black/30 transition-colors">
                                         <div class="font-semibold text-blue-400 mb-0.5">Reply to</div>
                                         <div class="truncate opacity-70">{{ msg.reply_to_text || 'Message' }}</div>
                                     </div>
@@ -951,10 +1264,13 @@
                                         </div>
                                         
                                         <!-- Regular photo (not part of album) -->
-                                        <img v-else-if="msg.media?.type === 'photo' && !msg.raw_data?.grouped_id" :src="getMediaUrl(msg)"
-                                            loading="lazy"
-                                            class="rounded-lg max-h-64 max-w-full object-cover cursor-pointer hover:opacity-90 transition"
-                                            @click="openMedia(msg)" @error="handleImageError($event, msg)">
+                                        <div v-else-if="msg.media?.type === 'photo' && !msg.raw_data?.grouped_id" class="img-blur-up rounded-lg max-h-64 max-w-full inline-block cursor-pointer" @click="openMedia(msg)">
+                                            <img :src="getMediaUrl(msg)"
+                                                loading="lazy"
+                                                class="rounded-lg max-h-64 max-w-full object-cover hover:opacity-90 transition"
+                                                @load="$event.target.setAttribute('data-loaded', '')"
+                                                @error="handleImageError($event, msg)">
+                                        </div>
 
                                         <!-- Audio / Voice Notes -->
                                         <div v-else-if="isAudioFile(msg)"
@@ -990,7 +1306,7 @@
                                                 <source :src="getMediaUrl(msg)" type="video/mp4">
                                             </video>
                                             <!-- Play overlay -->
-                                            <div class="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition rounded-lg">
+                                            <div class="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors rounded-lg">
                                                 <div class="w-14 h-14 bg-white/90 rounded-full flex items-center justify-center shadow-lg">
                                                     <svg class="w-8 h-8 text-gray-800 ml-1" fill="currentColor" viewBox="0 0 24 24">
                                                         <path d="M8 5v14l11-7z"/>
@@ -1029,7 +1345,7 @@
                                         <!-- Other documents / files -->
                                         <a v-else :href="noDownload ? '#' : getMediaUrl(msg) + '?download=1'" :download="!noDownload"
                                             :class="{'pointer-events-none opacity-60': noDownload}"
-                                            class="flex items-center gap-2 bg-black/20 p-2 rounded hover:bg-black/30 transition">
+                                            class="flex items-center gap-2 bg-black/20 p-2 rounded hover:bg-black/30 transition-colors">
                                             <svg class="w-6 h-6 shrink-0" fill="none" stroke="currentColor"
                                                 viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1114,7 +1430,7 @@
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-xl font-bold text-white">Jump to Date</h3>
                     <button @click="closeDatePicker" 
-                        class="text-gray-400 hover:text-white transition p-1">
+                        class="text-gray-400 hover:text-white transition-colors p-1">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                         </svg>
@@ -1127,11 +1443,11 @@
                 </div>
                 <div class="flex gap-2 justify-end">
                     <button @click="closeDatePicker"
-                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition">
+                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">
                         Cancel
                     </button>
                     <button @click="jumpToDate"
-                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition">
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
                         Jump
                     </button>
                 </div>
@@ -1145,7 +1461,7 @@
             
             <!-- Close Button -->
             <button @click="closeLightbox" 
-                class="absolute top-4 right-4 z-60 p-2 text-white/70 hover:text-white transition">
+                class="absolute top-4 right-4 z-60 p-2 text-white/70 hover:text-white transition-colors">
                 <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                 </svg>
@@ -1153,7 +1469,7 @@
             
             <!-- Download Button -->
             <a v-if="lightboxMedia && !noDownload" :href="getMediaUrl(lightboxMedia) + '?download=1'" download
-                class="absolute top-4 right-16 z-60 p-2 text-white/70 hover:text-white transition">
+                class="absolute top-4 right-16 z-60 p-2 text-white/70 hover:text-white transition-colors">
                 <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                 </svg>
@@ -1161,7 +1477,7 @@
             
             <!-- Previous Button -->
             <button v-if="lightboxIndex > 0" @click.stop="lightboxPrev"
-                class="absolute left-4 top-1/2 -translate-y-1/2 z-60 p-3 text-white/70 hover:text-white bg-black/30 hover:bg-black/50 rounded-full transition">
+                class="absolute left-4 top-1/2 -translate-y-1/2 z-60 p-3 text-white/70 hover:text-white bg-black/30 hover:bg-black/50 rounded-full transition-colors">
                 <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
                 </svg>
@@ -1169,24 +1485,26 @@
             
             <!-- Next Button -->
             <button v-if="lightboxIndex < mediaMessages.length - 1" @click.stop="lightboxNext"
-                class="absolute right-4 top-1/2 -translate-y-1/2 z-60 p-3 text-white/70 hover:text-white bg-black/30 hover:bg-black/50 rounded-full transition">
+                class="absolute right-4 top-1/2 -translate-y-1/2 z-60 p-3 text-white/70 hover:text-white bg-black/30 hover:bg-black/50 rounded-full transition-colors">
                 <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                 </svg>
             </button>
             
             <!-- Image -->
-            <img v-if="lightboxMedia && isLightboxImage(lightboxMedia)" 
-                :src="getMediaUrl(lightboxMedia)" 
+            <img v-if="lightboxMedia && isLightboxImage(lightboxMedia)"
+                :src="getMediaUrl(lightboxMedia)"
                 class="max-h-[90vh] max-w-[90vw] object-contain"
-                @click.stop>
-            
+                @click.stop
+                @contextmenu.prevent="openContextMenu($event, 'lightbox', lightboxMedia)">
+
             <!-- Video -->
             <video v-else-if="lightboxMedia && isLightboxVideo(lightboxMedia)"
                 :src="getMediaUrl(lightboxMedia)"
                 class="max-h-[90vh] max-w-[90vw] object-contain"
                 controls autoplay
-                @click.stop>
+                @click.stop
+                @contextmenu.prevent="openContextMenu($event, 'lightbox', lightboxMedia)">
             </video>
             
             <!-- Media Info -->
@@ -1220,6 +1538,9 @@
                     <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200'" class="px-4 py-2 border-b-2 text-sm font-medium">
                         Audit Log
                     </button>
+                    <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200'" class="px-4 py-2 border-b-2 text-sm font-medium">
+                        Listener
+                    </button>
                 </div>
 
                 <!-- Content -->
@@ -1236,8 +1557,16 @@
                             </div>
                             <div class="mt-3">
                                 <label class="text-xs text-gray-400 block mb-1">Allowed Chats (none selected = access to all chats)</label>
-                                <div class="flex flex-wrap gap-1 bg-gray-700 rounded p-2 max-h-32 overflow-y-auto">
-                                    <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs text-gray-300 bg-gray-600 rounded px-2 py-1 cursor-pointer hover:bg-gray-500">
+                                <input v-model="adminChatFilter" type="text" placeholder="Filter chats..."
+                                    class="w-full bg-gray-800 text-white rounded px-3 py-1.5 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    autocomplete="off" spellcheck="false">
+                                <div class="flex gap-2 mb-1">
+                                    <button type="button" @click="adminViewerForm.allowed_chat_ids = adminChats.map(c => c.id)" class="text-xs text-blue-400 hover:text-blue-300">Select all</button>
+                                    <button type="button" @click="adminViewerForm.allowed_chat_ids = []" class="text-xs text-gray-400 hover:text-gray-300">Deselect all</button>
+                                    <span class="text-xs text-gray-500 ml-auto">{{ adminViewerForm.allowed_chat_ids.length }} of {{ adminChats.length }} selected</span>
+                                </div>
+                                <div class="flex flex-wrap gap-1 bg-gray-700 rounded p-2 max-h-48 overflow-y-auto">
+                                    <label v-for="chat in filteredAdminChats" :key="chat.id" class="flex items-center gap-1 text-xs text-gray-300 bg-gray-600 rounded px-2 py-1 cursor-pointer hover:bg-gray-500">
                                         <input type="checkbox" :value="chat.id" v-model="adminViewerForm.allowed_chat_ids" class="rounded" />
                                         {{ chat.title || chat.id }}
                                     </label>
@@ -1386,6 +1715,96 @@
                             <div v-if="adminAuditLogs.length === 0" class="text-gray-500 text-sm text-center py-4">No audit logs yet</div>
                         </div>
                     </div>
+
+                    <!-- Listener Settings Tab -->
+                    <div v-if="adminActiveTab === 'listener'">
+                        <div class="space-y-4">
+                            <!-- Status display -->
+                            <div class="bg-gray-900 rounded-lg p-4">
+                                <h3 class="text-sm font-medium text-gray-300 mb-3">Listener Status</h3>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <span class="text-xs text-gray-500">Status</span>
+                                        <div class="flex items-center gap-2 mt-1">
+                                            <span class="w-2 h-2 rounded-full" :class="{
+                                                'bg-green-500': listenerInfo.status === 'running',
+                                                'bg-yellow-500 animate-pulse': listenerInfo.status === 'grace_period' || listenerInfo.status === 'starting',
+                                                'bg-gray-500': listenerInfo.status === 'stopped' || listenerInfo.status === 'stopping'
+                                            }"></span>
+                                            <span class="text-sm text-white capitalize">{{ listenerInfo.status || 'unknown' }}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500">Active Viewers</span>
+                                        <div class="text-sm text-white mt-1">{{ listenerInfo.viewer_count ?? 0 }}</div>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500">Mode</span>
+                                        <div class="text-sm text-white mt-1 capitalize">{{ listenerInfo.mode || 'off' }}</div>
+                                    </div>
+                                    <div>
+                                        <span class="text-xs text-gray-500">Grace Period</span>
+                                        <div class="text-sm text-white mt-1">{{ listenerInfo.grace_period ?? 300 }}s</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Mode info -->
+                            <div class="bg-gray-900/50 rounded-lg p-4 text-xs text-gray-400">
+                                <p class="mb-2"><strong class="text-gray-300">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
+                                <p class="mb-2"><strong class="text-gray-300">always</strong> — Listener always runs (legacy behavior)</p>
+                                <p><strong class="text-gray-300">off</strong> — Listener never runs</p>
+                                <p class="mt-3 text-gray-500">Mode is configured via <code class="bg-gray-800 px-1 rounded">LISTENER_MODE</code> env var</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Context Menu -->
+        <div v-if="contextMenu.visible" class="fixed z-[9999]" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @keydown="handleMenuKeydown" role="menu" aria-label="Context menu">
+            <div class="rounded-lg shadow-2xl py-1 min-w-[180px] border" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                <button v-for="(item, i) in contextMenu.items" :key="i" @click="item.action(); closeContextMenu()"
+                    class="ctx-menu-item w-full px-3 py-2 text-left text-xs flex items-center gap-2.5 transition-colors outline-none focus:bg-white/10 hover:bg-white/10"
+                    style="color: var(--tg-text);" role="menuitem" tabindex="-1">
+                    <i class="fas w-4 text-center" :class="item.icon" style="color: var(--tg-muted);"></i>
+                    <span>{{ item.label }}</span>
+                </button>
+            </div>
+        </div>
+        <!-- Context menu backdrop (click outside to close) -->
+        <div v-if="contextMenu.visible" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu" class="fixed inset-0 z-[9998]"></div>
+
+        <!-- Toast Notification -->
+        <div v-if="toast.visible" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2 rounded-lg shadow-lg text-sm font-medium pointer-events-none"
+            :class="[toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white', toast.leaving ? 'toast-leave' : 'toast-enter']">
+            {{ toast.message }}
+        </div>
+
+        <!-- Settings Modal -->
+        <div v-if="showSettingsModal" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" @click.self="showSettingsModal = false">
+            <div class="rounded-xl shadow-2xl w-full max-w-sm p-5" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-base font-semibold">Display Settings</h3>
+                    <button @click="showSettingsModal = false" class="p-1 rounded hover:bg-white/10">
+                        <i class="fas fa-times text-sm" style="color: var(--tg-muted);"></i>
+                    </button>
+                </div>
+                <!-- Timezone -->
+                <div class="mb-4">
+                    <label class="text-xs font-medium mb-1.5 block" style="color: var(--tg-muted);">Timezone</label>
+                    <div class="flex items-center gap-2 mb-2">
+                        <input type="checkbox" id="tz-auto" :checked="settingsTimezoneAuto" @change="toggleTimezoneAuto($event.target.checked)"
+                            class="rounded" style="accent-color: var(--tg-accent);">
+                        <label for="tz-auto" class="text-xs" style="color: var(--tg-muted);">Auto-detect ({{ detectedTimezone }})</label>
+                    </div>
+                    <select v-if="!settingsTimezoneAuto" v-model="settingsTimezone" @change="saveTimezone(settingsTimezone)"
+                        class="w-full text-sm rounded-lg px-3 py-2 border focus:outline-none"
+                        style="background: var(--tg-bg); color: var(--tg-text); border-color: var(--tg-border);">
+                        <option v-for="tz in timezoneList" :key="tz" :value="tz">{{ tz }}</option>
+                    </select>
+                </div>
+                <div class="text-[10px] pt-2 border-t" style="color: var(--tg-muted); border-color: var(--tg-border);">
+                    Settings saved per-browser via localStorage.
                 </div>
             </div>
         </div>
@@ -1421,11 +1840,172 @@
                 const showAdminPanel = ref(false)
                 const loginMode = ref('password') // 'password' or 'token'
                 const tokenInput = ref('')
+
+                // Theme system
+                const themePresets = [
+                    { id: 'midnight', label: 'Midnight', preview: '#0f172a', type: 'dark' },
+                    { id: 'telegram-classic', label: 'Telegram Classic', preview: '#17212b', type: 'dark' },
+                    { id: 'amoled-black', label: 'AMOLED Black', preview: '#000000', type: 'dark' },
+                    { id: 'nord', label: 'Nord', preview: '#2e3440', type: 'dark' },
+                    { id: 'monokai', label: 'Monokai', preview: '#272822', type: 'dark' },
+                    { id: 'solarized-dark', label: 'Solarized Dark', preview: '#002b36', type: 'dark' },
+                    { id: 'light-default', label: 'Light', preview: '#ffffff', type: 'light' },
+                ]
+                const currentTheme = ref(localStorage.getItem('tg-theme') || 'midnight')
+                const themeDropdownOpen = ref(false)
+                const themeAutoDetect = ref(localStorage.getItem('tg-theme-auto') === 'true')
+                const setTheme = (themeId) => {
+                    currentTheme.value = themeId
+                    document.documentElement.setAttribute('data-theme', themeId)
+                    const isLight = themeId.startsWith('light')
+                    document.documentElement.style.colorScheme = isLight ? 'light' : 'dark'
+                    localStorage.setItem('tg-theme', themeId)
+                    themeDropdownOpen.value = false
+                    // Update theme-color meta
+                    const meta = document.querySelector('meta[name="theme-color"]')
+                    const preset = themePresets.find(t => t.id === themeId)
+                    if (meta && preset) meta.content = preset.preview
+                }
+                const toggleThemeAutoDetect = () => {
+                    themeAutoDetect.value = !themeAutoDetect.value
+                    localStorage.setItem('tg-theme-auto', themeAutoDetect.value ? 'true' : 'false')
+                    if (themeAutoDetect.value) {
+                        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+                        setTheme(prefersDark ? 'midnight' : 'light-default')
+                    }
+                }
+                // Listen for system theme changes when auto-detect is on
+                if (window.matchMedia) {
+                    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                        if (themeAutoDetect.value) setTheme(e.matches ? 'midnight' : 'light-default')
+                    })
+                }
+
+                // Toast notification system
+                const toast = Vue.reactive({ visible: false, message: '', type: 'success', leaving: false })
+                let toastTimer = null
+                const showToast = (msg, type = 'success') => {
+                    clearTimeout(toastTimer)
+                    toast.visible = true
+                    toast.message = msg
+                    toast.type = type
+                    toast.leaving = false
+                    toastTimer = setTimeout(() => {
+                        toast.leaving = true
+                        setTimeout(() => { toast.visible = false; toast.leaving = false }, 300)
+                    }, 2700)
+                }
+
+                // Settings modal
+                const showSettingsModal = ref(false)
+                const showAiComingSoon = ref(false)
+                const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+                const settingsTimezoneAuto = ref(localStorage.getItem('tg-tz-auto') !== 'false')
+                const settingsTimezone = ref(localStorage.getItem('tg-viewer-timezone') || detectedTimezone)
+                // Build timezone list: common zones + browser full list
+                const timezoneList = (() => {
+                    const common = ['UTC','America/New_York','America/Chicago','America/Denver','America/Los_Angeles',
+                        'America/Sao_Paulo','Europe/London','Europe/Paris','Europe/Berlin','Europe/Madrid','Europe/Moscow',
+                        'Asia/Dubai','Asia/Kolkata','Asia/Shanghai','Asia/Tokyo','Asia/Seoul','Asia/Manila','Asia/Singapore',
+                        'Australia/Sydney','Pacific/Auckland']
+                    try { const all = Intl.supportedValuesOf('timeZone'); return [...new Set([...common, ...all])] }
+                    catch { return common }
+                })()
+                const saveTimezone = (tz) => {
+                    settingsTimezone.value = tz
+                    localStorage.setItem('tg-viewer-timezone', tz)
+                    viewerTimezone.value = tz
+                    if (moment.tz) moment.tz.setDefault(tz)
+                    showToast('Timezone updated')
+                }
+                const toggleTimezoneAuto = (auto) => {
+                    settingsTimezoneAuto.value = auto
+                    localStorage.setItem('tg-tz-auto', auto ? 'true' : 'false')
+                    if (auto) saveTimezone(detectedTimezone)
+                }
+                // Apply saved timezone on load
+                ;(() => {
+                    const isAuto = localStorage.getItem('tg-tz-auto') !== 'false'
+                    const saved = isAuto ? detectedTimezone : (localStorage.getItem('tg-viewer-timezone') || detectedTimezone)
+                    viewerTimezone.value = saved
+                    settingsTimezone.value = saved
+                    if (moment.tz) moment.tz.setDefault(saved)
+                })()
+
+                // Context menu
+                const contextMenu = Vue.reactive({ visible: false, x: 0, y: 0, items: [], target: null })
+                const copyToClipboard = async (text) => {
+                    try {
+                        if (navigator.clipboard) { await navigator.clipboard.writeText(text) }
+                        else { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta) }
+                        showToast('Copied!')
+                    } catch { showToast('Copy failed', 'error') }
+                }
+                const positionMenu = (e) => {
+                    const menuW = 200, menuH = 250
+                    contextMenu.x = Math.min(e.clientX, window.innerWidth - menuW)
+                    contextMenu.y = Math.min(e.clientY, window.innerHeight - menuH)
+                }
+                const closeContextMenu = () => {
+                    if (!contextMenu.visible) return
+                    contextMenu.visible = false
+                    document.removeEventListener('scroll', closeContextMenu, true)
+                }
+                const openContextMenu = (e, type, data) => {
+                    if (e.shiftKey) return // allow browser default with Shift+right-click
+                    closeContextMenu()
+                    const items = []
+                    if (type === 'message') {
+                        if (data.text) items.push({ label: 'Copy Text', icon: 'fa-copy', action: () => copyToClipboard(data.text) })
+                        items.push({ label: 'Copy Link', icon: 'fa-link', action: () => {
+                            const url = `${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`
+                            copyToClipboard(url)
+                        }})
+                        if (data.reply_to_msg_id) items.push({ label: 'Jump to Reply', icon: 'fa-reply', action: () => { closeContextMenu(); scrollToMessage(data.reply_to_msg_id) }})
+                        if (data.media?.file_path) {
+                            items.push({ label: 'Open Media', icon: 'fa-image', action: () => { closeContextMenu(); openMedia(data) }})
+                            if (!noDownload.value) items.push({ label: 'Download', icon: 'fa-download', action: () => { window.open(getMediaUrl(data) + '?download=1', '_blank') }})
+                        }
+                    } else if (type === 'chat') {
+                        items.push({ label: 'Open Chat', icon: 'fa-comment', action: () => { closeContextMenu(); selectChat(data) }})
+                        items.push({ label: 'Copy Chat ID', icon: 'fa-hashtag', action: () => copyToClipboard(String(data.id)) })
+                    } else if (type === 'lightbox') {
+                        if (!noDownload.value) items.push({ label: 'Download', icon: 'fa-download', action: () => { window.open(getMediaUrl(data) + '?download=1', '_blank') }})
+                        items.push({ label: 'Open in New Tab', icon: 'fa-external-link-alt', action: () => { window.open(getMediaUrl(data), '_blank') }})
+                    }
+                    if (!items.length) return
+                    contextMenu.items = items
+                    contextMenu.target = data
+                    positionMenu(e)
+                    contextMenu.visible = true
+                    document.addEventListener('scroll', closeContextMenu, true)
+                    nextTick(() => {
+                        const first = document.querySelector('.ctx-menu-item')
+                        if (first) first.focus()
+                    })
+                }
+                const handleMenuKeydown = (e) => {
+                    const items = document.querySelectorAll('.ctx-menu-item')
+                    const idx = Array.from(items).indexOf(document.activeElement)
+                    if (e.key === 'ArrowDown') { e.preventDefault(); items[Math.min(idx + 1, items.length - 1)]?.focus() }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); items[Math.max(idx - 1, 0)]?.focus() }
+                    else if (e.key === 'Enter') { e.preventDefault(); document.activeElement?.click() }
+                    else if (e.key === 'Escape') { e.preventDefault(); closeContextMenu() }
+                }
+
+                // Permalink
+                const copyPermalink = (msg) => {
+                    const url = `${window.location.origin}/chat/${msg.chat_id}?msg=${msg.id}`
+                    copyToClipboard(url)
+                }
+                // chatListFocusIndex for keyboard nav (Phase 6)
+                const chatListFocusIndex = ref(-1)
+
                 const chatsError = ref('')  // Error message when database is busy
                 const lastBackupTime = ref(null)  // Last backup time from stats
                 const lastBackupTimeSource = ref('metadata')  // Source of last backup time: 'metadata' (UTC) or 'sync_status' (server local)
                 const listenerActive = ref(false)  // Whether real-time listener is active
-                const viewerTimezone = ref('Europe/Madrid')  // Default timezone, will be updated from config
+                const listenerInfo = ref({ mode: 'off', status: 'stopped', grace_period: 300, viewer_count: 0 })
                 const showDatePickerModal = ref(false)
                 const datePickerInput = ref(null)
                 const selectedDate = ref(null)
@@ -1856,12 +2436,11 @@
                             // Show/hide stats UI based on config
                             showStatsUI.value = stats.show_stats !== false
                             
-                            // Update timezone from config
-                            if (stats.timezone) {
+                            // Use server timezone only as fallback if no localStorage preference
+                            if (stats.timezone && !localStorage.getItem('tg-viewer-timezone') && localStorage.getItem('tg-tz-auto') === null) {
                                 viewerTimezone.value = stats.timezone
-                                if (moment && moment.tz) {
-                                    moment.tz.setDefault(viewerTimezone.value)
-                                }
+                                settingsTimezone.value = stats.timezone
+                                if (moment && moment.tz) moment.tz.setDefault(stats.timezone)
                             }
                             
                             // Last backup time
@@ -1882,7 +2461,18 @@
                         console.error("Failed to fetch stats", e)
                     }
                 }
-                
+
+                const loadListenerStatus = async () => {
+                    try {
+                        const res = await fetch('/api/admin/listener-status', { headers: { 'Authorization': `Bearer ${authToken.value}` } })
+                        if (res.ok) {
+                            listenerInfo.value = await res.json()
+                        }
+                    } catch (e) {
+                        console.error('Failed to fetch listener status', e)
+                    }
+                }
+
                 const formatStatsTime = (isoString) => {
                     if (!isoString) return 'Never calculated'
                     const date = moment(isoString)
@@ -1927,6 +2517,8 @@
 
                 // Auth check on mount
                 onMounted(async () => {
+                    // Global keyboard handler
+                    document.addEventListener('keydown', handleGlobalKeydown)
                     console.log('[DEBUG] onMounted started')
                     try {
                         console.log('[DEBUG] Fetching /api/auth/check...')
@@ -1979,25 +2571,42 @@
                                 await loadArchivedCount()
                                 setupInfiniteScroll()
 
-                                // Handle deep link from push notification
+                                // Handle deep link from push notification or permalink
                                 const urlParams = new URLSearchParams(window.location.search)
-                                const chatIdParam = urlParams.get('chat')
-                                const msgIdParam = urlParams.get('msg')
-                                
+                                let chatIdParam = urlParams.get('chat')
+                                let msgIdParam = urlParams.get('msg')
+
+                                // Permalink: /chat/{chat_id}?msg={msg_id}
+                                const pathMatch = window.location.pathname.match(/^\/chat\/(-?\d+)$/)
+                                if (pathMatch) {
+                                    chatIdParam = pathMatch[1]
+                                    if (!msgIdParam) msgIdParam = urlParams.get('msg')
+                                }
+
                                 if (chatIdParam) {
                                     const chatId = parseInt(chatIdParam)
                                     const targetChat = chats.value.find(c => c.id === chatId)
                                     if (targetChat) {
-                                        console.log('[Notification] Deep linking to chat:', chatId)
                                         await selectChat(targetChat)
                                         if (msgIdParam) {
                                             const msgId = parseInt(msgIdParam)
-                                            console.log('[Notification] Scrolling to message:', msgId)
+                                            // Try context API first, fallback to existing scrollToMessage
+                                            try {
+                                                const ctxRes = await fetch(`/api/chats/${chatId}/messages/${msgId}/context`, { credentials: 'include' })
+                                                if (ctxRes.ok) {
+                                                    const ctxData = await ctxRes.json()
+                                                    if (ctxData.messages?.length) {
+                                                        messages.value = ctxData.messages
+                                                        await nextTick()
+                                                    }
+                                                }
+                                            } catch {}
                                             await nextTick()
-                                            scrollToMessage(msgId)
+                                            scrollToMessage(parseInt(msgIdParam))
                                         }
+                                    } else {
+                                        showToast('Chat not found or access denied', 'error')
                                     }
-                                    // Clean URL without reload to prevent re-navigation on refresh
                                     window.history.replaceState({}, '', '/')
                                 }
                             }
@@ -2372,6 +2981,9 @@
                         })
                     }, { threshold: 0.1 })
                 }
+
+                // Reset chat list focus when search changes
+                watch(searchQuery, () => { chatListFocusIndex.value = -1 })
 
                 // Watch for messages changes to observe new GIFs
                 watch(messages, () => {
@@ -2833,13 +3445,18 @@
                     await loadMessages()
                 }
 
+                let _scrollRafPending = false
                 const handleScroll = (e) => {
-                    const { scrollTop } = e.target
-                    
-                    // Show/hide scroll to bottom button
-                    // With flex-col-reverse: scrollTop is NEGATIVE when scrolled up from bottom
-                    // scrollTop=0 is at bottom (newest), scrollTop=-1000 means scrolled up 1000px
-                    showScrollToBottom.value = scrollTop < -300
+                    if (_scrollRafPending) return
+                    _scrollRafPending = true
+                    requestAnimationFrame(() => {
+                        _scrollRafPending = false
+                        const { scrollTop } = e.target
+                        // Show/hide scroll to bottom button
+                        // With flex-col-reverse: scrollTop is NEGATIVE when scrolled up from bottom
+                        // scrollTop=0 is at bottom (newest), scrollTop=-1000 means scrolled up 1000px
+                        showScrollToBottom.value = scrollTop < -300
+                    })
                 }
                 
                 // Manual load more function (fallback for when infinite scroll doesn't trigger)
@@ -3012,17 +3629,10 @@
                     return hue
                 }
 
-                // Get background color for message bubble
+                // Get background color for message bubble (uses CSS custom properties for theming)
                 const getMessageBackground = (msg) => {
                     const isOwn = isOwnMessage(msg)
-
-                    if (isOwn) {
-                        // Own messages: Strong blue background
-                        return 'hsla(210, 60%, 28%, 0.95)'
-                    } else {
-                        // Others: Unified softer gray background
-                        return 'hsla(220, 20%, 25%, 0.80)'
-                    }
+                    return isOwn ? 'var(--tg-own-msg)' : 'var(--tg-other-msg)'
                 }
 
                 // Get color for sender name (unique per person)
@@ -3146,6 +3756,11 @@
                     return `/media/${folder}/${filename}`
                 }
 
+                // Image load handler for blur-up effect
+                const onImageLoad = (event) => {
+                    event.target.setAttribute('data-loaded', '')
+                }
+
                 const getDocumentDisplayName = (msg) => {
                     // Prefer file name from media table when available
                     let name = msg.media?.file_name || ''
@@ -3217,8 +3832,6 @@
                         lightboxMedia.value = msg
                         lightboxIndex.value = mediaMessages.value.findIndex(m => m.id === msg.id && m.chat_id === msg.chat_id)
                         lightboxOpen.value = true
-                        // Add keyboard listener
-                        document.addEventListener('keydown', handleLightboxKeydown)
                     } else {
                         window.open(getMediaUrl(msg), '_blank')
                     }
@@ -3227,7 +3840,6 @@
                 const closeLightbox = () => {
                     lightboxOpen.value = false
                     lightboxMedia.value = null
-                    document.removeEventListener('keydown', handleLightboxKeydown)
                 }
                 
                 const lightboxPrev = () => {
@@ -3244,12 +3856,189 @@
                     }
                 }
                 
-                const handleLightboxKeydown = (e) => {
-                    if (!lightboxOpen.value) return
-                    if (e.key === 'Escape') closeLightbox()
-                    else if (e.key === 'ArrowLeft') lightboxPrev()
-                    else if (e.key === 'ArrowRight') lightboxNext()
+                // Global keyboard handler (replaces per-component handlers)
+                const handleGlobalKeydown = (e) => {
+                    // Skip when typing in inputs (except Escape and Ctrl+F which cascade)
+                    const tag = e.target.tagName
+                    const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable
+                    const isPassthrough = e.key === 'Escape' || (e.ctrlKey && e.key === 'f')
+                    if (isInput && !isPassthrough) return
+                    if (isInput && e.key === 'Escape') { e.target.blur() }
+
+                    // Escape cascade (priority order)
+                    if (e.key === 'Escape') {
+                        if (lightboxOpen.value) { closeLightbox(); return }
+                        if (contextMenu.visible) { closeContextMenu(); return }
+                        if (showDatePickerModal.value) { closeDatePicker(); return }
+                        if (showSettingsModal.value) { showSettingsModal.value = false; return }
+                        if (showAiComingSoon.value) { showAiComingSoon.value = false; return }
+                        if (searchBarVisible.value) { clearSearch(); return }
+                        return
+                    }
+
+                    // Lightbox keys
+                    if (lightboxOpen.value) {
+                        if (e.key === 'ArrowLeft') lightboxPrev()
+                        else if (e.key === 'ArrowRight') lightboxNext()
+                        return
+                    }
+
+                    // Context menu open — let it handle its own keys
+                    if (contextMenu.visible) return
+
+                    // Ctrl+F — toggle search bar
+                    if (e.ctrlKey && e.key === 'f' && selectedChat.value) {
+                        e.preventDefault()
+                        toggleSearchBar()
+                        return
+                    }
+
+                    // Message scroll (when a chat is selected, no overlay)
+                    if (selectedChat.value && messagesContainer.value) {
+                        const container = messagesContainer.value
+                        const scrollAmt = container.clientHeight * 0.8
+                        if (e.key === 'PageDown') { e.preventDefault(); container.scrollBy({ top: scrollAmt, behavior: 'smooth' }) }
+                        else if (e.key === 'PageUp') { e.preventDefault(); container.scrollBy({ top: -scrollAmt, behavior: 'smooth' }) }
+                        else if (e.key === 'Home') { e.preventDefault(); container.scrollTop = 0 }
+                        else if (e.key === 'End') { e.preventDefault(); container.scrollTop = -container.scrollHeight }
+                    }
+
+                    // Chat list navigation (ArrowUp/Down when no chat selected or sidebar visible)
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                        if (!selectedChat.value || window.innerWidth >= 768) {
+                            e.preventDefault()
+                            const list = filteredChats.value
+                            if (!list.length) return
+                            if (e.key === 'ArrowDown') chatListFocusIndex.value = Math.min(chatListFocusIndex.value + 1, list.length - 1)
+                            else chatListFocusIndex.value = Math.max(chatListFocusIndex.value - 1, 0)
+                            // Scroll focused item into view
+                            nextTick(() => {
+                                const items = document.querySelectorAll('.sidebar-chat-list > div')
+                                items[chatListFocusIndex.value]?.scrollIntoView({ block: 'nearest' })
+                            })
+                        }
+                    }
+                    if (e.key === 'Enter' && chatListFocusIndex.value >= 0) {
+                        const list = filteredChats.value
+                        if (list[chatListFocusIndex.value]) selectChat(list[chatListFocusIndex.value])
+                    }
                 }
+                // Message search (Phase 9)
+                const searchBarVisible = ref(false)
+                const msgSearchQuery = ref('')
+                const searchMatchCount = ref(0)
+                const searchMatchIndex = ref(-1)
+                const searchInput = ref(null)
+                let searchDebounceTimer = null
+                let searchAbortCtrl = null
+
+                const toggleSearchBar = () => {
+                    searchBarVisible.value = !searchBarVisible.value
+                    if (searchBarVisible.value) {
+                        Vue.nextTick(() => searchInput.value?.focus())
+                    } else {
+                        clearMsgSearch()
+                    }
+                }
+
+                const handleSearchInput = () => {
+                    clearTimeout(searchDebounceTimer)
+                    if (searchAbortCtrl) searchAbortCtrl.abort()
+                    searchDebounceTimer = setTimeout(async () => {
+                        const q = msgSearchQuery.value.trim()
+                        if (!q) { clearSearchHighlights(); searchMatchCount.value = 0; searchMatchIndex.value = -1; return }
+                        if (!selectedChat.value) return
+                        searchAbortCtrl = new AbortController()
+                        try {
+                            const resp = await fetch(
+                                `/api/chats/${selectedChat.value.id}/messages?search=${encodeURIComponent(q)}&limit=200`,
+                                { credentials: 'include', signal: searchAbortCtrl.signal }
+                            )
+                            if (!resp.ok) return
+                            const data = await resp.json()
+                            messages.value = data
+                            Vue.nextTick(() => {
+                                applySearchHighlights(messagesContainer.value, q)
+                                const marks = messagesContainer.value?.querySelectorAll('mark') || []
+                                searchMatchCount.value = marks.length
+                                searchMatchIndex.value = marks.length > 0 ? 0 : -1
+                                if (marks.length > 0) {
+                                    marks[0].classList.add('current')
+                                    marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
+                                }
+                            })
+                        } catch (e) {
+                            if (e.name !== 'AbortError') console.error('Search failed:', e)
+                        }
+                    }, 300)
+                }
+
+                const applySearchHighlights = (container, term) => {
+                    if (!term || !container) return
+                    clearSearchHighlights(container)
+                    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                    const regex = new RegExp(`(${escaped})`, 'gi')
+                    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+                    const textNodes = []
+                    while (walker.nextNode()) textNodes.push(walker.currentNode)
+                    textNodes.forEach(node => {
+                        if (!regex.test(node.textContent)) return
+                        regex.lastIndex = 0
+                        const frag = document.createDocumentFragment()
+                        let lastIdx = 0
+                        let match
+                        while ((match = regex.exec(node.textContent)) !== null) {
+                            frag.appendChild(document.createTextNode(node.textContent.slice(lastIdx, match.index)))
+                            const mark = document.createElement('mark')
+                            mark.textContent = match[1]
+                            frag.appendChild(mark)
+                            lastIdx = regex.lastIndex
+                        }
+                        frag.appendChild(document.createTextNode(node.textContent.slice(lastIdx)))
+                        node.parentNode.replaceChild(frag, node)
+                    })
+                }
+
+                const clearSearchHighlights = (container) => {
+                    const el = container || messagesContainer.value
+                    if (!el) return
+                    el.querySelectorAll('mark').forEach(mark => {
+                        const parent = mark.parentNode
+                        parent.replaceChild(document.createTextNode(mark.textContent), mark)
+                        parent.normalize()
+                    })
+                }
+
+                const navigateSearchMatch = (dir) => {
+                    const marks = messagesContainer.value?.querySelectorAll('mark') || []
+                    if (marks.length === 0) return
+                    marks.forEach(m => m.classList.remove('current'))
+                    searchMatchIndex.value = (searchMatchIndex.value + dir + marks.length) % marks.length
+                    marks[searchMatchIndex.value].classList.add('current')
+                    marks[searchMatchIndex.value].scrollIntoView({ block: 'center', behavior: 'smooth' })
+                }
+
+                const clearMsgSearch = () => {
+                    clearTimeout(searchDebounceTimer)
+                    if (searchAbortCtrl) searchAbortCtrl.abort()
+                    searchBarVisible.value = false
+                    const hadQuery = !!msgSearchQuery.value
+                    msgSearchQuery.value = ''
+                    searchMatchCount.value = 0
+                    searchMatchIndex.value = -1
+                    clearSearchHighlights()
+                    // Reload original messages if we had searched
+                    if (hadQuery && selectedChat.value) {
+                        messages.value = []
+                        hasMore.value = true
+                        loading.value = false
+                        ++chatVersion
+                        loadMessages()
+                    }
+                }
+
+                // Alias for backward compat with Phase 6 keyboard handler
+                const clearSearch = clearMsgSearch
 
                 const escapeHtml = (text) => {
                     const div = document.createElement('div')
@@ -3454,6 +4243,7 @@
                 const adminViewerForm = ref({ username: '', password: '', allowed_chat_ids: [], is_active: true, no_download: false })
                 const adminEditingId = ref(null)
                 const adminError = ref('')
+                const adminChatFilter = ref('')
                 const adminActiveTab = ref('viewers')
                 // v7.2.0: Share tokens
                 const adminTokens = ref([])
@@ -3463,6 +4253,12 @@
                 const adminNewTokenUrl = computed(() => {
                     if (!adminNewToken.value) return ''
                     return `${window.location.origin}/?token=${adminNewToken.value}`
+                })
+
+                const filteredAdminChats = computed(() => {
+                    if (!adminChatFilter.value) return adminChats.value
+                    const q = adminChatFilter.value.toLowerCase()
+                    return adminChats.value.filter(c => (c.title || String(c.id)).toLowerCase().includes(q))
                 })
 
                 const loadAdminViewers = async () => {
@@ -3554,6 +4350,7 @@
                     adminEditingId.value = null
                     adminViewerForm.value = { username: '', password: '', allowed_chat_ids: [], is_active: true, no_download: false }
                     adminError.value = ''
+                    adminChatFilter.value = ''
                 }
 
                 // v7.2.0: Token management
@@ -3681,6 +4478,17 @@
                     messagesContainer,
                     scrollAnchor,
                     handleScroll,
+                    // Keyboard nav & search
+                    searchBarVisible,
+                    toggleSearchBar,
+                    clearSearch,
+                    msgSearchQuery,
+                    searchMatchCount,
+                    searchMatchIndex,
+                    searchInput,
+                    handleSearchInput,
+                    navigateSearchMatch,
+                    clearMsgSearch,
                     // Auth
                     isAuthenticated,
                     authRequired,
@@ -3710,6 +4518,8 @@
                     editViewer,
                     deleteViewer,
                     cancelEdit,
+                    adminChatFilter,
+                    filteredAdminChats,
                     loadAdminAudit,
                     // v7.2.0: Tokens
                     adminTokens,
@@ -3721,6 +4531,32 @@
                     createToken,
                     revokeToken,
                     deleteToken,
+                    // Context menu & permalink
+                    contextMenu,
+                    openContextMenu,
+                    closeContextMenu,
+                    handleMenuKeydown,
+                    copyToClipboard,
+                    copyPermalink,
+                    chatListFocusIndex,
+                    // Toast & settings
+                    toast,
+                    showToast,
+                    showSettingsModal,
+                    showAiComingSoon,
+                    settingsTimezone,
+                    settingsTimezoneAuto,
+                    detectedTimezone,
+                    timezoneList,
+                    saveTimezone,
+                    toggleTimezoneAuto,
+                    // Theme system
+                    themePresets,
+                    currentTheme,
+                    themeDropdownOpen,
+                    setTheme,
+                    themeAutoDetect,
+                    toggleThemeAutoDetect,
                     // Colors / avatars
                     getSenderStyle,
                     getSenderNameColor,
@@ -3756,6 +4592,9 @@
                     lastBackupTime,
                     lastBackupTimeSource,
                     listenerActive,
+                    listenerInfo,
+                    loadListenerStatus,
+                    onImageLoad,
                     viewerTimezone,
                     // Date picker
                     showDatePickerModal,

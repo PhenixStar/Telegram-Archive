@@ -952,7 +952,7 @@ class DatabaseAdapter:
 
             try:
                 result.update(json.loads(cached_stats))
-            except json.JSONDecodeError, TypeError:
+            except (json.JSONDecodeError, TypeError):
                 pass
 
         if last_backup_time:
@@ -1188,6 +1188,162 @@ class DatabaseAdapter:
                     reactions_by_emoji[emoji]["count"] += reaction.get("count", 1)
                     if reaction.get("user_id"):
                         reactions_by_emoji[emoji]["user_ids"].append(reaction["user_id"])
+                msg["reactions"] = list(reactions_by_emoji.values())
+
+            return messages
+
+    async def get_messages_around(
+        self,
+        chat_id: int,
+        msg_id: int,
+        count: int = 50,
+    ) -> list[dict[str, Any]]:
+        """
+        Get messages around a target message for permalink navigation.
+
+        Fetches count/2 messages before and after the target message's date,
+        returning them in the same format as get_messages_paginated.
+
+        Args:
+            chat_id: Chat ID
+            msg_id: Target message ID
+            count: Total number of messages to return (split evenly before/after)
+
+        Returns:
+            List of message dicts with user/media info, or empty list if target not found
+        """
+        half = count // 2
+        async with self.db_manager.async_session_factory() as session:
+            # Step 1: Find target message date
+            target_result = await session.execute(
+                select(Message.date).where(
+                    and_(Message.chat_id == chat_id, Message.id == msg_id)
+                )
+            )
+            target_date = target_result.scalar_one_or_none()
+            if target_date is None:
+                return []
+
+            # Base select with joins (same as get_messages_paginated)
+            base_stmt = (
+                select(
+                    Message,
+                    User.first_name,
+                    User.last_name,
+                    User.username,
+                    Media.id.label("media_id"),
+                    Media.type.label("media_type"),
+                    Media.file_path.label("media_file_path"),
+                    Media.file_name.label("media_file_name"),
+                    Media.file_size.label("media_file_size"),
+                    Media.mime_type.label("media_mime_type"),
+                    Media.width.label("media_width"),
+                    Media.height.label("media_height"),
+                    Media.duration.label("media_duration"),
+                )
+                .outerjoin(User, Message.sender_id == User.id)
+                .outerjoin(
+                    Media,
+                    and_(
+                        Media.message_id == Message.id,
+                        Media.chat_id == Message.chat_id,
+                    ),
+                )
+                .where(Message.chat_id == chat_id)
+            )
+
+            # Step 2: Get messages before target (older), ordered newest-first
+            before_stmt = (
+                base_stmt.where(
+                    or_(
+                        Message.date < target_date,
+                        and_(Message.date == target_date, Message.id < msg_id),
+                    )
+                )
+                .order_by(Message.date.desc(), Message.id.desc())
+                .limit(half)
+            )
+
+            # Step 3: Get target + messages after (newer), ordered oldest-first
+            after_stmt = (
+                base_stmt.where(
+                    or_(
+                        Message.date > target_date,
+                        and_(Message.date == target_date, Message.id >= msg_id),
+                    )
+                )
+                .order_by(Message.date.asc(), Message.id.asc())
+                .limit(half)
+            )
+
+            before_result = await session.execute(before_stmt)
+            after_result = await session.execute(after_stmt)
+
+            # Combine: before (reversed to chronological) + after
+            before_rows = list(before_result)
+            after_rows = list(after_result)
+            all_rows = list(reversed(before_rows)) + after_rows
+
+            messages = []
+            for row in all_rows:
+                msg = self._message_to_dict(row.Message)
+                msg["first_name"] = row.first_name
+                msg["last_name"] = row.last_name
+                msg["username"] = row.username
+
+                if row.media_type:
+                    msg["media"] = {
+                        "id": row.media_id,
+                        "type": row.media_type,
+                        "file_path": row.media_file_path,
+                        "file_name": row.media_file_name,
+                        "file_size": row.media_file_size,
+                        "mime_type": row.media_mime_type,
+                        "width": row.media_width,
+                        "height": row.media_height,
+                        "duration": row.media_duration,
+                    }
+                else:
+                    msg["media"] = None
+
+                if msg.get("raw_data"):
+                    try:
+                        msg["raw_data"] = json.loads(msg["raw_data"])
+                    except Exception:
+                        msg["raw_data"] = {}
+
+                messages.append(msg)
+
+            # Enrich with reply texts and reactions
+            for msg in messages:
+                if msg.get("reply_to_msg_id") and not msg.get("reply_to_text"):
+                    reply_result = await session.execute(
+                        select(Message.text).where(
+                            and_(
+                                Message.chat_id == chat_id,
+                                Message.id == msg["reply_to_msg_id"],
+                            )
+                        )
+                    )
+                    reply_text = reply_result.scalar_one_or_none()
+                    if reply_text:
+                        msg["reply_to_text"] = reply_text[:100]
+
+                reactions = await self.get_reactions(msg["id"], chat_id)
+                reactions_by_emoji: dict[str, dict] = {}
+                for reaction in reactions:
+                    emoji = reaction["emoji"]
+                    if emoji not in reactions_by_emoji:
+                        reactions_by_emoji[emoji] = {
+                            "emoji": emoji,
+                            "count": 0,
+                            "user_ids": [],
+                        }
+                    reactions_by_emoji[emoji]["count"] += reaction.get("count", 1)
+                    if reaction.get("user_id"):
+                        reactions_by_emoji[emoji]["user_ids"].append(
+                            reaction["user_id"]
+                        )
                 msg["reactions"] = list(reactions_by_emoji.values())
 
             return messages
@@ -2077,6 +2233,156 @@ class DatabaseAdapter:
         async with self.db_manager.async_session_factory() as session:
             result = await session.execute(select(AppSettings))
             return {row.key: row.value for row in result.scalars().all()}
+
+    # ========================================================================
+    # FTS5 Full-Text Search (SQLite only)
+    # ========================================================================
+
+    async def init_fts(self) -> None:
+        """Initialize FTS5 virtual table (SQLite only, no-op on PostgreSQL)."""
+        if not self._is_sqlite:
+            logger.info("FTS5 skipped: PostgreSQL detected")
+            return
+        from .fts import setup_sqlite_fts
+
+        async with self.db_manager.async_session_factory() as session:
+            await setup_sqlite_fts(session)
+
+    async def rebuild_fts_index(self) -> int:
+        """Rebuild the FTS5 index from scratch. Returns rows indexed."""
+        if not self._is_sqlite:
+            return 0
+        from .fts import rebuild_sqlite_fts
+
+        async with self.db_manager.async_session_factory() as session:
+            return await rebuild_sqlite_fts(session)
+
+    async def get_fts_status(self) -> str | None:
+        """Get FTS index build status from app_settings."""
+        return await self.get_setting("fts_index_status")
+
+    async def set_fts_status(self, status: str) -> None:
+        """Set FTS index build status in app_settings."""
+        await self.set_setting("fts_index_status", status)
+
+    @staticmethod
+    def _build_fts_where(
+        sanitized_query: str,
+        chat_id: int | None,
+        allowed_chat_ids: set[int] | None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Build WHERE clause + params for FTS5 queries with access control."""
+        where_parts = ["fts.text MATCH :query"]
+        params: dict[str, Any] = {"query": sanitized_query}
+
+        if chat_id is not None:
+            where_parts.append("fts.chat_id = :chat_id")
+            params["chat_id"] = chat_id
+
+        if allowed_chat_ids is not None:
+            placeholders = ", ".join(
+                f":acid{i}" for i in range(len(allowed_chat_ids))
+            )
+            where_parts.append(f"fts.chat_id IN ({placeholders})")
+            for i, cid in enumerate(allowed_chat_ids):
+                params[f"acid{i}"] = cid
+
+        return " AND ".join(where_parts), params
+
+    async def search_messages_fts(
+        self,
+        query: str,
+        chat_id: int | None,
+        allowed_chat_ids: set[int] | None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Search messages using FTS5 with access control."""
+        from .fts import sanitize_fts_query
+
+        sanitized = sanitize_fts_query(query)
+        if not sanitized:
+            return []
+
+        async with self.db_manager.async_session_factory() as session:
+            where_clause, params = self._build_fts_where(sanitized, chat_id, allowed_chat_ids)
+            params["lim"] = limit
+            params["off"] = offset
+
+            sql = f"""
+                SELECT m.id, m.chat_id, m.text, m.date, m.sender_id,
+                       u.first_name, u.last_name, u.username,
+                       snippet(messages_fts, 0, '<b>', '</b>', '...', 40) as snippet,
+                       rank
+                FROM messages_fts fts
+                JOIN messages m ON m.id = fts.msg_id AND m.chat_id = fts.chat_id
+                LEFT JOIN users u ON u.id = m.sender_id
+                WHERE {where_clause}
+                ORDER BY rank
+                LIMIT :lim OFFSET :off
+            """
+
+            try:
+                result = await session.execute(text(sql), params)
+                rows = result.fetchall()
+            except Exception as e:
+                logger.warning("FTS query failed: %s", e)
+                return []
+
+            return [
+                {
+                    "id": row.id,
+                    "chat_id": row.chat_id,
+                    "text": row.text,
+                    "date": row.date.isoformat() if row.date else None,
+                    "sender_id": row.sender_id,
+                    "first_name": row.first_name,
+                    "last_name": row.last_name,
+                    "username": row.username,
+                    "snippet": row.snippet,
+                }
+                for row in rows
+            ]
+
+    async def count_fts_matches(
+        self,
+        query: str,
+        chat_id: int | None,
+        allowed_chat_ids: set[int] | None,
+    ) -> int:
+        """Count total FTS matches for a query (for pagination info)."""
+        from .fts import sanitize_fts_query
+
+        sanitized = sanitize_fts_query(query)
+        if not sanitized:
+            return 0
+
+        async with self.db_manager.async_session_factory() as session:
+            where_clause, params = self._build_fts_where(sanitized, chat_id, allowed_chat_ids)
+            sql = f"SELECT count(*) FROM messages_fts fts WHERE {where_clause}"
+
+            try:
+                result = await session.execute(text(sql), params)
+                return result.scalar() or 0
+            except Exception:
+                return 0
+
+    async def insert_fts_entry(self, rowid: int, msg_id: int, chat_id: int, msg_text: str) -> None:
+        """Insert a single message into the FTS index (for real-time sync)."""
+        if not self._is_sqlite or not msg_text:
+            return
+        try:
+            async with self.db_manager.async_session_factory() as session:
+                await session.execute(
+                    text(
+                        "INSERT OR IGNORE INTO messages_fts(rowid, text, chat_id, msg_id) "
+                        "VALUES(:rowid, :text, :chat_id, :msg_id)"
+                    ),
+                    {"rowid": rowid, "text": msg_text, "chat_id": chat_id, "msg_id": msg_id},
+                )
+                await session.commit()
+        except Exception as e:
+            logger.debug("FTS insert skipped: %s", e)
 
     async def close(self) -> None:
         """Close database connections."""

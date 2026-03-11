@@ -127,6 +127,116 @@ config = Config()
 db: DatabaseAdapter | None = None
 
 
+class ListenerManager:
+    """Manages Telegram listener lifecycle based on viewer presence (LISTENER_MODE=auto)."""
+
+    def __init__(self, cfg: Config):
+        self._config = cfg
+        self._listener = None
+        self._listener_task: asyncio.Task | None = None
+        self._grace_task: asyncio.Task | None = None
+        self._status = "stopped"  # stopped | starting | running | stopping | grace_period
+        self._lock = asyncio.Lock()
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    async def on_viewer_connect(self, viewer_count: int):
+        """Called when a viewer connects. Start listener if mode=auto and not running."""
+        if self._config.listener_mode != "auto":
+            return
+        # Cancel grace period if one is active
+        if self._grace_task and not self._grace_task.done():
+            self._grace_task.cancel()
+            self._grace_task = None
+            if self._status == "grace_period":
+                self._status = "running"
+                logger.info("[ListenerManager] Grace period cancelled - viewer reconnected")
+            return
+        if self._status == "stopped":
+            await self._start()
+
+    async def on_viewer_disconnect(self, viewer_count: int):
+        """Called when a viewer disconnects. Start grace period if last viewer."""
+        if self._config.listener_mode != "auto":
+            return
+        if viewer_count == 0 and self._status == "running":
+            self._status = "grace_period"
+            grace = self._config.listener_grace_period
+            logger.info(f"[ListenerManager] Last viewer disconnected, grace period: {grace}s")
+            self._grace_task = asyncio.create_task(self._grace_then_stop(grace))
+
+    async def _grace_then_stop(self, seconds: int):
+        """Wait grace period then stop listener."""
+        try:
+            await asyncio.sleep(seconds)
+            logger.info("[ListenerManager] Grace period expired, stopping listener")
+            await self._stop()
+        except asyncio.CancelledError:
+            pass
+
+    async def _start(self):
+        """Start the Telegram listener."""
+        async with self._lock:
+            if self._status != "stopped":
+                return
+            self._status = "starting"
+            try:
+                from ..listener import TelegramListener
+
+                self._listener = await TelegramListener.create(self._config)
+                await self._listener.connect()
+                self._listener_task = asyncio.create_task(self._run_listener())
+                self._status = "running"
+                logger.info("[ListenerManager] Listener started (auto mode)")
+            except Exception:
+                logger.exception("[ListenerManager] Failed to start listener")
+                self._status = "stopped"
+
+    async def _run_listener(self):
+        """Run listener in background task."""
+        try:
+            await self._listener.run()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("[ListenerManager] Listener error")
+        finally:
+            self._status = "stopped"
+
+    async def _stop(self):
+        """Stop the Telegram listener."""
+        async with self._lock:
+            if self._status not in ("running", "grace_period"):
+                return
+            self._status = "stopping"
+            if self._listener_task and not self._listener_task.done():
+                self._listener_task.cancel()
+                try:
+                    await asyncio.wait_for(self._listener_task, timeout=10)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            if self._listener:
+                try:
+                    await self._listener.stop()
+                except Exception:
+                    pass
+                self._listener = None
+            self._status = "stopped"
+            logger.info("[ListenerManager] Listener stopped")
+
+    async def shutdown(self):
+        """Clean shutdown on app exit."""
+        if self._grace_task and not self._grace_task.done():
+            self._grace_task.cancel()
+        await self._stop()
+
+
+# Listener auto-activation manager
+listener_manager = ListenerManager(config)
+
+
 async def _normalize_display_chat_ids():
     """
     Normalize DISPLAY_CHAT_IDS to use marked format.
@@ -168,6 +278,7 @@ async def _normalize_display_chat_ids():
 # Background tasks
 stats_task: asyncio.Task | None = None
 _session_cleanup_task: asyncio.Task | None = None
+_fts_task: asyncio.Task | None = None
 
 # Real-time listener (PostgreSQL LISTEN/NOTIFY)
 realtime_listener: RealtimeListener | None = None
@@ -286,10 +397,32 @@ async def stats_calculation_scheduler():
             await asyncio.sleep(3600)
 
 
+async def _fts_index_worker() -> None:
+    """Background worker: build/rebuild FTS5 index on startup."""
+    try:
+        await db.init_fts()
+        status = await db.get_fts_status()
+        if status == "ready":
+            logger.info("FTS index already built, skipping rebuild")
+            return
+        await db.set_fts_status("building")
+        total = await db.rebuild_fts_index()
+        await db.set_fts_status("ready")
+        logger.info("FTS index build complete: %d messages indexed", total)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error("FTS index build failed: %s", e)
+        try:
+            await db.set_fts_status("error")
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage application lifecycle - initialize and cleanup database."""
-    global db, stats_task, _session_cleanup_task
+    global db, stats_task, _session_cleanup_task, _fts_task
     logger.info("Initializing database connection...")
     db_manager = await init_database()
     db = DatabaseAdapter(db_manager)
@@ -320,7 +453,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 if row["allowed_chat_ids"]:
                     try:
                         allowed = set(json.loads(row["allowed_chat_ids"]))
-                    except json.JSONDecodeError, TypeError:
+                    except (json.JSONDecodeError, TypeError):
                         logger.warning(f"Skipping session with corrupted allowed_chat_ids for {row['username']}")
                         continue
                 _sessions[row["token"]] = SessionData(
@@ -367,13 +500,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     else:
         logger.info(f"Push notifications mode: {config.push_notifications}")
 
+    # Start FTS5 index worker (non-blocking background task)
+    _fts_task = asyncio.create_task(_fts_index_worker())
+
     yield
 
     # Cleanup
+    await listener_manager.shutdown()
+
     if realtime_listener:
         await realtime_listener.stop()
 
-    for task in [stats_task, _session_cleanup_task]:
+    for task in [stats_task, _session_cleanup_task, _fts_task]:
         if task:
             task.cancel()
             try:
@@ -595,7 +733,7 @@ async def _resolve_session(auth_cookie: str) -> SessionData | None:
     if row["allowed_chat_ids"]:
         try:
             allowed = set(json.loads(row["allowed_chat_ids"]))
-        except json.JSONDecodeError, TypeError:
+        except (json.JSONDecodeError, TypeError):
             logger.warning(f"Corrupted allowed_chat_ids for session {row['username']}, denying access")
             return None
 
@@ -694,8 +832,16 @@ _media_root = Path(config.media_path).resolve() if os.path.exists(config.media_p
 
 # Thumbnail endpoint MUST be defined before the catch-all /media/{path:path} route
 @app.get("/media/thumb/{size}/{folder:path}/{filename}")
-async def serve_thumbnail(size: int, folder: str, filename: str, user: UserContext = Depends(require_auth)):
-    """Serve on-demand generated thumbnails with auth and path traversal protection."""
+async def serve_thumbnail(
+    size: int, folder: str, filename: str,
+    request: Request,
+    user: UserContext = Depends(require_auth),
+):
+    """Serve on-demand generated thumbnails with auth and path traversal protection.
+
+    Supports both image and video files. Videos use ffmpeg for first-frame extraction.
+    Serves AVIF when the client accepts it and Pillow has AVIF support, else WebP.
+    """
     if not _media_root:
         raise HTTPException(status_code=404, detail="Media directory not configured")
 
@@ -709,13 +855,53 @@ async def serve_thumbnail(size: int, folder: str, filename: str, user: UserConte
         except ValueError:
             pass
 
-    from .thumbnails import ensure_thumbnail
+    from .thumbnails import ensure_thumbnail, ensure_video_thumbnail, _is_video
 
+    # Try image first, then video
     thumb_path = await ensure_thumbnail(_media_root, size, folder, filename)
+    if not thumb_path and _is_video(filename):
+        thumb_path = await ensure_video_thumbnail(_media_root, size, folder, filename)
+
     if not thumb_path:
         raise HTTPException(status_code=404, detail="Thumbnail not available")
 
-    return FileResponse(thumb_path, media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
+    return FileResponse(
+        thumb_path,
+        media_type="image/webp",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/api/lqip/{folder:path}/{filename}")
+async def serve_lqip(folder: str, filename: str, user: UserContext = Depends(require_auth)):
+    """Return a tiny base64 blur placeholder for progressive image loading.
+
+    Returns JSON: {"blur": "data:image/webp;base64,..."} or {"blur": null}.
+    """
+    if not _media_root:
+        return JSONResponse({"blur": None})
+
+    # Chat-level access check
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None:
+        try:
+            media_chat_id = int(folder.split("/")[0])
+            if media_chat_id not in user_chat_ids:
+                raise HTTPException(status_code=403, detail="Access denied")
+        except ValueError:
+            pass
+
+    from .thumbnails import generate_lqip_base64
+
+    try:
+        blur = await generate_lqip_base64(_media_root, folder, filename)
+    except Exception:
+        blur = None
+
+    return JSONResponse(
+        {"blur": blur},
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/media/{path:path}")
@@ -738,7 +924,7 @@ async def serve_media(path: str, download: int = Query(0), user: UserContext = D
     candidate = _media_root / path
     try:
         resolved = candidate.resolve(strict=True)
-    except OSError, ValueError:
+    except (OSError, ValueError):
         raise HTTPException(status_code=404, detail="File not found")
     if not resolved.is_relative_to(_media_root):
         raise HTTPException(status_code=403, detail="Access denied")
@@ -763,6 +949,50 @@ async def serve_media(path: str, download: int = Query(0), user: UserContext = D
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """Serve the main application page."""
+    return FileResponse(
+        templates_dir / "index.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
+@app.get("/chat/{chat_id}", response_class=HTMLResponse)
+async def permalink_page(
+    chat_id: int,
+    request: Request,
+    auth_cookie: str | None = Cookie(default=None, alias=AUTH_COOKIE_NAME),
+):
+    """Serve viewer page for permalink URLs. Auth + chat access check."""
+    if AUTH_ENABLED:
+        if not auth_cookie:
+            redirect = f"/chat/{chat_id}"
+            msg = request.query_params.get("msg", "")
+            if msg:
+                redirect += f"?msg={msg}"
+            return HTMLResponse(
+                status_code=302,
+                headers={"Location": f"/?redirect={quote(redirect)}"},
+            )
+        session = await _resolve_session(auth_cookie)
+        if not session or time.time() - session.created_at > AUTH_SESSION_SECONDS:
+            redirect = f"/chat/{chat_id}"
+            msg = request.query_params.get("msg", "")
+            if msg:
+                redirect += f"?msg={msg}"
+            return HTMLResponse(
+                status_code=302,
+                headers={"Location": f"/?redirect={quote(redirect)}"},
+            )
+        # Return 403 for both not-found and forbidden (prevents enumeration)
+        user_chat_ids = get_user_chat_ids(
+            UserContext(
+                role=session.role,
+                username=session.username,
+                allowed_chat_ids=session.allowed_chat_ids,
+                no_download=session.no_download,
+            )
+        )
+        if user_chat_ids is not None and chat_id not in user_chat_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
     return FileResponse(
         templates_dir / "index.html",
         headers={"Cache-Control": "no-cache, must-revalidate"},
@@ -836,7 +1066,7 @@ async def login(request: Request):
                 if viewer["allowed_chat_ids"]:
                     try:
                         allowed = set(json.loads(viewer["allowed_chat_ids"]))
-                    except json.JSONDecodeError, TypeError:
+                    except (json.JSONDecodeError, TypeError):
                         allowed = None
 
                 viewer_no_download = bool(viewer.get("no_download", 0))
@@ -985,7 +1215,7 @@ async def auth_via_token(request: Request):
     if token_record["allowed_chat_ids"]:
         try:
             allowed = set(json.loads(token_record["allowed_chat_ids"]))
-        except json.JSONDecodeError, TypeError:
+        except (json.JSONDecodeError, TypeError):
             allowed = None
 
     token_no_download = bool(token_record.get("no_download", 0))
@@ -1207,6 +1437,84 @@ async def get_pinned_messages(chat_id: int, user: UserContext = Depends(require_
     except Exception as e:
         logger.error(f"Error fetching pinned messages: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/chats/{chat_id}/messages/{msg_id}/context")
+async def get_message_context(
+    chat_id: int,
+    msg_id: int,
+    user: UserContext = Depends(require_auth),
+):
+    """Get messages around a target message for permalink navigation."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        result = await db.get_messages_around(chat_id, msg_id, count=50)
+        if not result:
+            raise HTTPException(status_code=403, detail="Access denied")
+        return {"messages": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching message context: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/search")
+async def search_messages_global(
+    q: str,
+    chat_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: UserContext = Depends(require_auth),
+):
+    """Cross-chat FTS5 search with access control. Falls back to ILIKE."""
+    limit = min(max(limit, 1), 200)
+    offset = max(offset, 0)
+    if len(q) > 200:
+        raise HTTPException(status_code=400, detail="Query too long (max 200 chars)")
+    if not q.strip():
+        return {"results": [], "total": 0, "method": "none", "has_more": False}
+
+    allowed_chat_ids = get_user_chat_ids(user)
+    status = await db.get_fts_status()
+
+    if status == "ready":
+        results = await db.search_messages_fts(q, chat_id, allowed_chat_ids, limit, offset)
+        total = await db.count_fts_matches(q, chat_id, allowed_chat_ids)
+        method = "fts"
+    else:
+        # Fallback: per-chat ILIKE only (cross-chat not supported without FTS)
+        if chat_id is None:
+            return {
+                "results": [],
+                "total": 0,
+                "method": "ilike",
+                "has_more": False,
+                "fts_status": status or "not_initialized",
+            }
+        # Access control: verify user can access this chat
+        if allowed_chat_ids is not None and chat_id not in allowed_chat_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
+        results = await db.get_messages_paginated(chat_id, limit, offset, search=q)
+        total = len(results)
+        method = "ilike"
+
+    return {
+        "results": results,
+        "total": total,
+        "method": method,
+        "has_more": len(results) == limit,
+    }
+
+
+@app.get("/api/fts/status")
+async def get_fts_status(user: UserContext = Depends(require_auth)):
+    """Get current FTS index build status."""
+    status = await db.get_fts_status()
+    return {"status": status or "not_initialized"}
 
 
 @app.get("/api/folders")
@@ -1553,6 +1861,22 @@ async def export_chat(chat_id: int, user: UserContext = Depends(require_auth)):
 
 
 # ============================================================================
+# Listener Status Endpoint
+# ============================================================================
+
+
+@app.get("/api/admin/listener-status")
+async def get_listener_status(user: UserContext = Depends(require_master)):
+    """Return current Telegram listener mode, status, and viewer count."""
+    return {
+        "mode": config.listener_mode,
+        "status": listener_manager.status,
+        "grace_period": config.listener_grace_period,
+        "viewer_count": len(ws_manager.active_connections),
+    }
+
+
+# ============================================================================
 # Admin Endpoints (v7.0.0) — Master-only viewer account management
 # ============================================================================
 
@@ -1610,7 +1934,7 @@ async def create_viewer(request: Request, user: UserContext = Depends(require_ma
     if allowed_chat_ids is not None:
         try:
             chat_ids_json = json.dumps([int(cid) for cid in allowed_chat_ids])
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="Invalid chat ID format")
 
     account = await db.create_viewer_account(
@@ -1668,7 +1992,7 @@ async def update_viewer(viewer_id: int, request: Request, user: UserContext = De
         else:
             try:
                 updates["allowed_chat_ids"] = json.dumps([int(cid) for cid in allowed])
-            except ValueError, TypeError:
+            except (ValueError, TypeError):
                 raise HTTPException(status_code=400, detail="Invalid chat ID format")
 
     if "is_active" in data:
@@ -1807,7 +2131,7 @@ async def create_token(request: Request, user: UserContext = Depends(require_mas
 
     try:
         chat_ids_json = json.dumps([int(cid) for cid in allowed_chat_ids])
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid chat ID format")
 
     # Generate token: 32 bytes = 64 hex chars
@@ -1861,7 +2185,7 @@ async def update_token(token_id: int, request: Request, user: UserContext = Depe
             raise HTTPException(status_code=400, detail="allowed_chat_ids must be a list")
         try:
             updates["allowed_chat_ids"] = json.dumps([int(cid) for cid in allowed])
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="Invalid chat ID format")
     if "is_revoked" in data:
         updates["is_revoked"] = 1 if data["is_revoked"] else 0
@@ -2007,6 +2331,7 @@ async def websocket_endpoint(websocket: WebSocket):
         ws_user_chat_ids = get_user_chat_ids(user_ctx)
 
     await ws_manager.connect(websocket, allowed_chat_ids=ws_user_chat_ids)
+    await listener_manager.on_viewer_connect(len(ws_manager.active_connections))
 
     try:
         while True:
@@ -2030,9 +2355,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
+        await listener_manager.on_viewer_disconnect(len(ws_manager.active_connections))
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         ws_manager.disconnect(websocket)
+        await listener_manager.on_viewer_disconnect(len(ws_manager.active_connections))
 
 
 # ============================================================================

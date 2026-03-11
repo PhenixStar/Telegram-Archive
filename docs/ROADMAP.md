@@ -30,10 +30,10 @@ For version history and changes, see [CHANGELOG.md](./CHANGELOG.md).
 
 ### Viewer Polish
 
-- [ ] Custom themes (light mode, OLED dark, Telegram classic)
+- [x] Custom themes (light mode, OLED dark, Telegram classic) — v7.3.0
 - [ ] Voice message player with waveform visualization
-- [ ] Keyboard shortcuts (j/k navigation, Esc to close, etc.)
-- [ ] Message deep links (shareable URLs to specific messages)
+- [x] Keyboard shortcuts (j/k navigation, Esc to close, etc.) — v7.3.0
+- [x] Message deep links (shareable URLs to specific messages) — v7.3.0
 - [ ] i18n / localization (viewer is English-only currently)
 
 ### Developer Experience
@@ -45,13 +45,22 @@ For version history and changes, see [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-## v7.0.0 — Search & Discovery
+## v7.3.0 — Viewer Advanced Features (In Progress)
 
 ### Full-text Search
 
-- [ ] Elasticsearch or Meilisearch integration for full-text search across all messages
+- [x] SQLite FTS5 native full-text search (v7.3.0)
+- [x] `/api/search` endpoint with FTS5 + ILIKE fallback (v7.3.0)
+- [ ] Elasticsearch or Meilisearch integration (future: post-v7.3)
 - [ ] Semantic search (find by meaning, not just keywords)
 - [ ] Advanced filters: date range, media type, sender, has:link, has:media
+
+### Viewer UX Improvements
+
+- [x] 7 themes (6 dark + 1 light) with auto-detect (v7.3.0)
+- [x] Context menus (message, chat, lightbox) (v7.3.0)
+- [x] Keyboard navigation & shortcuts (v7.3.0)
+- [x] Message permalinks & copy link (v7.3.0)
 
 ---
 
@@ -196,6 +205,11 @@ Features that were previously on this roadmap and have been implemented:
 | Ruff linter/formatter | v6.2.3 | CI enforcement + pre-commit hooks |
 | Security hardening | v6.2.3 | CSP, CORS, secure cookies, container hardening |
 | PBKDF2 auth tokens | v6.2.4 | Replaced weak SHA256 hashing |
+| Full-text search (FTS5) | v7.3.0 | SQLite-native search with ILIKE fallback |
+| Theme system (7 themes) | v7.3.0 | 6 dark + 1 light with auto-detect |
+| Keyboard navigation | v7.3.0 | j/k shortcuts, arrow keys, Esc handling |
+| Context menus | v7.3.0 | Right-click on messages, chats, and lightbox |
+| Message permalinks | v7.3.0 | Shareable deep links to specific messages |
 
 ---
 
