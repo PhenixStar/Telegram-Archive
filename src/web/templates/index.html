@@ -3929,7 +3929,7 @@
                 const searchMatchCount = ref(0)
                 const searchMatchIndex = ref(-1)
                 const searchInput = ref(null)
-                let searchDebounceTimer = null
+                let msgSearchDebounceTimer = null
                 let searchAbortCtrl = null
 
                 const toggleSearchBar = () => {
@@ -3942,9 +3942,9 @@
                 }
 
                 const handleSearchInput = () => {
-                    clearTimeout(searchDebounceTimer)
+                    clearTimeout(msgSearchDebounceTimer)
                     if (searchAbortCtrl) searchAbortCtrl.abort()
-                    searchDebounceTimer = setTimeout(async () => {
+                    msgSearchDebounceTimer = setTimeout(async () => {
                         const q = msgSearchQuery.value.trim()
                         if (!q) { clearSearchHighlights(); searchMatchCount.value = 0; searchMatchIndex.value = -1; return }
                         if (!selectedChat.value) return
@@ -4019,7 +4019,7 @@
                 }
 
                 const clearMsgSearch = () => {
-                    clearTimeout(searchDebounceTimer)
+                    clearTimeout(msgSearchDebounceTimer)
                     if (searchAbortCtrl) searchAbortCtrl.abort()
                     searchBarVisible.value = false
                     const hadQuery = !!msgSearchQuery.value
