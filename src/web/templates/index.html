@@ -415,11 +415,8 @@
             grid-row: span 2;
         }
 
-        /* Render optimization for large message lists */
-        .msg-date-group {
-            content-visibility: auto;
-            contain-intrinsic-size: auto 300px;
-        }
+        /* msg-date-group: no containment — flex-col-reverse is incompatible
+           with content-visibility and contain:content */
 
         /* Light theme form contrast */
         [data-theme^="light"] input, [data-theme^="light"] select, [data-theme^="light"] textarea {
@@ -1122,9 +1119,9 @@
                     </div>
 
                     <!-- Messages - uses flex-col-reverse for instant scroll-to-bottom -->
-                    <div class="flex-1 relative min-h-0 flex flex-col">
-                    <!-- Search bar (sticky top) -->
-                    <div v-show="searchBarVisible" class="flex items-center gap-2 px-3 py-2 border-b" style="background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 10;">
+                    <div class="flex-1 relative min-h-0">
+                    <!-- Search bar (absolute overlay at top) -->
+                    <div v-show="searchBarVisible" class="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2 border-b shadow-lg" style="background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 20;">
                         <i class="fas fa-search text-xs" style="color: var(--tg-muted);"></i>
                         <input ref="searchInput" v-model="msgSearchQuery" @input="handleSearchInput" @keydown.enter.prevent="navigateSearchMatch(1)" @keydown.escape.prevent="clearMsgSearch" type="text" placeholder="Search messages..." class="flex-1 bg-transparent text-sm outline-none" style="color: var(--tg-text);">
                         <span v-if="msgSearchQuery && searchMatchCount >= 0" class="text-xs whitespace-nowrap" style="color: var(--tg-muted);">
@@ -1134,7 +1131,7 @@
                         <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Next match"><i class="fas fa-chevron-down text-xs"></i></button>
                         <button @click="clearMsgSearch" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Close search"><i class="fas fa-times text-xs"></i></button>
                     </div>
-                    <div ref="messagesContainer" class="flex-1 h-0 overflow-y-auto overflow-x-hidden p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll">
+                    <div ref="messagesContainer" class="h-full overflow-y-auto overflow-x-hidden p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll">
                         <div v-if="loading && messages.length === 0" class="text-center py-4 text-tg-muted">
                             Loading messages...
                         </div>
@@ -1142,14 +1139,14 @@
                         <template v-for="(msg, index) in sortedMessages" :key="msg.id">
                             <!-- Service Message (chat actions like photo changed, user joined, etc) -->
                             <!-- v6.0.0: Service type moved to raw_data.service_type -->
-                            <div v-if="msg.raw_data?.service_type === 'service'" class="msg-date-group flex justify-center my-2">
+                            <div v-if="msg.raw_data?.service_type === 'service'" class="flex justify-center my-2">
                                 <div class="service-message px-4 py-1.5 rounded-full text-xs text-center max-w-[80%]"
                                     style="background: rgba(0,0,0,0.3); color: rgba(255,255,255,0.8);">
                                     {{ msg.text }}
                                 </div>
                             </div>
                             <!-- Regular Message (hide duplicate album messages - only show first in group) -->
-                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="msg-date-group flex min-w-0 overflow-hidden" :class="isOwnMessage(msg) ? 'justify-end' : 'justify-start'">
+                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="flex" :class="isOwnMessage(msg) ? 'justify-end' : 'justify-start'">
                                 <div class="message-bubble group relative p-3 text-sm shadow-sm text-gray-100"
                                     :class="isOwnMessage(msg) ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md'"
                                     :style="getSenderStyle(msg)"
