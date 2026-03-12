@@ -614,57 +614,9 @@
                 <div class="flex items-center gap-2 px-3 py-1 border-b border-gray-700">
                     <span v-if="authRequired && isAuthenticated" class="text-xs text-gray-400 truncate flex-1">{{ currentUsername }}</span>
                     <span v-else class="flex-1"></span>
-                    <!-- Theme Selector -->
-                    <div class="relative">
-                        <button @click="themeDropdownOpen = !themeDropdownOpen" class="text-gray-400 hover:text-white p-1" title="Theme" aria-label="Change theme">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
-                            </svg>
-                        </button>
-                        <div v-if="themeDropdownOpen" @click="themeDropdownOpen = false" class="fixed inset-0 z-40"></div>
-                        <div v-if="themeDropdownOpen" class="absolute right-0 top-full mt-1 z-50 rounded-lg shadow-xl py-1 min-w-[180px]" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                            <!-- Auto detect -->
-                            <button @click="toggleThemeAutoDetect()"
-                                class="w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 hover:bg-white/10"
-                                :style="{ color: themeAutoDetect ? 'var(--tg-accent)' : 'var(--tg-muted)' }">
-                                <i class="fas fa-magic w-3 text-center text-[10px]"></i>
-                                <span>Auto (System)</span>
-                                <svg v-if="themeAutoDetect" class="w-3 h-3 ml-auto" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                                </svg>
-                            </button>
-                            <div class="mx-2 my-1 border-t" style="border-color: var(--tg-border);"></div>
-                            <!-- Dark themes -->
-                            <div class="px-3 py-0.5 text-[9px] uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Dark</div>
-                            <button v-for="t in themePresets.filter(x => x.type === 'dark')" :key="t.id" @click="setTheme(t.id)"
-                                class="w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 hover:bg-white/10"
-                                :style="{ color: currentTheme === t.id ? 'var(--tg-text)' : 'var(--tg-muted)' }">
-                                <span class="w-3 h-3 rounded-full shrink-0 border" style="border-color: var(--tg-border);" :style="{ backgroundColor: t.preview }"></span>
-                                <span>{{ t.label }}</span>
-                                <svg v-if="currentTheme === t.id" class="w-3 h-3 ml-auto" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                                </svg>
-                            </button>
-                            <div class="mx-2 my-1 border-t" style="border-color: var(--tg-border);"></div>
-                            <!-- Light themes -->
-                            <div class="px-3 py-0.5 text-[9px] uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Light</div>
-                            <button v-for="t in themePresets.filter(x => x.type === 'light')" :key="t.id" @click="setTheme(t.id)"
-                                class="w-full px-3 py-1.5 text-left text-xs transition-colors flex items-center gap-2 hover:bg-white/10"
-                                :style="{ color: currentTheme === t.id ? 'var(--tg-text)' : 'var(--tg-muted)' }">
-                                <span class="w-3 h-3 rounded-full shrink-0 border" style="border-color: var(--tg-border);" :style="{ backgroundColor: t.preview }"></span>
-                                <span>{{ t.label }}</span>
-                                <svg v-if="currentTheme === t.id" class="w-3 h-3 ml-auto" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
                     <!-- Settings (all users) -->
-                    <button @click="showSettingsModal = !showSettingsModal" class="p-1" style="color: var(--tg-muted);" title="Settings" aria-label="Display settings">
-                        <i class="fas fa-sliders-h text-xs"></i>
-                    </button>
-                    <button v-if="authRequired && isAuthenticated && userRole === 'master'" @click="openAdminPanel" class="text-gray-400 hover:text-white p-1" title="Admin Settings" aria-label="Admin settings">
-                        <i class="fas fa-cog"></i>
+                    <button @click="openSettings()" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Settings" aria-label="Settings">
+                        <i class="fas fa-cog text-xs"></i>
                     </button>
                     <button v-if="authRequired && isAuthenticated" @click="performLogout" class="text-gray-400 hover:text-red-400 p-1" title="Logout" aria-label="Sign out">
                         <i class="fas fa-sign-out-alt"></i>
@@ -1075,17 +1027,45 @@
                             </div>
                         </div>
 
-                        <div class="flex items-center gap-1 sm:gap-2 shrink-0">
-                            <!-- Search Bar - responsive width -->
-                            <div class="relative w-28 sm:w-48 md:w-64">
-                                <input v-model="messageSearchQuery" @input="searchMessages" type="text"
-                                    placeholder="Search..."
-                                    class="w-full bg-gray-900 text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
-                                    stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                                </svg>
+                        <div class="flex items-center gap-1 sm:gap-2 shrink-0 flex-wrap">
+                            <div class="flex items-center gap-1">
+                                <!-- Search Bar - responsive width -->
+                                <div class="relative w-28 sm:w-48 md:w-64">
+                                    <input v-model="messageSearchQuery" @input="searchMessages" type="text"
+                                        placeholder="Search..."
+                                        class="w-full bg-gray-900 text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
+                                        stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                    </svg>
+                                </div>
+                                <!-- Advanced search toggle -->
+                                <button @click="showAdvancedSearch = !showAdvancedSearch"
+                                    :class="showAdvancedSearch ? 'text-blue-400' : 'text-gray-400'"
+                                    class="p-1.5 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                                    title="Advanced search">
+                                    <i class="fas fa-sliders-h text-xs"></i>
+                                </button>
+                            </div>
+
+                            <!-- Advanced search date fields (collapsed by default) -->
+                            <div v-if="showAdvancedSearch"
+                                 class="flex items-center gap-2 w-full mt-1 sm:mt-0 sm:w-auto">
+                                <input v-model="searchDateFrom" type="date"
+                                    @change="searchMessages"
+                                    class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                                    title="From date">
+                                <span class="text-gray-500 text-xs">&mdash;</span>
+                                <input v-model="searchDateTo" type="date"
+                                    @change="searchMessages"
+                                    class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                                    title="To date">
+                                <button v-if="searchDateFrom || searchDateTo"
+                                    @click="searchDateFrom = ''; searchDateTo = ''; searchMessages()"
+                                    class="text-gray-400 hover:text-white text-xs px-1" title="Clear dates">
+                                    <i class="fas fa-times"></i>
+                                </button>
                             </div>
 
                             <!-- Export Button - always visible -->
@@ -1181,6 +1161,13 @@
                         <button @click="clearMsgSearch" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Close search"><i class="fas fa-times text-xs"></i></button>
                     </div>
                     <div ref="messagesContainer" class="h-full overflow-y-auto overflow-x-hidden p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll">
+                        <!-- v9.0: Newer messages sentinel (visual bottom in flex-col-reverse = first DOM child) -->
+                        <div v-if="contextMode && hasMoreNewer && !loadingNewer && messages.length > 0"
+                             ref="loadNewerSentinel" class="h-1 w-full"></div>
+                        <div v-if="loadingNewer" class="flex justify-center py-4">
+                            <div class="loading-spinner"></div>
+                        </div>
+
                         <div v-if="loading && messages.length === 0" class="text-center py-4 text-tg-muted">
                             Loading messages...
                         </div>
@@ -1538,37 +1525,9 @@
                     </button>
                 </div>
 
-                <!-- Model Selector -->
-                <div class="px-4 py-3 border-b" style="border-color: var(--tg-border);">
-                    <label class="text-xs font-medium mb-1.5 block" style="color: var(--tg-muted);">Model</label>
-                    <select v-model="aiSelectedModel" class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/50" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                        <option value="auto">Auto (server default)</option>
-                        <optgroup label="Z-AI / GLM">
-                            <option value="GLM-5">GLM-5</option>
-                            <option value="GLM-4.7">GLM-4.7</option>
-                            <option value="GLM-4.5-Air">GLM-4.5 Air</option>
-                        </optgroup>
-                        <optgroup label="MiniMax">
-                            <option value="MiniMax-M2.5">MiniMax M2.5</option>
-                            <option value="MiniMax-M2.5-highspeed">MiniMax M2.5 Highspeed</option>
-                        </optgroup>
-                    </select>
-                </div>
-
-                <!-- AI Tools Tabs -->
-                <div class="flex border-b" style="border-color: var(--tg-border);">
-                    <button v-for="tab in aiTabs" :key="tab.id" @click="aiActiveTab = tab.id"
-                        class="flex-1 px-3 py-2.5 text-xs font-medium transition-colors relative"
-                        :style="aiActiveTab === tab.id ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'">
-                        <i :class="tab.icon" class="mr-1"></i>{{ tab.label }}
-                        <div v-if="aiActiveTab === tab.id" class="absolute bottom-0 left-2 right-2 h-0.5 rounded-t" style="background: var(--tg-accent);"></div>
-                    </button>
-                </div>
-
-                <!-- Tab Content -->
+                <!-- Chat Content -->
                 <div class="flex-1 overflow-y-auto">
-                    <!-- Chat Tab: AI conversation -->
-                    <div v-if="aiActiveTab === 'chat'" class="flex flex-col h-full">
+                    <div class="flex flex-col h-full">
                         <div class="flex-1 overflow-y-auto p-4 space-y-3">
                             <div v-if="aiMessages.length === 0" class="text-center py-8">
                                 <svg class="w-12 h-12 mx-auto mb-3 opacity-30" style="color: var(--tg-muted);" fill="currentColor" viewBox="0 0 24 24">
@@ -1628,92 +1587,7 @@
                         </div>
                     </div>
 
-                    <!-- Sort Tab: Chat history sorting -->
-                    <div v-if="aiActiveTab === 'sort'" class="p-4 space-y-4">
-                        <div>
-                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Sort Messages By</label>
-                            <div class="space-y-1.5">
-                                <button v-for="opt in aiSortOptions" :key="opt.id" @click="aiSortBy = opt.id"
-                                    class="w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2 transition-colors"
-                                    :style="aiSortBy === opt.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
-                                    <i :class="opt.icon" class="w-4 text-center"></i>
-                                    <span>{{ opt.label }}</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Filter</label>
-                            <div class="space-y-1.5">
-                                <button v-for="f in aiFilterOptions" :key="f.id" @click="toggleAiFilter(f.id)"
-                                    class="w-full text-left px-3 py-2 rounded-lg text-xs flex items-center gap-2 transition-colors"
-                                    :style="aiActiveFilters.includes(f.id) ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
-                                    <i :class="f.icon" class="w-4 text-center"></i>
-                                    <span>{{ f.label }}</span>
-                                </button>
-                            </div>
-                        </div>
-                        <button @click="applyAiSort" class="w-full py-2.5 rounded-lg text-sm font-medium transition-colors" style="background: var(--tg-accent); color: #fff;">
-                            <i class="fas fa-check mr-1.5"></i>Apply Sort & Filter
-                        </button>
-                    </div>
-
-                    <!-- Auto-Reply Tab -->
-                    <div v-if="aiActiveTab === 'auto'" class="p-4 space-y-4">
-                        <div class="rounded-xl p-4" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                            <div class="flex items-center justify-between mb-3">
-                                <span class="text-sm font-medium" style="color: var(--tg-text);">Auto-Reply</span>
-                                <button @click="aiAutoReplyEnabled = !aiAutoReplyEnabled"
-                                    class="w-10 h-5 rounded-full transition-colors relative"
-                                    :style="aiAutoReplyEnabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
-                                    <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
-                                        :class="aiAutoReplyEnabled ? 'translate-x-5' : 'translate-x-0.5'"></span>
-                                </button>
-                            </div>
-                            <p class="text-xs mb-3" style="color: var(--tg-muted);">When enabled, AI will draft or send replies automatically when you're away.</p>
-                            <div class="space-y-3">
-                                <div>
-                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Mode</label>
-                                    <select v-model="aiAutoReplyMode" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <option value="draft">Draft only (review before sending)</option>
-                                        <option value="auto">Auto-send after delay</option>
-                                    </select>
-                                </div>
-                                <div v-if="aiAutoReplyMode === 'auto'">
-                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Delay before sending</label>
-                                    <select v-model="aiAutoReplyDelay" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <option value="30">30 seconds</option>
-                                        <option value="60">1 minute</option>
-                                        <option value="300">5 minutes</option>
-                                        <option value="900">15 minutes</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Persona / Tone</label>
-                                    <select v-model="aiAutoReplyTone" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <option value="professional">Professional</option>
-                                        <option value="friendly">Friendly</option>
-                                        <option value="concise">Concise</option>
-                                        <option value="custom">Custom instructions...</option>
-                                    </select>
-                                </div>
-                                <div v-if="aiAutoReplyTone === 'custom'">
-                                    <textarea v-model="aiAutoReplyCustom" rows="3" placeholder="Describe how AI should reply on your behalf..."
-                                        class="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none"
-                                        style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);"></textarea>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="rounded-xl p-4" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                            <div class="text-sm font-medium mb-2" style="color: var(--tg-text);">Status</div>
-                            <div class="flex items-center gap-2 text-xs" style="color: var(--tg-muted);">
-                                <span class="w-2 h-2 rounded-full" :style="aiAutoReplyEnabled ? 'background: #22c55e;' : 'background: var(--tg-border);'"></span>
-                                {{ aiAutoReplyEnabled ? 'Active — monitoring for new messages' : 'Disabled' }}
-                            </div>
-                            <div v-if="aiAutoReplyEnabled" class="mt-2 text-xs" style="color: var(--tg-muted);">
-                                Drafts pending: {{ aiDraftCount }}
-                            </div>
-                        </div>
-                    </div>
+                    <!-- Sort & Auto-Reply tabs moved to Settings > AI -->
                 </div>
             </div>
             </transition>
@@ -1813,278 +1687,7 @@
             </div>
         </div>
 
-        <!-- Admin Panel (v7.0.0) -->
-        <div v-if="showAdminPanel" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-            <div class="rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col" style="background: var(--tg-sidebar);">
-                <!-- Header -->
-                <div class="flex items-center justify-between px-6 py-4" style="border-bottom: 1px solid var(--tg-border);">
-                    <h2 class="text-lg font-semibold" style="color: var(--tg-text);">Admin Settings</h2>
-                    <button @click="showAdminPanel = false" class="hover:opacity-80" style="color: var(--tg-muted);">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-
-                <!-- Tabs -->
-                <div class="flex px-6" style="border-bottom: 1px solid var(--tg-border);">
-                    <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                        Viewer Accounts
-                    </button>
-                    <button @click="adminActiveTab = 'tokens'; loadAdminTokens()" :class="adminActiveTab === 'tokens' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                        Share Tokens
-                    </button>
-                    <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                        Audit Log
-                    </button>
-                    <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                        Listener
-                    </button>
-                </div>
-
-                <!-- Content -->
-                <div class="flex-1 overflow-y-auto p-6">
-                    <!-- Viewers Tab -->
-                    <div v-if="adminActiveTab === 'viewers'">
-                        <!-- Create/Edit Form -->
-                        <div class="rounded-lg p-4 mb-4" style="background: var(--tg-bg);">
-                            <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">{{ adminEditingId ? 'Edit Viewer' : 'Create Viewer' }}</h3>
-                            <div v-if="adminError" class="text-red-400 text-sm mb-3">{{ adminError }}</div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <input v-model="adminViewerForm.username" :disabled="!!adminEditingId" placeholder="Username" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
-                                <input v-model="adminViewerForm.password" type="password" :placeholder="adminEditingId ? 'New password (leave empty to keep)' : 'Password'" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
-                            </div>
-                            <div class="mt-3">
-                                <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats (none selected = access to all chats)</label>
-                                <input v-model="adminChatFilter" type="text" placeholder="Filter chats..."
-                                    class="w-full rounded px-3 py-1.5 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                    style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"
-                                    autocomplete="off" spellcheck="false">
-                                <div class="flex gap-2 mb-1">
-                                    <button type="button" @click="adminViewerForm.allowed_chat_ids = adminChats.map(c => c.id)" class="text-xs text-blue-400 hover:text-blue-300">Select all</button>
-                                    <button type="button" @click="adminViewerForm.allowed_chat_ids = []" class="text-xs hover:opacity-80" style="color: var(--tg-muted);">Deselect all</button>
-                                    <span class="text-xs ml-auto" style="color: var(--tg-muted);">{{ adminViewerForm.allowed_chat_ids.length }} of {{ adminChats.length }} selected</span>
-                                </div>
-                                <div class="flex flex-wrap gap-1 rounded p-2 max-h-48 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                                    <label v-for="chat in filteredAdminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
-                                        <input type="checkbox" :value="chat.id" v-model="adminViewerForm.allowed_chat_ids" class="rounded" />
-                                        {{ chat.title || chat.id }}
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="mt-3 flex items-center gap-4">
-                                <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
-                                    <input type="checkbox" v-model="adminViewerForm.is_active" class="rounded" /> Active
-                                </label>
-                                <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
-                                    <input type="checkbox" v-model="adminViewerForm.no_download" class="rounded" /> No Downloads
-                                </label>
-                                <div class="flex-1"></div>
-                                <button v-if="adminEditingId" @click="cancelEdit" class="px-3 py-1.5 text-sm" style="color: var(--tg-muted);">Cancel</button>
-                                <button @click="saveViewer" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">
-                                    {{ adminEditingId ? 'Update' : 'Create' }}
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Viewers List -->
-                        <div class="space-y-2">
-                            <div v-for="viewer in adminViewers" :key="viewer.id" class="flex items-center gap-3 rounded-lg p-3" style="background: var(--tg-bg);">
-                                <div class="flex-1">
-                                    <div class="text-sm font-medium" style="color: var(--tg-text);">{{ viewer.username }}</div>
-                                    <div class="text-xs" style="color: var(--tg-muted);">
-                                        <template v-if="viewer.allowed_chat_ids && viewer.allowed_chat_ids.length">
-                                            {{ viewer.allowed_chat_ids.map(id => { const c = adminChats.find(ch => ch.id === id); return c ? c.title : id }).join(', ') }}
-                                        </template>
-                                        <template v-else>All chats</template>
-                                        · {{ viewer.is_active ? 'Active' : 'Inactive' }}
-                                        <template v-if="viewer.no_download"> · <span class="text-amber-400">No DL</span></template>
-                                    </div>
-                                </div>
-                                <button @click="editViewer(viewer)" class="p-1 hover:text-blue-400" style="color: var(--tg-muted);"><i class="fas fa-edit"></i></button>
-                                <button @click="deleteViewer(viewer)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);"><i class="fas fa-trash"></i></button>
-                            </div>
-                            <div v-if="adminViewers.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No viewer accounts yet</div>
-                        </div>
-                    </div>
-
-                    <!-- Share Tokens Tab (v7.2.0) -->
-                    <div v-if="adminActiveTab === 'tokens'">
-                        <!-- Create Token Form -->
-                        <div class="rounded-lg p-4 mb-4" style="background: var(--tg-bg);">
-                            <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Create Share Token</h3>
-                            <div v-if="adminTokenError" class="text-red-400 text-sm mb-3">{{ adminTokenError }}</div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <input v-model="adminTokenForm.label" placeholder="Label (optional)" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
-                                <input v-model="adminTokenForm.expires_at" type="datetime-local" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
-                            </div>
-                            <div class="mt-3">
-                                <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats (required — tokens must be scoped)</label>
-                                <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                                    <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
-                                        <input type="checkbox" :value="chat.id" v-model="adminTokenForm.allowed_chat_ids" class="rounded" />
-                                        {{ chat.title || chat.id }}
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="mt-3 flex items-center gap-4">
-                                <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
-                                    <input type="checkbox" v-model="adminTokenForm.no_download" class="rounded" /> No Downloads
-                                </label>
-                                <div class="flex-1"></div>
-                                <button @click="createToken" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">
-                                    Create Token
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Newly created token (shown once) -->
-                        <div v-if="adminNewToken" class="bg-green-900/50 border border-green-600 rounded-lg p-4 mb-4">
-                            <div class="text-sm text-green-300 mb-2">Token created! Copy it now — it won't be shown again.</div>
-                            <div class="space-y-2">
-                                <div>
-                                    <div class="text-xs text-gray-400 mb-1">Token</div>
-                                    <div class="flex items-center gap-2">
-                                        <code class="flex-1 bg-gray-900 text-green-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewToken }}</code>
-                                        <button @click="navigator.clipboard.writeText(adminNewToken)" class="px-3 py-2 bg-green-700 hover:bg-green-600 text-white text-xs rounded shrink-0">Copy</button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="text-xs text-gray-400 mb-1">Shareable Link</div>
-                                    <div class="flex items-center gap-2">
-                                        <code class="flex-1 bg-gray-900 text-blue-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewTokenUrl }}</code>
-                                        <button @click="navigator.clipboard.writeText(adminNewTokenUrl); adminNewToken = ''" class="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded shrink-0">Copy Link</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Tokens List -->
-                        <div class="space-y-2">
-                            <div v-for="token in adminTokens" :key="token.id" class="rounded-lg p-3" style="background: var(--tg-bg);">
-                                <!-- View mode -->
-                                <div v-if="editingTokenId !== token.id">
-                                    <div class="flex items-center gap-3">
-                                        <div class="flex-1 min-w-0">
-                                            <div class="text-sm font-medium" style="color: var(--tg-text);">{{ token.label || `Token #${token.id}` }}</div>
-                                            <div class="text-xs" style="color: var(--tg-muted);">
-                                                <template v-if="token.allowed_chat_ids && token.allowed_chat_ids.length">
-                                                    {{ token.allowed_chat_ids.map(id => { const c = adminChats.find(ch => ch.id === id); return c ? c.title : id }).join(', ') }}
-                                                </template>
-                                                · Used {{ token.use_count || 0 }}x
-                                                <template v-if="token.last_used_at"> · Last: {{ new Date(token.last_used_at).toLocaleDateString() }}</template>
-                                                <template v-if="token.expires_at"> · Exp: {{ new Date(token.expires_at).toLocaleDateString() }}</template>
-                                                <template v-if="token.no_download"> · <span class="text-amber-400">No DL</span></template>
-                                                <template v-if="token.is_revoked"> · <span class="text-red-400">Revoked</span></template>
-                                            </div>
-                                        </div>
-                                        <button @click="startEditToken(token)" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Edit"><i class="fas fa-pen text-xs"></i></button>
-                                        <button v-if="!token.is_revoked" @click="revokeToken(token)" class="p-1 hover:text-amber-400" style="color: var(--tg-muted);" title="Revoke"><i class="fas fa-ban"></i></button>
-                                        <button @click="deleteToken(token)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);" title="Delete"><i class="fas fa-trash"></i></button>
-                                    </div>
-                                </div>
-                                <!-- Edit mode -->
-                                <div v-else>
-                                    <div class="space-y-2">
-                                        <input v-model="editTokenForm.label" placeholder="Label" class="w-full rounded px-3 py-1.5 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
-                                        <div>
-                                            <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats</label>
-                                            <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                                                <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
-                                                    <input type="checkbox" :value="chat.id" v-model="editTokenForm.allowed_chat_ids" class="rounded" />
-                                                    {{ chat.title || chat.id }}
-                                                </label>
-                                            </div>
-                                        </div>
-                                        <div class="flex items-center gap-4">
-                                            <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
-                                                <input type="checkbox" v-model="editTokenForm.no_download" class="rounded" /> No Downloads
-                                            </label>
-                                            <div class="flex-1"></div>
-                                            <button @click="editingTokenId = null" class="px-3 py-1 text-sm rounded" style="color: var(--tg-muted);">Cancel</button>
-                                            <button @click="saveEditToken(token.id)" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">Save</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div v-if="adminTokens.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No share tokens yet</div>
-                        </div>
-                    </div>
-
-                    <!-- Audit Log Tab -->
-                    <div v-if="adminActiveTab === 'audit'">
-                        <!-- Action filter -->
-                        <div class="flex gap-2 mb-3">
-                            <select v-model="adminAuditAction" @change="loadAdminAudit()" class="rounded px-3 py-1.5 text-sm" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                <option value="">All actions</option>
-                                <option value="login_success">Login success</option>
-                                <option value="login_failed">Login failed</option>
-                                <option value="logout">Logout</option>
-                                <option value="token_auth_success">Token auth success</option>
-                                <option value="token_auth_failed">Token auth failed</option>
-                                <option value="viewer_created">Viewer created</option>
-                                <option value="viewer_updated">Viewer updated</option>
-                                <option value="viewer_deleted">Viewer deleted</option>
-                                <option value="token_created">Token created</option>
-                                <option value="token_updated">Token updated</option>
-                                <option value="token_deleted">Token deleted</option>
-                                <option value="setting_updated">Setting updated</option>
-                            </select>
-                        </div>
-                        <div class="space-y-1">
-                            <div v-for="log in adminAuditLogs" :key="log.id" class="flex items-center gap-3 text-xs rounded px-3 py-2" style="background: var(--tg-bg);">
-                                <span class="w-36 shrink-0" style="color: var(--tg-muted);">{{ new Date(log.created_at).toLocaleString() }}</span>
-                                <span :class="{'text-yellow-400': log.role === 'master', 'text-blue-400': log.role === 'viewer', 'text-purple-400': log.role === 'token'}" class="w-16 shrink-0">{{ log.role }}</span>
-                                <span class="w-24 shrink-0 truncate" style="color: var(--tg-text);">{{ log.username }}</span>
-                                <span class="flex-1 truncate" style="color: var(--tg-muted);">{{ log.action }}</span>
-                                <span class="truncate w-28" style="color: var(--tg-muted); opacity: 0.6;">{{ log.ip_address }}</span>
-                            </div>
-                            <div v-if="adminAuditLogs.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No audit logs yet</div>
-                        </div>
-                    </div>
-
-                    <!-- Listener Settings Tab -->
-                    <div v-if="adminActiveTab === 'listener'">
-                        <div class="space-y-4">
-                            <!-- Status display -->
-                            <div class="rounded-lg p-4" style="background: var(--tg-bg);">
-                                <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Listener Status</h3>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <span class="text-xs" style="color: var(--tg-muted);">Status</span>
-                                        <div class="flex items-center gap-2 mt-1">
-                                            <span class="w-2 h-2 rounded-full" :class="{
-                                                'bg-green-500': listenerInfo.status === 'running',
-                                                'bg-yellow-500 animate-pulse': listenerInfo.status === 'grace_period' || listenerInfo.status === 'starting',
-                                                'bg-gray-500': listenerInfo.status === 'stopped' || listenerInfo.status === 'stopping'
-                                            }"></span>
-                                            <span class="text-sm capitalize" style="color: var(--tg-text);">{{ listenerInfo.status || 'unknown' }}</span>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <span class="text-xs" style="color: var(--tg-muted);">Active Viewers</span>
-                                        <div class="text-sm mt-1" style="color: var(--tg-text);">{{ listenerInfo.viewer_count ?? 0 }}</div>
-                                    </div>
-                                    <div>
-                                        <span class="text-xs" style="color: var(--tg-muted);">Mode</span>
-                                        <div class="text-sm mt-1 capitalize" style="color: var(--tg-text);">{{ listenerInfo.mode || 'off' }}</div>
-                                    </div>
-                                    <div>
-                                        <span class="text-xs" style="color: var(--tg-muted);">Grace Period</span>
-                                        <div class="text-sm mt-1" style="color: var(--tg-text);">{{ listenerInfo.grace_period ?? 300 }}s</div>
-                                    </div>
-                                </div>
-                            </div>
-                            <!-- Mode info -->
-                            <div class="rounded-lg p-4 text-xs" style="background: var(--tg-bg); color: var(--tg-muted);">
-                                <p class="mb-2"><strong style="color: var(--tg-text);">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
-                                <p class="mb-2"><strong style="color: var(--tg-text);">always</strong> — Listener always runs (legacy behavior)</p>
-                                <p><strong style="color: var(--tg-text);">off</strong> — Listener never runs</p>
-                                <p class="mt-3" style="opacity: 0.6;">Mode is configured via <code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> env var</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <!-- Admin Panel removed — consolidated into Unified Settings Modal -->
         <!-- Context Menu -->
         <div v-if="contextMenu.visible" class="fixed z-[9999]" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @keydown="handleMenuKeydown" role="menu" aria-label="Context menu">
             <div class="rounded-lg shadow-2xl py-1 min-w-[180px] border" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
@@ -2105,31 +1708,463 @@
             {{ toast.message }}
         </div>
 
-        <!-- Settings Modal -->
-        <div v-if="showSettingsModal" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" @click.self="showSettingsModal = false">
-            <div class="rounded-xl shadow-2xl w-full max-w-sm p-5" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-base font-semibold">Display Settings</h3>
-                    <button @click="showSettingsModal = false" class="p-1 rounded hover:bg-white/10">
-                        <i class="fas fa-times text-sm" style="color: var(--tg-muted);"></i>
+        <!-- Unified Settings Modal -->
+        <div v-if="showSettingsModal" class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" @click.self="showSettingsModal = false">
+            <div class="rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col" style="background: var(--tg-sidebar);">
+                <!-- Header -->
+                <div class="flex items-center justify-between px-6 py-4" style="border-bottom: 1px solid var(--tg-border);">
+                    <h2 class="text-lg font-semibold" style="color: var(--tg-text);">Settings</h2>
+                    <button @click="showSettingsModal = false" class="hover:opacity-80" style="color: var(--tg-muted);">
+                        <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
-                <!-- Timezone -->
-                <div class="mb-4">
-                    <label class="text-xs font-medium mb-1.5 block" style="color: var(--tg-muted);">Timezone</label>
-                    <div class="flex items-center gap-2 mb-2">
-                        <input type="checkbox" id="tz-auto" :checked="settingsTimezoneAuto" @change="toggleTimezoneAuto($event.target.checked)"
-                            class="rounded" style="accent-color: var(--tg-accent);">
-                        <label for="tz-auto" class="text-xs" style="color: var(--tg-muted);">Auto-detect ({{ detectedTimezone }})</label>
-                    </div>
-                    <select v-if="!settingsTimezoneAuto" v-model="settingsTimezone" @change="saveTimezone(settingsTimezone)"
-                        class="w-full text-sm rounded-lg px-3 py-2 border focus:outline-none"
-                        style="background: var(--tg-bg); color: var(--tg-text); border-color: var(--tg-border);">
-                        <option v-for="tz in timezoneList" :key="tz" :value="tz">{{ tz }}</option>
-                    </select>
+                <!-- Tab bar -->
+                <div class="flex px-6" style="border-bottom: 1px solid var(--tg-border);">
+                    <button @click="settingsActiveTab = 'appearance'"
+                        :class="settingsActiveTab === 'appearance' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :style="{color: settingsActiveTab === 'appearance' ? '' : 'var(--tg-muted)'}"
+                        class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                        <i class="fas fa-palette mr-1.5 text-xs"></i>Appearance
+                    </button>
+                    <button @click="settingsActiveTab = 'general'"
+                        :class="settingsActiveTab === 'general' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :style="{color: settingsActiveTab === 'general' ? '' : 'var(--tg-muted)'}"
+                        class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                        <i class="fas fa-sliders-h mr-1.5 text-xs"></i>General
+                    </button>
+                    <button @click="settingsActiveTab = 'ai'"
+                        :class="settingsActiveTab === 'ai' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :style="{color: settingsActiveTab === 'ai' ? '' : 'var(--tg-muted)'}"
+                        class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                        <i class="fas fa-robot mr-1.5 text-xs"></i>AI
+                    </button>
+                    <button v-if="authRequired && isAuthenticated && userRole === 'master'"
+                        @click="settingsActiveTab = 'admin'; Promise.all([loadAdminViewers(), loadAdminChats(), loadAdminAudit(), loadAdminTokens()])"
+                        :class="settingsActiveTab === 'admin' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :style="{color: settingsActiveTab === 'admin' ? '' : 'var(--tg-muted)'}"
+                        class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                        <i class="fas fa-shield-alt mr-1.5 text-xs"></i>Admin
+                    </button>
                 </div>
-                <div class="text-[10px] pt-2 border-t" style="color: var(--tg-muted); border-color: var(--tg-border);">
-                    Settings saved per-browser via localStorage.
+                <!-- Content -->
+                <div class="flex-1 overflow-y-auto p-6">
+
+                    <!-- Appearance Tab -->
+                    <div v-if="settingsActiveTab === 'appearance'">
+                        <!-- Auto-detect toggle -->
+                        <div class="mb-4">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" :checked="themeAutoDetect" @change="toggleThemeAutoDetect()"
+                                    class="rounded" style="accent-color: var(--tg-accent);">
+                                <span class="text-sm" style="color: var(--tg-text);">Auto-detect from system</span>
+                                <span class="text-xs" style="color: var(--tg-muted);">(follows OS light/dark)</span>
+                            </label>
+                        </div>
+                        <!-- Dark themes -->
+                        <div class="mb-4">
+                            <div class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--tg-muted);">Dark Themes</div>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                <button v-for="t in themePresets.filter(x => x.type === 'dark')" :key="t.id" @click="setTheme(t.id)"
+                                    class="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm transition-colors hover:bg-white/5"
+                                    :style="currentTheme === t.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <span class="w-4 h-4 rounded-full shrink-0 border" style="border-color: var(--tg-border);" :style="{ backgroundColor: t.preview }"></span>
+                                    <span>{{ t.label }}</span>
+                                    <svg v-if="currentTheme === t.id" class="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Light themes -->
+                        <div>
+                            <div class="text-xs uppercase tracking-wider font-semibold mb-2" style="color: var(--tg-muted);">Light Themes</div>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                <button v-for="t in themePresets.filter(x => x.type === 'light')" :key="t.id" @click="setTheme(t.id)"
+                                    class="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm transition-colors hover:bg-white/5"
+                                    :style="currentTheme === t.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <span class="w-4 h-4 rounded-full shrink-0 border" style="border-color: var(--tg-border);" :style="{ backgroundColor: t.preview }"></span>
+                                    <span>{{ t.label }}</span>
+                                    <svg v-if="currentTheme === t.id" class="w-3 h-3 ml-auto" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- General Tab -->
+                    <div v-if="settingsActiveTab === 'general'">
+                        <!-- Timezone -->
+                        <div class="mb-4">
+                            <label class="text-xs font-medium mb-1.5 block" style="color: var(--tg-muted);">Timezone</label>
+                            <div class="flex items-center gap-2 mb-2">
+                                <input type="checkbox" id="tz-auto-settings" :checked="settingsTimezoneAuto" @change="toggleTimezoneAuto($event.target.checked)"
+                                    class="rounded" style="accent-color: var(--tg-accent);">
+                                <label for="tz-auto-settings" class="text-xs" style="color: var(--tg-muted);">Auto-detect ({{ detectedTimezone }})</label>
+                            </div>
+                            <select v-if="!settingsTimezoneAuto" v-model="settingsTimezone" @change="saveTimezone(settingsTimezone)"
+                                class="w-full text-sm rounded-lg px-3 py-2 border focus:outline-none"
+                                style="background: var(--tg-bg); color: var(--tg-text); border-color: var(--tg-border);">
+                                <option v-for="tz in timezoneList" :key="tz" :value="tz">{{ tz }}</option>
+                            </select>
+                        </div>
+                        <div class="text-[10px] pt-2 border-t" style="color: var(--tg-muted); border-color: var(--tg-border);">
+                            Settings saved per-browser via localStorage.
+                        </div>
+                    </div>
+
+                    <!-- AI Tab -->
+                    <div v-if="settingsActiveTab === 'ai'" class="space-y-6">
+                        <!-- Model Selector -->
+                        <div>
+                            <label class="text-xs font-medium mb-1.5 block" style="color: var(--tg-muted);">AI Model</label>
+                            <select v-model="aiSelectedModel" class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/50" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                <option value="auto">Auto (server default)</option>
+                                <optgroup label="Z-AI / GLM">
+                                    <option value="GLM-5">GLM-5</option>
+                                    <option value="GLM-4.7">GLM-4.7</option>
+                                    <option value="GLM-4.5-Air">GLM-4.5 Air</option>
+                                </optgroup>
+                                <optgroup label="MiniMax">
+                                    <option value="MiniMax-M2.5">MiniMax M2.5</option>
+                                    <option value="MiniMax-M2.5-highspeed">MiniMax M2.5 Highspeed</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <!-- Sort & Filter -->
+                        <div>
+                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Sort Messages By</label>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                <button v-for="opt in aiSortOptions" :key="opt.id" @click="aiSortBy = opt.id"
+                                    class="text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition-colors"
+                                    :style="aiSortBy === opt.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <i :class="opt.icon" class="w-4 text-center"></i>
+                                    <span>{{ opt.label }}</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Filter</label>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                <button v-for="f in aiFilterOptions" :key="f.id" @click="toggleAiFilter(f.id)"
+                                    class="text-left px-3 py-2 rounded-lg text-xs flex items-center gap-2 transition-colors"
+                                    :style="aiActiveFilters.includes(f.id) ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <i :class="f.icon" class="w-4 text-center"></i>
+                                    <span>{{ f.label }}</span>
+                                </button>
+                            </div>
+                            <button @click="applyAiSort" class="mt-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors" style="background: var(--tg-accent); color: #fff;">
+                                <i class="fas fa-check mr-1.5"></i>Apply Sort & Filter
+                            </button>
+                        </div>
+                        <!-- Auto-Reply -->
+                        <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-sm font-medium" style="color: var(--tg-text);">Auto-Reply</span>
+                                <button @click="aiAutoReplyEnabled = !aiAutoReplyEnabled"
+                                    class="w-10 h-5 rounded-full transition-colors relative"
+                                    :style="aiAutoReplyEnabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
+                                    <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+                                        :class="aiAutoReplyEnabled ? 'translate-x-5' : 'translate-x-0.5'"></span>
+                                </button>
+                            </div>
+                            <p class="text-xs mb-3" style="color: var(--tg-muted);">When enabled, AI will draft or send replies automatically when you're away.</p>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Mode</label>
+                                    <select v-model="aiAutoReplyMode" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="draft">Draft only (review before sending)</option>
+                                        <option value="auto">Auto-send after delay</option>
+                                    </select>
+                                </div>
+                                <div v-if="aiAutoReplyMode === 'auto'">
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Delay before sending</label>
+                                    <select v-model="aiAutoReplyDelay" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="30">30 seconds</option>
+                                        <option value="60">1 minute</option>
+                                        <option value="300">5 minutes</option>
+                                        <option value="900">15 minutes</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Persona / Tone</label>
+                                    <select v-model="aiAutoReplyTone" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="professional">Professional</option>
+                                        <option value="friendly">Friendly</option>
+                                        <option value="concise">Concise</option>
+                                        <option value="custom">Custom instructions...</option>
+                                    </select>
+                                </div>
+                                <div v-if="aiAutoReplyTone === 'custom'">
+                                    <textarea v-model="aiAutoReplyCustom" rows="3" placeholder="Describe how AI should reply on your behalf..."
+                                        class="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none"
+                                        style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Auto-Reply Status -->
+                        <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div class="text-sm font-medium mb-2" style="color: var(--tg-text);">Auto-Reply Status</div>
+                            <div class="flex items-center gap-2 text-xs" style="color: var(--tg-muted);">
+                                <span class="w-2 h-2 rounded-full" :style="aiAutoReplyEnabled ? 'background: #22c55e;' : 'background: var(--tg-border);'"></span>
+                                {{ aiAutoReplyEnabled ? 'Active — monitoring for new messages' : 'Disabled' }}
+                            </div>
+                            <div v-if="aiAutoReplyEnabled" class="mt-2 text-xs" style="color: var(--tg-muted);">
+                                Drafts pending: {{ aiDraftCount }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Admin Tab (master only) -->
+                    <div v-if="settingsActiveTab === 'admin' && authRequired && isAuthenticated && userRole === 'master'">
+                        <!-- Admin sub-tabs -->
+                        <div class="flex mb-4 -mt-2" style="border-bottom: 1px solid var(--tg-border);">
+                            <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Viewer Accounts
+                            </button>
+                            <button @click="adminActiveTab = 'tokens'; loadAdminTokens()" :class="adminActiveTab === 'tokens' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Share Tokens
+                            </button>
+                            <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Audit Log
+                            </button>
+                            <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Listener
+                            </button>
+                        </div>
+                        <!-- Viewers Tab -->
+                        <div v-if="adminActiveTab === 'viewers'">
+                            <!-- Create/Edit Form -->
+                            <div class="rounded-lg p-4 mb-4" style="background: var(--tg-bg);">
+                                <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">{{ adminEditingId ? 'Edit Viewer' : 'Create Viewer' }}</h3>
+                                <div v-if="adminError" class="text-red-400 text-sm mb-3">{{ adminError }}</div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <input v-model="adminViewerForm.username" :disabled="!!adminEditingId" placeholder="Username" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                    <input v-model="adminViewerForm.password" type="password" :placeholder="adminEditingId ? 'New password (leave empty to keep)' : 'Password'" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                </div>
+                                <div class="mt-3">
+                                    <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats (none selected = access to all chats)</label>
+                                    <input v-model="adminChatFilter" type="text" placeholder="Filter chats..."
+                                        class="w-full rounded px-3 py-1.5 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"
+                                        autocomplete="off" spellcheck="false">
+                                    <div class="flex gap-2 mb-1">
+                                        <button type="button" @click="adminViewerForm.allowed_chat_ids = adminChats.map(c => c.id)" class="text-xs text-blue-400 hover:text-blue-300">Select all</button>
+                                        <button type="button" @click="adminViewerForm.allowed_chat_ids = []" class="text-xs hover:opacity-80" style="color: var(--tg-muted);">Deselect all</button>
+                                        <span class="text-xs ml-auto" style="color: var(--tg-muted);">{{ adminViewerForm.allowed_chat_ids.length }} of {{ adminChats.length }} selected</span>
+                                    </div>
+                                    <div class="flex flex-wrap gap-1 rounded p-2 max-h-48 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                        <label v-for="chat in filteredAdminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
+                                            <input type="checkbox" :value="chat.id" v-model="adminViewerForm.allowed_chat_ids" class="rounded" />
+                                            {{ chat.title || chat.id }}
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="mt-3 flex items-center gap-4">
+                                    <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
+                                        <input type="checkbox" v-model="adminViewerForm.is_active" class="rounded" /> Active
+                                    </label>
+                                    <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
+                                        <input type="checkbox" v-model="adminViewerForm.no_download" class="rounded" /> No Downloads
+                                    </label>
+                                    <div class="flex-1"></div>
+                                    <button v-if="adminEditingId" @click="cancelEdit" class="px-3 py-1.5 text-sm" style="color: var(--tg-muted);">Cancel</button>
+                                    <button @click="saveViewer" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">
+                                        {{ adminEditingId ? 'Update' : 'Create' }}
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- Viewers List -->
+                            <div class="space-y-2">
+                                <div v-for="viewer in adminViewers" :key="viewer.id" class="flex items-center gap-3 rounded-lg p-3" style="background: var(--tg-bg);">
+                                    <div class="flex-1">
+                                        <div class="text-sm font-medium" style="color: var(--tg-text);">{{ viewer.username }}</div>
+                                        <div class="text-xs" style="color: var(--tg-muted);">
+                                            <template v-if="viewer.allowed_chat_ids && viewer.allowed_chat_ids.length">
+                                                {{ viewer.allowed_chat_ids.map(id => { const c = adminChats.find(ch => ch.id === id); return c ? c.title : id }).join(', ') }}
+                                            </template>
+                                            <template v-else>All chats</template>
+                                            · {{ viewer.is_active ? 'Active' : 'Inactive' }}
+                                            <template v-if="viewer.no_download"> · <span class="text-amber-400">No DL</span></template>
+                                        </div>
+                                    </div>
+                                    <button @click="editViewer(viewer)" class="p-1 hover:text-blue-400" style="color: var(--tg-muted);"><i class="fas fa-edit"></i></button>
+                                    <button @click="deleteViewer(viewer)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);"><i class="fas fa-trash"></i></button>
+                                </div>
+                                <div v-if="adminViewers.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No viewer accounts yet</div>
+                            </div>
+                        </div>
+                        <!-- Share Tokens Tab -->
+                        <div v-if="adminActiveTab === 'tokens'">
+                            <!-- Create Token Form -->
+                            <div class="rounded-lg p-4 mb-4" style="background: var(--tg-bg);">
+                                <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Create Share Token</h3>
+                                <div v-if="adminTokenError" class="text-red-400 text-sm mb-3">{{ adminTokenError }}</div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <input v-model="adminTokenForm.label" placeholder="Label (optional)" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                    <input v-model="adminTokenForm.expires_at" type="datetime-local" class="rounded px-3 py-2 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                </div>
+                                <div class="mt-3">
+                                    <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats (required — tokens must be scoped)</label>
+                                    <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                        <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
+                                            <input type="checkbox" :value="chat.id" v-model="adminTokenForm.allowed_chat_ids" class="rounded" />
+                                            {{ chat.title || chat.id }}
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="mt-3 flex items-center gap-4">
+                                    <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
+                                        <input type="checkbox" v-model="adminTokenForm.no_download" class="rounded" /> No Downloads
+                                    </label>
+                                    <div class="flex-1"></div>
+                                    <button @click="createToken" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">
+                                        Create Token
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- Newly created token -->
+                            <div v-if="adminNewToken" class="bg-green-900/50 border border-green-600 rounded-lg p-4 mb-4">
+                                <div class="text-sm text-green-300 mb-2">Token created! Copy it now — it won't be shown again.</div>
+                                <div class="space-y-2">
+                                    <div>
+                                        <div class="text-xs text-gray-400 mb-1">Token</div>
+                                        <div class="flex items-center gap-2">
+                                            <code class="flex-1 bg-gray-900 text-green-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewToken }}</code>
+                                            <button @click="navigator.clipboard.writeText(adminNewToken)" class="px-3 py-2 bg-green-700 hover:bg-green-600 text-white text-xs rounded shrink-0">Copy</button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="text-xs text-gray-400 mb-1">Shareable Link</div>
+                                        <div class="flex items-center gap-2">
+                                            <code class="flex-1 bg-gray-900 text-blue-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewTokenUrl }}</code>
+                                            <button @click="navigator.clipboard.writeText(adminNewTokenUrl); adminNewToken = ''" class="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded shrink-0">Copy Link</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Tokens List -->
+                            <div class="space-y-2">
+                                <div v-for="token in adminTokens" :key="token.id" class="rounded-lg p-3" style="background: var(--tg-bg);">
+                                    <!-- View mode -->
+                                    <div v-if="editingTokenId !== token.id">
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="text-sm font-medium" style="color: var(--tg-text);">{{ token.label || `Token #${token.id}` }}</div>
+                                                <div class="text-xs" style="color: var(--tg-muted);">
+                                                    <template v-if="token.allowed_chat_ids && token.allowed_chat_ids.length">
+                                                        {{ token.allowed_chat_ids.map(id => { const c = adminChats.find(ch => ch.id === id); return c ? c.title : id }).join(', ') }}
+                                                    </template>
+                                                    · Used {{ token.use_count || 0 }}x
+                                                    <template v-if="token.last_used_at"> · Last: {{ new Date(token.last_used_at).toLocaleDateString() }}</template>
+                                                    <template v-if="token.expires_at"> · Exp: {{ new Date(token.expires_at).toLocaleDateString() }}</template>
+                                                    <template v-if="token.no_download"> · <span class="text-amber-400">No DL</span></template>
+                                                    <template v-if="token.is_revoked"> · <span class="text-red-400">Revoked</span></template>
+                                                </div>
+                                            </div>
+                                            <button @click="startEditToken(token)" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Edit"><i class="fas fa-pen text-xs"></i></button>
+                                            <button v-if="!token.is_revoked" @click="revokeToken(token)" class="p-1 hover:text-amber-400" style="color: var(--tg-muted);" title="Revoke"><i class="fas fa-ban"></i></button>
+                                            <button @click="deleteToken(token)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);" title="Delete"><i class="fas fa-trash"></i></button>
+                                        </div>
+                                    </div>
+                                    <!-- Edit mode -->
+                                    <div v-else>
+                                        <div class="space-y-2">
+                                            <input v-model="editTokenForm.label" placeholder="Label" class="w-full rounded px-3 py-1.5 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
+                                            <div>
+                                                <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats</label>
+                                                <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                                    <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
+                                                        <input type="checkbox" :value="chat.id" v-model="editTokenForm.allowed_chat_ids" class="rounded" />
+                                                        {{ chat.title || chat.id }}
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center gap-4">
+                                                <label class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
+                                                    <input type="checkbox" v-model="editTokenForm.no_download" class="rounded" /> No Downloads
+                                                </label>
+                                                <div class="flex-1"></div>
+                                                <button @click="editingTokenId = null" class="px-3 py-1 text-sm rounded" style="color: var(--tg-muted);">Cancel</button>
+                                                <button @click="saveEditToken(token.id)" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">Save</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-if="adminTokens.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No share tokens yet</div>
+                            </div>
+                        </div>
+                        <!-- Audit Log Tab -->
+                        <div v-if="adminActiveTab === 'audit'">
+                            <div class="flex gap-2 mb-3">
+                                <select v-model="adminAuditAction" @change="loadAdminAudit()" class="rounded px-3 py-1.5 text-sm" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <option value="">All actions</option>
+                                    <option value="login_success">Login success</option>
+                                    <option value="login_failed">Login failed</option>
+                                    <option value="logout">Logout</option>
+                                    <option value="token_auth_success">Token auth success</option>
+                                    <option value="token_auth_failed">Token auth failed</option>
+                                    <option value="viewer_created">Viewer created</option>
+                                    <option value="viewer_updated">Viewer updated</option>
+                                    <option value="viewer_deleted">Viewer deleted</option>
+                                    <option value="token_created">Token created</option>
+                                    <option value="token_updated">Token updated</option>
+                                    <option value="token_deleted">Token deleted</option>
+                                    <option value="setting_updated">Setting updated</option>
+                                </select>
+                            </div>
+                            <div class="space-y-1">
+                                <div v-for="log in adminAuditLogs" :key="log.id" class="flex items-center gap-3 text-xs rounded px-3 py-2" style="background: var(--tg-bg);">
+                                    <span class="w-36 shrink-0" style="color: var(--tg-muted);">{{ new Date(log.created_at).toLocaleString() }}</span>
+                                    <span :class="{'text-yellow-400': log.role === 'master', 'text-blue-400': log.role === 'viewer', 'text-purple-400': log.role === 'token'}" class="w-16 shrink-0">{{ log.role }}</span>
+                                    <span class="w-24 shrink-0 truncate" style="color: var(--tg-text);">{{ log.username }}</span>
+                                    <span class="flex-1 truncate" style="color: var(--tg-muted);">{{ log.action }}</span>
+                                    <span class="truncate w-28" style="color: var(--tg-muted); opacity: 0.6;">{{ log.ip_address }}</span>
+                                </div>
+                                <div v-if="adminAuditLogs.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No audit logs yet</div>
+                            </div>
+                        </div>
+                        <!-- Listener Settings Tab -->
+                        <div v-if="adminActiveTab === 'listener'">
+                            <div class="space-y-4">
+                                <div class="rounded-lg p-4" style="background: var(--tg-bg);">
+                                    <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Listener Status</h3>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <span class="text-xs" style="color: var(--tg-muted);">Status</span>
+                                            <div class="flex items-center gap-2 mt-1">
+                                                <span class="w-2 h-2 rounded-full" :class="{
+                                                    'bg-green-500': listenerInfo.status === 'running',
+                                                    'bg-yellow-500 animate-pulse': listenerInfo.status === 'grace_period' || listenerInfo.status === 'starting',
+                                                    'bg-gray-500': listenerInfo.status === 'stopped' || listenerInfo.status === 'stopping'
+                                                }"></span>
+                                                <span class="text-sm capitalize" style="color: var(--tg-text);">{{ listenerInfo.status || 'unknown' }}</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs" style="color: var(--tg-muted);">Active Viewers</span>
+                                            <div class="text-sm mt-1" style="color: var(--tg-text);">{{ listenerInfo.viewer_count ?? 0 }}</div>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs" style="color: var(--tg-muted);">Mode</span>
+                                            <div class="text-sm mt-1 capitalize" style="color: var(--tg-text);">{{ listenerInfo.mode || 'off' }}</div>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs" style="color: var(--tg-muted);">Grace Period</span>
+                                            <div class="text-sm mt-1" style="color: var(--tg-text);">{{ listenerInfo.grace_period ?? 300 }}s</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="rounded-lg p-4 text-xs" style="background: var(--tg-bg); color: var(--tg-muted);">
+                                    <p class="mb-2"><strong style="color: var(--tg-text);">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
+                                    <p class="mb-2"><strong style="color: var(--tg-text);">always</strong> — Listener always runs (legacy behavior)</p>
+                                    <p><strong style="color: var(--tg-text);">off</strong> — Listener never runs</p>
+                                    <p class="mt-3" style="opacity: 0.6;">Mode is configured via <code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> env var</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </div>
@@ -2145,6 +2180,15 @@
                 const selectedChat = ref(null)
                 const searchQuery = ref('')
                 const messageSearchQuery = ref('')
+                // Bidirectional loading state
+                const hasMoreNewer = ref(false)
+                const loadingNewer = ref(false)
+                const contextMode = ref(false)
+                const pendingTargetMsgId = ref(null)
+                // Advanced search state
+                const showAdvancedSearch = ref(false)
+                const searchDateFrom = ref('')
+                const searchDateTo = ref('')
                 const loading = ref(false)
                 const loadingChats = ref(true)  // Start as true, loading on init
                 const loadingStats = ref(true)  // Start as true, loading on init
@@ -2154,6 +2198,7 @@
                 const messagesContainer = ref(null)
                 const scrollAnchor = ref(null)
                 const loadMoreSentinel = ref(null)
+                const loadNewerSentinel = ref(null)
                 const isAuthenticated = ref(false)
                 const authRequired = ref(false)
                 const authCheckFailed = ref(false)  // True if auth check request failed
@@ -2178,7 +2223,6 @@
                     { id: 'light-default', label: 'Light', preview: '#ffffff', type: 'light' },
                 ]
                 const currentTheme = ref(localStorage.getItem('tg-theme') || 'midnight')
-                const themeDropdownOpen = ref(false)
                 const themeAutoDetect = ref(localStorage.getItem('tg-theme-auto') === 'true')
                 const setTheme = (themeId) => {
                     currentTheme.value = themeId
@@ -2186,7 +2230,6 @@
                     const isLight = themeId.startsWith('light')
                     document.documentElement.style.colorScheme = isLight ? 'light' : 'dark'
                     localStorage.setItem('tg-theme', themeId)
-                    themeDropdownOpen.value = false
                     // Update theme-color meta
                     const meta = document.querySelector('meta[name="theme-color"]')
                     const preset = themePresets.find(t => t.id === themeId)
@@ -2225,6 +2268,14 @@
                 // Settings modal
                 const viewerTimezone = ref('Europe/Madrid')  // Default, updated from config or localStorage
                 const showSettingsModal = ref(false)
+                const settingsActiveTab = ref('appearance')
+                const openSettings = (tab) => {
+                    settingsActiveTab.value = tab || 'appearance'
+                    showSettingsModal.value = true
+                    if (settingsActiveTab.value === 'admin' && userRole.value === 'master') {
+                        Promise.all([loadAdminViewers(), loadAdminChats(), loadAdminAudit(), loadAdminTokens()])
+                    }
+                }
                 // AI Assistant panel state
                 const showAiPanel = ref(false)
                 const aiSelectedModel = ref('auto')
@@ -2813,7 +2864,7 @@
                     if (messagesScrollObserver) {
                         messagesScrollObserver.disconnect()
                     }
-                    
+
                     messagesScrollObserver = new IntersectionObserver(
                         (entries) => {
                             // When sentinel becomes visible, load more messages
@@ -2822,16 +2873,39 @@
                                 loadMessages()
                             }
                         },
-                        { 
+                        {
                             root: messagesContainer.value,
                             rootMargin: '200px'  // Start loading before reaching the top
                         }
                     )
-                    
+
                     // Observe the sentinel when it's in DOM
                     nextTick(() => {
                         if (loadMoreSentinel.value) {
                             messagesScrollObserver.observe(loadMoreSentinel.value)
+                        }
+                    })
+                }
+
+                // v9.0: Observer for loading newer messages (forward scroll in context mode)
+                let newerMessagesObserver = null
+
+                const setupNewerMessagesObserver = () => {
+                    if (newerMessagesObserver) newerMessagesObserver.disconnect()
+
+                    newerMessagesObserver = new IntersectionObserver(
+                        (entries) => {
+                            if (entries[0].isIntersecting && hasMoreNewer.value && !loadingNewer.value) {
+                                console.log('>>> Loading newer messages (bottom sentinel visible)')
+                                loadNewerMessages()
+                            }
+                        },
+                        { root: messagesContainer.value, rootMargin: '200px' }
+                    )
+
+                    nextTick(() => {
+                        if (loadNewerSentinel.value) {
+                            newerMessagesObserver.observe(loadNewerSentinel.value)
                         }
                     })
                 }
@@ -3017,25 +3091,20 @@
 
                                 if (chatIdParam) {
                                     const chatId = parseInt(chatIdParam)
-                                    const targetChat = chats.value.find(c => c.id === chatId)
+                                    let targetChat = chats.value.find(c => c.id === chatId)
+                                    // Permalink fallback: chat may not be in first page — fetch from API
+                                    if (!targetChat) {
+                                        try {
+                                            const chatRes = await fetch(`/api/chats/${chatId}`, { credentials: 'include' })
+                                            if (chatRes.ok) {
+                                                targetChat = await chatRes.json()
+                                            }
+                                        } catch {}
+                                    }
                                     if (targetChat) {
-                                        await selectChat(targetChat)
-                                        if (msgIdParam) {
-                                            const msgId = parseInt(msgIdParam)
-                                            // Try context API first, fallback to existing scrollToMessage
-                                            try {
-                                                const ctxRes = await fetch(`/api/chats/${chatId}/messages/${msgId}/context`, { credentials: 'include' })
-                                                if (ctxRes.ok) {
-                                                    const ctxData = await ctxRes.json()
-                                                    if (ctxData.messages?.length) {
-                                                        messages.value = ctxData.messages
-                                                        await nextTick()
-                                                    }
-                                                }
-                                            } catch {}
-                                            await nextTick()
-                                            scrollToMessage(parseInt(msgIdParam))
-                                        }
+                                        // v9.0: Unified — selectChat handles context loading + scroll
+                                        const msgId = msgIdParam ? parseInt(msgIdParam) : null
+                                        await selectChat(targetChat, msgId ? { targetMsgId: msgId } : {})
                                     } else {
                                         showToast('Chat not found or access denied', 'error')
                                     }
@@ -3070,12 +3139,8 @@
                                     console.log('[Notification] Click received for chat:', chat_id)
                                     const targetChat = chats.value.find(c => c.id === chat_id)
                                     if (targetChat) {
-                                        await selectChat(targetChat)
-                                        if (message_id) {
-                                            console.log('[Notification] Scrolling to message:', message_id)
-                                            await nextTick()
-                                            scrollToMessage(message_id)
-                                        }
+                                        // v9.0: Unified — selectChat handles context loading + scroll
+                                        await selectChat(targetChat, message_id ? { targetMsgId: message_id } : {})
                                     }
                                 }
                             }
@@ -3494,6 +3559,35 @@
                             await loadArchivedCount()
                             setupInfiniteScroll()
                             await initNotifications()
+
+                            // Handle redirect after login (from permalink 302)
+                            const urlParams = new URLSearchParams(window.location.search)
+                            const redirectPath = urlParams.get('redirect')
+                            if (redirectPath) {
+                                const pathMatch = redirectPath.match(/^\/chat\/(-?\d+)/)
+                                if (pathMatch) {
+                                    const chatId = parseInt(pathMatch[1])
+                                    const redirectParams = new URLSearchParams(redirectPath.split('?')[1] || '')
+                                    const msgId = redirectParams.get('msg')
+                                    let targetChat = chats.value.find(c => c.id === chatId)
+                                    // Permalink fallback: chat may not be in first page — fetch from API
+                                    if (!targetChat) {
+                                        try {
+                                            const chatRes = await fetch(`/api/chats/${chatId}`, { credentials: 'include' })
+                                            if (chatRes.ok) {
+                                                targetChat = await chatRes.json()
+                                            }
+                                        } catch {}
+                                    }
+                                    if (targetChat) {
+                                        // v9.0: Unified — selectChat handles context loading + scroll
+                                        await selectChat(targetChat, msgId ? { targetMsgId: parseInt(msgId) } : {})
+                                    } else {
+                                        showToast('Chat not found or access denied', 'error')
+                                    }
+                                }
+                                window.history.replaceState({}, '', '/')
+                            }
                         } else {
                             loginError.value = 'Login failed'
                         }
@@ -3512,6 +3606,7 @@
                     isAuthenticated.value = false
                     userRole.value = ''
                     currentUsername.value = ''
+                    showSettingsModal.value = false
                     showAdminPanel.value = false
                 }
 
@@ -3683,23 +3778,29 @@
                     }
                 }
                 
-                const selectChat = async (chat) => {
+                const selectChat = async (chat, opts = {}) => {
                     // v6.2.0: If forum chat, open topics list instead
                     if (chat.is_forum) {
                         await openForumTopics(chat)
                         return
                     }
-                    
+
                     // Invalidate any in-flight loads from previous chat
                     const myVersion = ++chatVersion
                     stopMessageRefresh()
                     loading.value = false  // Reset gate so loadMessages can proceed
-                    
+
                     selectedChat.value = chat
                     messages.value = []
                     page.value = 0
                     hasMore.value = true
+                    hasMoreNewer.value = false
+                    contextMode.value = false
+                    pendingTargetMsgId.value = null
                     messageSearchQuery.value = ''
+                    showAdvancedSearch.value = false
+                    searchDateFrom.value = ''
+                    searchDateTo.value = ''
                     chatStats.value = null  // Reset stats when changing chat
                     pinnedMessages.value = []  // Reset pinned messages when changing chat
                     // v8.1: Clear voice message state to prevent memory leak
@@ -3708,6 +3809,42 @@
                     Object.keys(voiceAudioRefs).forEach(k => { delete voiceAudioRefs[k] })
                     currentPinnedIndex.value = 0
                     showPinnedOnly.value = false  // Exit pinned-only view when changing chat
+
+                    // v9.0: Context mode — load messages around target instead of latest
+                    if (opts.targetMsgId) {
+                        contextMode.value = true
+                        pendingTargetMsgId.value = opts.targetMsgId
+                        loading.value = true
+                        try {
+                            const ctxRes = await fetch(
+                                `/api/chats/${chat.id}/messages/${opts.targetMsgId}/context`,
+                                { credentials: 'include' }
+                            )
+                            if (chatVersion !== myVersion) return
+                            if (ctxRes.ok) {
+                                const ctxData = await ctxRes.json()
+                                messages.value = ctxData.messages || []
+                                hasMore.value = ctxData.has_more_older !== false
+                                hasMoreNewer.value = ctxData.has_more_newer !== false
+                            }
+                        } catch (e) { console.error('Context load failed:', e) }
+                        loading.value = false
+                        markChatSeen(chat)
+                        if (chatVersion !== myVersion) return
+                        await loadChatStats(chat.id)
+                        await loadPinnedMessages(chat.id)
+                        await nextTick()
+                        if (chatVersion !== myVersion) return
+                        scrollToMessage(opts.targetMsgId)
+                        if (!initialLoadDone.value) {
+                            requestAnimationFrame(() => { initialLoadDone.value = true })
+                        }
+                        setupMessagesScrollObserver()
+                        setupNewerMessagesObserver()
+                        // Do NOT start auto-refresh in context mode
+                        return
+                    }
+
                     // v8.1: Mark chat as seen (for unread badge)
                     markChatSeen(chat)
                     await loadMessages()
@@ -3830,17 +3967,18 @@
                             url += `&topic_id=${nav.topicId}`
                         }
 
+                        const hasDateFilter = searchDateFrom.value || searchDateTo.value
+
                         // Use cursor-based pagination (faster) instead of offset
-                        // For initial load or search, don't use cursor
-                        // For subsequent loads, use the oldest message's date as cursor
-                        if (messages.value.length > 0 && !messageSearchQuery.value) {
+                        // Skip cursor when searching or date-filtering (use offset instead)
+                        if (messages.value.length > 0 && !messageSearchQuery.value && !hasDateFilter) {
                             // Find the oldest message (messages are sorted newest first)
                             const oldestMsg = messages.value.reduce((oldest, msg) => {
                                 const msgDate = new Date(msg.date)
                                 const oldestDate = new Date(oldest.date)
                                 return msgDate < oldestDate ? msg : oldest
                             }, messages.value[0])
-                            
+
                             if (oldestMsg?.date) {
                                 url += `&before_date=${encodeURIComponent(oldestMsg.date)}`
                                 if (oldestMsg.id) {
@@ -3849,12 +3987,19 @@
                             }
                         }
 
-                        if (messageSearchQuery.value) {
-                            // Search still uses offset for simplicity
+                        if (messageSearchQuery.value || hasDateFilter) {
+                            // Search + date range use offset pagination
                             const offset = page.value * limit
                             url = `/api/chats/${selectedChat.value.id}/messages?limit=${limit}&offset=${offset}`
-                            url += `&search=${encodeURIComponent(messageSearchQuery.value)}`
-                            // Also pass topic_id for search within a topic
+                            if (messageSearchQuery.value) {
+                                url += `&search=${encodeURIComponent(messageSearchQuery.value)}`
+                            }
+                            if (searchDateFrom.value) {
+                                url += `&date_from=${encodeURIComponent(searchDateFrom.value + 'T00:00:00')}`
+                            }
+                            if (searchDateTo.value) {
+                                url += `&date_to=${encodeURIComponent(searchDateTo.value + 'T23:59:59')}`
+                            }
                             if (nav.type === 'chat' && nav.topicId) {
                                 url += `&topic_id=${nav.topicId}`
                             }
@@ -3892,6 +4037,54 @@
                         await nextTick()
                         if (messagesScrollObserver && loadMoreSentinel.value) {
                             messagesScrollObserver.observe(loadMoreSentinel.value)
+                        }
+                    }
+                }
+
+                // v9.0: Load newer messages (forward scroll from a midpoint)
+                const loadNewerMessages = async () => {
+                    if (loadingNewer.value || !hasMoreNewer.value || !selectedChat.value) return
+
+                    loadingNewer.value = true
+                    try {
+                        // Find the newest message currently loaded
+                        const newestMsg = messages.value.reduce((newest, msg) => {
+                            return new Date(msg.date) > new Date(newest.date) ? msg : newest
+                        }, messages.value[0])
+
+                        if (!newestMsg) return
+
+                        const url = `/api/chats/${selectedChat.value.id}/messages`
+                            + `?after_date=${encodeURIComponent(newestMsg.date)}`
+                            + `&after_id=${newestMsg.id}&limit=50`
+
+                        const res = await fetch(url, { credentials: 'include' })
+                        const newMessages = await res.json()
+
+                        if (newMessages.length < 50) {
+                            hasMoreNewer.value = false
+                        }
+
+                        // Merge newer messages into the list
+                        const existingById = new Map(messages.value.map(m => [m.id, m]))
+                        for (const msg of newMessages) {
+                            existingById.set(msg.id, msg)
+                        }
+                        messages.value = Array.from(existingById.values())
+
+                        // Transition to normal mode when we've caught up to latest
+                        if (!hasMoreNewer.value && contextMode.value) {
+                            contextMode.value = false
+                            startMessageRefresh()
+                            console.log('[Context] Caught up to latest, switching to auto-refresh')
+                        }
+                    } catch (e) {
+                        console.error('Failed to load newer messages', e)
+                    } finally {
+                        loadingNewer.value = false
+                        await nextTick()
+                        if (newerMessagesObserver && loadNewerSentinel.value) {
+                            newerMessagesObserver.observe(loadNewerSentinel.value)
                         }
                     }
                 }
@@ -3959,6 +4152,21 @@
                 }
 
                 const scrollToLatest = () => {
+                    // v9.0: If in context mode, reload from latest instead of just scrolling
+                    if (contextMode.value && selectedChat.value) {
+                        contextMode.value = false
+                        hasMoreNewer.value = false
+                        messages.value = []
+                        page.value = 0
+                        hasMore.value = true
+                        loadMessages().then(() => {
+                            scrollToBottom(true)
+                            setupMessagesScrollObserver()
+                            startMessageRefresh()
+                        })
+                        showScrollToBottom.value = false
+                        return
+                    }
                     scrollToBottom(true)
                     showScrollToBottom.value = false
                 }
@@ -4799,8 +5007,7 @@
                 }
 
                 const openAdminPanel = async () => {
-                    showAdminPanel.value = true
-                    await Promise.all([loadAdminViewers(), loadAdminChats(), loadAdminAudit(), loadAdminTokens()])
+                    openSettings('admin')
                 }
 
                 const saveViewer = async () => {
@@ -5101,6 +5308,8 @@
                     toast,
                     showToast,
                     showSettingsModal,
+                    settingsActiveTab,
+                    openSettings,
                     showAiPanel,
                     aiSelectedModel,
                     aiActiveTab,
@@ -5132,7 +5341,6 @@
                     // Theme system
                     themePresets,
                     currentTheme,
-                    themeDropdownOpen,
                     setTheme,
                     themeAutoDetect,
                     toggleThemeAutoDetect,
@@ -5197,6 +5405,15 @@
                     // Message pagination
                     hasMore,
                     loadMoreMessages,
+                    // v9.0: Bidirectional loading + advanced search
+                    hasMoreNewer,
+                    loadingNewer,
+                    contextMode,
+                    loadNewerSentinel,
+                    loadNewerMessages,
+                    showAdvancedSearch,
+                    searchDateFrom,
+                    searchDateTo,
                     // Notifications (v5.0)
                     notificationsEnabled,
                     notificationsSupported,

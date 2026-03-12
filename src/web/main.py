@@ -1376,6 +1376,21 @@ async def get_chats(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@app.get("/api/chats/{chat_id}")
+async def get_chat_info(
+    chat_id: int,
+    user: UserContext = Depends(require_auth),
+):
+    """Get a single chat by ID (for permalink navigation)."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    chat = await db.get_chat_by_id(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
 @app.get("/api/chats/{chat_id}/messages")
 async def get_messages(
     chat_id: int,
@@ -1385,33 +1400,47 @@ async def get_messages(
     search: str | None = None,
     before_date: str | None = None,
     before_id: int | None = None,
+    after_date: str | None = None,
+    after_id: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     topic_id: int | None = None,
 ):
     """
     Get messages for a specific chat with user and media info.
 
-    Supports two pagination modes:
+    Supports three pagination modes:
     - Offset-based: ?offset=100 (slower for large offsets)
-    - Cursor-based: ?before_date=2026-01-15T12:00:00&before_id=12345 (O(1) performance)
+    - Cursor backward: ?before_date=...&before_id=... (older messages)
+    - Cursor forward: ?after_date=...&after_id=... (newer messages)
+
+    Optional date range: ?date_from=...&date_to=... (filters on top of pagination)
 
     v6.2.0: Added topic_id filter for forum topic messages.
-
-    Cursor-based pagination is preferred for infinite scroll.
     """
     user_chat_ids = get_user_chat_ids(user)
     if user_chat_ids is not None and chat_id not in user_chat_ids:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Parse before_date if provided
-    parsed_before_date = None
-    if before_date:
+    # Mutual exclusion: before_* and after_* cannot both be provided
+    if before_date and after_date:
+        raise HTTPException(status_code=400, detail="Cannot use both before_date and after_date")
+
+    def _parse_date(value: str | None, param_name: str) -> datetime | None:
+        if not value:
+            return None
         try:
-            parsed_before_date = datetime.fromisoformat(before_date.replace("Z", "+00:00"))
-            # Strip timezone for DB compatibility
-            if parsed_before_date.tzinfo:
-                parsed_before_date = parsed_before_date.replace(tzinfo=None)
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo:
+                parsed = parsed.replace(tzinfo=None)
+            return parsed
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid before_date format. Use ISO 8601.")
+            raise HTTPException(status_code=400, detail=f"Invalid {param_name} format. Use ISO 8601.")
+
+    parsed_before_date = _parse_date(before_date, "before_date")
+    parsed_after_date = _parse_date(after_date, "after_date")
+    parsed_date_from = _parse_date(date_from, "date_from")
+    parsed_date_to = _parse_date(date_to, "date_to")
 
     try:
         messages = await db.get_messages_paginated(
@@ -1421,6 +1450,10 @@ async def get_messages(
             search=search,
             before_date=parsed_before_date,
             before_id=before_id,
+            after_date=parsed_after_date,
+            after_id=after_id,
+            date_from=parsed_date_from,
+            date_to=parsed_date_to,
             topic_id=topic_id,
         )
         return messages
@@ -1459,7 +1492,7 @@ async def get_message_context(
         result = await db.get_messages_around(chat_id, msg_id, count=50)
         if not result:
             raise HTTPException(status_code=403, detail="Access denied")
-        return {"messages": result}
+        return result
     except HTTPException:
         raise
     except Exception as e:

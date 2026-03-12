@@ -1112,6 +1112,10 @@ class DatabaseAdapter:
         search: str | None = None,
         before_date: datetime | None = None,
         before_id: int | None = None,
+        after_date: datetime | None = None,
+        after_id: int | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
         topic_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """
@@ -1120,17 +1124,22 @@ class DatabaseAdapter:
         v6.0.0: Media is now returned as a nested object from the media table.
         v6.2.0: Added topic_id filter for forum topic messages.
 
-        Supports two pagination modes:
+        Supports three pagination modes:
         1. Offset-based (legacy): Uses offset parameter - slower for large offsets
-        2. Cursor-based (preferred): Uses before_date/before_id - O(1) regardless of position
+        2. Cursor backward: Uses before_date/before_id - O(1), older messages
+        3. Cursor forward: Uses after_date/after_id - O(1), newer messages
 
         Args:
             chat_id: Chat ID
             limit: Maximum messages to return
-            offset: Pagination offset (used only if before_date/before_id not provided)
+            offset: Pagination offset (used only if no cursor provided)
             search: Optional text search filter
-            before_date: Cursor - get messages before this date (faster than offset)
-            before_id: Cursor - message ID to use as tiebreaker for same-date messages
+            before_date: Cursor - get messages before this date (backward)
+            before_id: Cursor - tiebreaker for same-date messages (backward)
+            after_date: Cursor - get messages after this date (forward)
+            after_id: Cursor - tiebreaker for same-date messages (forward)
+            date_from: Filter - only messages on or after this date
+            date_to: Filter - only messages on or before this date
             topic_id: Optional forum topic ID to filter messages by thread
 
         Returns:
@@ -1167,6 +1176,12 @@ class DatabaseAdapter:
                 escaped = search.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
                 stmt = stmt.where(Message.text.ilike(f"%{escaped}%", escape="\\"))
 
+            # Date range filtering (applies on top of any pagination mode)
+            if date_from is not None:
+                stmt = stmt.where(Message.date >= date_from)
+            if date_to is not None:
+                stmt = stmt.where(Message.date <= date_to)
+
             # Cursor-based pagination (preferred - O(1) performance)
             if before_date is not None:
                 # Use composite cursor: (date, id) for deterministic ordering
@@ -1178,6 +1193,16 @@ class DatabaseAdapter:
                 else:
                     stmt = stmt.where(Message.date < before_date)
                 stmt = stmt.order_by(Message.date.desc(), Message.id.desc()).limit(limit)
+            elif after_date is not None:
+                # Forward cursor: get messages NEWER than cursor
+                if after_id is not None:
+                    stmt = stmt.where(
+                        or_(Message.date > after_date, and_(Message.date == after_date, Message.id > after_id))
+                    )
+                else:
+                    stmt = stmt.where(Message.date > after_date)
+                # Forward: oldest first so we get the NEXT messages chronologically
+                stmt = stmt.order_by(Message.date.asc(), Message.id.asc()).limit(limit)
             else:
                 # Offset-based pagination (legacy fallback)
                 stmt = stmt.order_by(Message.date.desc()).limit(limit).offset(offset)
@@ -1247,12 +1272,12 @@ class DatabaseAdapter:
         chat_id: int,
         msg_id: int,
         count: int = 50,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """
         Get messages around a target message for permalink navigation.
 
         Fetches count/2 messages before and after the target message's date,
-        returning them in the same format as get_messages_paginated.
+        returning them with boundary flags for bidirectional loading.
 
         Args:
             chat_id: Chat ID
@@ -1260,7 +1285,7 @@ class DatabaseAdapter:
             count: Total number of messages to return (split evenly before/after)
 
         Returns:
-            List of message dicts with user/media info, or empty list if target not found
+            Dict with messages list and boundary flags, or empty dict if not found
         """
         half = count // 2
         async with self.db_manager.async_session_factory() as session:
@@ -1272,7 +1297,7 @@ class DatabaseAdapter:
             )
             target_date = target_result.scalar_one_or_none()
             if target_date is None:
-                return []
+                return {}
 
             # Base select with joins (same as get_messages_paginated)
             base_stmt = (
@@ -1396,7 +1421,12 @@ class DatabaseAdapter:
                         )
                 msg["reactions"] = list(reactions_by_emoji.values())
 
-            return messages
+            return {
+                "messages": messages,
+                "has_more_older": len(before_rows) == half,
+                "has_more_newer": len(after_rows) == half,
+                "target_msg_id": msg_id,
+            }
 
     async def find_message_by_date_with_joins(self, chat_id: int, target_date: datetime) -> dict[str, Any] | None:
         """
