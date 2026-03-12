@@ -1,0 +1,15 @@
+{
+  "id": "session-1773224635925",
+  "startedAt": "2026-03-11T10:23:55.925Z",
+  "cwd": "/home/phenix/projects/apps/tele-private/repo/dev/plans/260311-1742-viewer-advanced-features",
+  "context": {},
+  "metrics": {
+    "edits": 27,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "restoredAt": "2026-03-11T10:23:55.928Z",
+  "endedAt": "2026-03-11T10:31:52.287Z",
+  "duration": 476363
+}

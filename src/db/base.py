@@ -138,12 +138,29 @@ class DatabaseManager:
             try:
                 async with self.engine.begin() as conn:
                     await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
+                    # v8.0: Migrate existing tables — add AI columns if missing
+                    await conn.run_sync(self._migrate_ai_columns)
             except Exception as e:
                 # Viewer containers may mount the database read-only — that's fine,
                 # the backup container is responsible for creating tables.
                 logger.warning(f"Could not create/verify tables (database may be read-only): {e}")
 
         logger.info(f"Database initialized successfully ({self._db_type()})")
+
+    @staticmethod
+    def _migrate_ai_columns(sync_conn) -> None:
+        """Add v8.0 AI columns to existing messages table if missing."""
+        try:
+            result = sync_conn.execute(text("PRAGMA table_info(messages)"))
+            cols = {row[1] for row in result.fetchall()}
+            if "ai_comment" not in cols:
+                sync_conn.execute(text("ALTER TABLE messages ADD COLUMN ai_comment TEXT"))
+                logger.info("Migration: added ai_comment column to messages")
+            if "ocr_text" not in cols:
+                sync_conn.execute(text("ALTER TABLE messages ADD COLUMN ocr_text TEXT"))
+                logger.info("Migration: added ocr_text column to messages")
+        except Exception as e:
+            logger.warning(f"AI column migration skipped: {e}")
 
     def _setup_sqlite_pragmas(self) -> None:
         """Set up SQLite PRAGMA settings for optimal performance.

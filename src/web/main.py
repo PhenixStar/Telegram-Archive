@@ -29,14 +29,19 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 
 from ..config import Config
-from ..db import DatabaseAdapter, close_database, get_db_manager, init_database
+from sqlalchemy import and_, select
+
+from ..db import DatabaseAdapter, Media, Message, close_database, get_db_manager, init_database
 from ..realtime import RealtimeListener
 
 if TYPE_CHECKING:
     from .push import PushNotificationManager
 
 # Register MIME types for audio files (required for StaticFiles to serve with correct Content-Type)
+import base64
 import mimetypes
+
+import httpx
 
 mimetypes.add_type("audio/ogg", ".ogg")
 mimetypes.add_type("audio/opus", ".opus")
@@ -2279,6 +2284,338 @@ async def set_setting(key: str, request: Request, user: UserContext = Depends(re
     )
 
     return {"key": key, "value": str(value)}
+
+
+# ============================================================================
+# AI Assistant Endpoints
+# ============================================================================
+
+
+def _check_ai_chat_access(user: UserContext, chat_id: int | None) -> None:
+    """Verify the user is allowed to access the given chat for AI operations."""
+    if chat_id is None:
+        return
+    allowed = get_user_chat_ids(user)
+    if allowed is not None and int(chat_id) not in allowed:
+        raise HTTPException(status_code=403, detail="Access denied for this chat")
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(
+    request: Request,
+    user: UserContext = Depends(require_auth),
+):
+    """Proxy AI chat requests to configured LLM API with DB-enriched context."""
+    if not config.ai_api_key:
+        raise HTTPException(status_code=503, detail="AI not configured — set AI_API_KEY env var")
+
+    body = await request.json()
+    user_message = body.get("message", "").strip()
+    model = body.get("model", config.ai_model)
+    chat_id = body.get("chat_id")  # optional: enables DB context enrichment
+    context_messages = body.get("context", [])
+
+    if not user_message:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    _check_ai_chat_access(user, chat_id)
+
+    # Build system prompt — enrich with DB context if chat_id provided
+    system_content = (
+        "You are an AI inventory agent for a Telegram archive. "
+        "You have access to message text, OCR-extracted text from images, and AI annotations. "
+        "Help the user analyze, search, summarize, draft replies, and manage their chat history. "
+        "Be concise and actionable."
+    )
+
+    # DB-enriched context (includes OCR text and AI annotations)
+    if chat_id:
+        try:
+            db_context = await db.get_ai_context_for_chat(int(chat_id), limit=40)
+            if db_context:
+                lines = []
+                for m in db_context:
+                    line = f"[{m.get('sender', '?')}] {m.get('text', '') or ''}"
+                    if m.get("ocr_text"):
+                        line += f" [IMAGE OCR: {m['ocr_text'][:200]}]"
+                    if m.get("ai_comment"):
+                        line += f" [AI NOTE: {m['ai_comment'][:150]}]"
+                    if m.get("media_type") and not m.get("ocr_text"):
+                        line += f" [{m['media_type']}]"
+                    lines.append(line)
+                system_content += f"\n\nChat context (newest first):\n" + "\n".join(lines)
+        except Exception as e:
+            logger.warning(f"Failed to load DB context: {e}")
+
+    # Fallback to frontend-provided context
+    elif context_messages:
+        context_text = "\n".join(
+            f"[{m.get('sender', 'Unknown')}] {m.get('text', '')}" for m in context_messages[:50]
+        )
+        system_content += f"\n\nRecent chat messages:\n{context_text}"
+
+    api_messages = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": user_message},
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{config.ai_base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {config.ai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": api_messages,
+                    "max_tokens": 2048,
+                    "temperature": 0.7,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            reply = data.get("choices", [{}])[0].get("message", {}).get("content", "No response")
+            return {"reply": reply, "model": model}
+    except httpx.HTTPStatusError as e:
+        logger.error(f"AI API error: {e.response.status_code} {e.response.text[:200]}")
+        raise HTTPException(status_code=502, detail=f"AI API error: {e.response.status_code}")
+    except Exception as e:
+        logger.error(f"AI request failed: {e}")
+        raise HTTPException(status_code=502, detail="AI service unavailable")
+
+
+@app.get("/api/ai/config")
+async def ai_config_endpoint(user: UserContext = Depends(require_auth)):
+    """Return AI configuration status (no secrets)."""
+    return {
+        "enabled": bool(config.ai_api_key),
+        "model": config.ai_model,
+        "provider": "Z-AI GLM" if "z.ai" in config.ai_base_url else "Custom",
+    }
+
+
+@app.post("/api/ai/ocr/{chat_id}/{message_id}")
+async def ai_ocr_message(
+    chat_id: int,
+    message_id: int,
+    user: UserContext = Depends(require_auth),
+):
+    """OCR a single message's image using GLM Vision API and store result in DB."""
+    if not config.ai_api_key:
+        raise HTTPException(status_code=503, detail="AI not configured")
+
+    _check_ai_chat_access(user, chat_id)
+
+    # Direct lookup: check if already OCR'd or find media for this specific message
+    async with db.db_manager.async_session_factory() as sess:
+        result = await sess.execute(
+            select(Message.ocr_text, Media.file_path, Media.mime_type)
+            .outerjoin(Media, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+            .where(and_(Message.chat_id == chat_id, Message.id == message_id))
+            .limit(1)
+        )
+        row = result.first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # Already OCR'd — return cached
+    if row[0]:
+        return {"message_id": message_id, "ocr_text": row[0], "cached": True}
+
+    file_path = row[1]
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No media file for this message")
+
+    # Build absolute path to media file
+    abs_path = os.path.join(config.backup_path, file_path) if not os.path.isabs(file_path) else file_path
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=404, detail="Media file missing from disk")
+
+    with open(abs_path, "rb") as f:
+        img_data = base64.b64encode(f.read()).decode()
+
+    mime = row[2] or "image/jpeg"
+    if not mime.startswith("image"):
+        mime = "image/jpeg"
+
+    # Call GLM Vision API for OCR
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(
+                f"{config.ai_base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {config.ai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": config.ai_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Extract ALL text from this image. Return only the extracted text, nothing else. If no text, describe the image briefly."},
+                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_data}"}},
+                            ],
+                        }
+                    ],
+                    "max_tokens": 2048,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            ocr_result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    except Exception as e:
+        logger.error(f"OCR API error: {e}")
+        raise HTTPException(status_code=502, detail="OCR service error")
+
+    await db.update_ocr_text(chat_id, message_id, ocr_result)
+    return {"message_id": message_id, "ocr_text": ocr_result, "cached": False}
+
+
+@app.post("/api/ai/ocr-batch/{chat_id}")
+async def ai_ocr_batch(
+    chat_id: int,
+    request: Request,
+    user: UserContext = Depends(require_auth),
+):
+    """Queue batch OCR for all un-processed images in a chat. Returns count."""
+    if not config.ai_api_key:
+        raise HTTPException(status_code=503, detail="AI not configured")
+
+    _check_ai_chat_access(user, chat_id)
+
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    limit = min(body.get("limit", 20), 100)
+
+    pending = await db.get_messages_needing_ocr(chat_id, limit=limit)
+    if not pending:
+        return {"queued": 0, "message": "All images already processed"}
+
+    # Process in background with shared httpx client
+    async def _run_batch():
+        processed = 0
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                for item in pending:
+                    file_path = item["file_path"]
+                    abs_path = os.path.join(config.backup_path, file_path) if not os.path.isabs(file_path) else file_path
+                    if not os.path.exists(abs_path):
+                        continue
+                    mime = item.get("mime_type", "image/jpeg") or "image/jpeg"
+                    if not mime.startswith("image"):
+                        continue
+                    try:
+                        with open(abs_path, "rb") as f:
+                            img_data = base64.b64encode(f.read()).decode()
+                        resp = await client.post(
+                            f"{config.ai_base_url.rstrip('/')}/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {config.ai_api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "model": config.ai_model,
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {"type": "text", "text": "Extract ALL text from this image. Return only the extracted text, nothing else. If no text, describe the image briefly."},
+                                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_data}"}},
+                                        ],
+                                    }
+                                ],
+                                "max_tokens": 2048,
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        ocr_result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        await db.update_ocr_text(item["chat_id"], item["message_id"], ocr_result)
+                        processed += 1
+                    except Exception as e:
+                        logger.warning(f"Batch OCR failed for msg {item['message_id']}: {e}")
+        except Exception as e:
+            logger.error(f"Batch OCR task error: {e}")
+        logger.info(f"Batch OCR completed: {processed}/{len(pending)} images processed for chat {chat_id}")
+
+    asyncio.create_task(_run_batch())
+    return {"queued": len(pending), "message": f"Processing {len(pending)} images in background"}
+
+
+@app.post("/api/ai/annotate/{chat_id}/{message_id}")
+async def ai_annotate_message(
+    chat_id: int,
+    message_id: int,
+    request: Request,
+    user: UserContext = Depends(require_auth),
+):
+    """AI-annotate a single message (summarize, tag, categorize)."""
+    if not config.ai_api_key:
+        raise HTTPException(status_code=503, detail="AI not configured")
+
+    _check_ai_chat_access(user, chat_id)
+
+    body = await request.json()
+    instruction = body.get("instruction", "Summarize and tag this message concisely.")
+
+    # Get the message
+    async with db.db_manager.async_session_factory() as sess:
+        result = await sess.execute(
+            select(Message).where(and_(Message.chat_id == chat_id, Message.id == message_id))
+        )
+        msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    msg_text = msg.text or ""
+    if msg.ocr_text:
+        msg_text += f"\n[OCR from image]: {msg.ocr_text}"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{config.ai_base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {config.ai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": body.get("model", config.ai_model),
+                    "messages": [
+                        {"role": "system", "content": "You are an AI inventory agent annotating Telegram messages. Be concise."},
+                        {"role": "user", "content": f"{instruction}\n\nMessage:\n{msg_text}"},
+                    ],
+                    "max_tokens": 512,
+                    "temperature": 0.3,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            comment = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    except Exception as e:
+        logger.error(f"Annotate API error: {e}")
+        raise HTTPException(status_code=502, detail="AI service error")
+
+    await db.update_ai_comment(chat_id, message_id, comment)
+    return {"message_id": message_id, "ai_comment": comment}
+
+
+@app.get("/api/ai/context/{chat_id}")
+async def ai_chat_context(
+    chat_id: int,
+    limit: int = Query(default=30, le=100),
+    user: UserContext = Depends(require_auth),
+):
+    """Get AI-enriched context for a chat (messages + OCR + AI comments)."""
+    _check_ai_chat_access(user, chat_id)
+
+    context = await db.get_ai_context_for_chat(chat_id, limit=limit)
+    ocr_count = sum(1 for m in context if m.get("ocr_text"))
+    annotated_count = sum(1 for m in context if m.get("ai_comment"))
+    return {"messages": context, "ocr_count": ocr_count, "annotated_count": annotated_count}
 
 
 # ============================================================================

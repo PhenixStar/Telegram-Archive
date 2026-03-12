@@ -248,6 +248,13 @@ class Config:
         self.vapid_public_key = os.getenv("VAPID_PUBLIC_KEY", "")
         self.vapid_contact = os.getenv("VAPID_CONTACT", "mailto:admin@example.com")
 
+        # =====================================================================
+        # AI ASSISTANT
+        # =====================================================================
+        self.ai_api_key = os.getenv("AI_API_KEY", "")
+        self.ai_base_url = os.getenv("AI_BASE_URL", "https://api.z.ai/api/coding/paas/v4")
+        self.ai_model = os.getenv("AI_MODEL", "GLM-5")
+
         # Stats calculation schedule
         # Daily calculation of statistics (chat counts, message counts, etc.)
         # Default: 03:00 (3am) in the configured viewer timezone

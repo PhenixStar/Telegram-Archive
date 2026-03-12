@@ -256,7 +256,51 @@ class DatabaseAdapter:
                 .subquery()
             )
 
-            stmt = select(Chat, subq.c.last_message_date).outerjoin(subq, Chat.id == subq.c.chat_id)
+            # v8.1: Correlated scalar subqueries for last message preview
+            # Uses idx_messages_chat_date_desc index — O(1) per chat
+            last_msg_text = (
+                select(Message.text)
+                .where(Message.chat_id == Chat.id)
+                .order_by(Message.date.desc())
+                .limit(1)
+                .correlate(Chat)
+                .scalar_subquery()
+                .label("last_message_text")
+            )
+            last_msg_sender = (
+                select(User.first_name)
+                .select_from(Message.__table__.join(User.__table__, Message.sender_id == User.id))
+                .where(Message.chat_id == Chat.id)
+                .order_by(Message.date.desc())
+                .limit(1)
+                .correlate(Chat)
+                .scalar_subquery()
+                .label("last_message_sender")
+            )
+            _latest_msg_id = (
+                select(Message.id)
+                .where(Message.chat_id == Chat.id)
+                .order_by(Message.date.desc())
+                .limit(1)
+                .correlate(Chat)
+                .scalar_subquery()
+            )
+            last_msg_id = _latest_msg_id.label("last_message_id")
+            # v8.1: Media type of the latest message (for "Photo", "Video" preview fallback)
+            last_msg_media_type = (
+                select(Media.type)
+                .where(and_(Media.chat_id == Chat.id, Media.message_id == _latest_msg_id))
+                .limit(1)
+                .correlate(Chat)
+                .scalar_subquery()
+                .label("last_message_media_type")
+            )
+
+            stmt = select(
+                Chat, subq.c.last_message_date, last_msg_text, last_msg_sender, last_msg_id, last_msg_media_type
+            ).outerjoin(
+                subq, Chat.id == subq.c.chat_id
+            )
 
             # Filter by folder membership
             if folder_id is not None:
@@ -308,6 +352,10 @@ class DatabaseAdapter:
                     "created_at": row.Chat.created_at,
                     "updated_at": row.Chat.updated_at,
                     "last_message_date": row.last_message_date,
+                    "last_message_text": row.last_message_text,
+                    "last_message_sender": row.last_message_sender,
+                    "last_message_id": row.last_message_id,
+                    "last_message_media_type": row.last_message_media_type,
                 }
                 chats.append(chat_dict)
             return chats
@@ -621,6 +669,8 @@ class DatabaseAdapter:
             "created_at": message.created_at,
             "is_outgoing": message.is_outgoing,
             "is_pinned": message.is_pinned,
+            "ai_comment": message.ai_comment,
+            "ocr_text": message.ocr_text,
         }
 
     async def get_chat_stats(self, chat_id: int) -> dict[str, Any]:
@@ -2383,6 +2433,98 @@ class DatabaseAdapter:
                 await session.commit()
         except Exception as e:
             logger.debug("FTS insert skipped: %s", e)
+
+    # ========================================================================
+    # AI Assistant Methods (v8.0)
+    # ========================================================================
+
+    async def update_ai_comment(self, chat_id: int, message_id: int, comment: str) -> bool:
+        """Store an AI-generated comment/annotation on a message."""
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(
+                select(Message).where(and_(Message.chat_id == chat_id, Message.id == message_id))
+            )
+            msg = result.scalar_one_or_none()
+            if not msg:
+                return False
+            msg.ai_comment = comment
+            await session.commit()
+            return True
+
+    async def update_ocr_text(self, chat_id: int, message_id: int, ocr_text: str) -> bool:
+        """Store OCR-extracted text for a message's image/document."""
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(
+                select(Message).where(and_(Message.chat_id == chat_id, Message.id == message_id))
+            )
+            msg = result.scalar_one_or_none()
+            if not msg:
+                return False
+            msg.ocr_text = ocr_text
+            await session.commit()
+            return True
+
+    async def get_messages_needing_ocr(self, chat_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        """Get messages with images that haven't been OCR'd yet."""
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(Message.id, Message.chat_id, Media.file_path, Media.type, Media.mime_type)
+                .join(Media, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+                .where(
+                    and_(
+                        Message.chat_id == chat_id,
+                        Message.ocr_text.is_(None),
+                        Media.type.in_(["photo", "document"]),
+                        Media.downloaded == 1,
+                    )
+                )
+                .order_by(Message.date.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [
+                {"message_id": r[0], "chat_id": r[1], "file_path": r[2], "type": r[3], "mime_type": r[4]}
+                for r in result
+            ]
+
+    async def get_ai_context_for_chat(self, chat_id: int, limit: int = 30) -> list[dict[str, Any]]:
+        """Get recent messages with AI annotations for AI context building."""
+        async with self.db_manager.async_session_factory() as session:
+            # Use a subquery for media to avoid row duplication when a message has multiple media
+            media_sub = (
+                select(
+                    Media.message_id,
+                    Media.chat_id,
+                    func.min(Media.type).label("media_type"),
+                )
+                .where(Media.chat_id == chat_id)
+                .group_by(Media.message_id, Media.chat_id)
+                .subquery()
+            )
+            stmt = (
+                select(
+                    Message.id, Message.text, Message.ai_comment, Message.ocr_text,
+                    Message.date, User.first_name, User.last_name,
+                    media_sub.c.media_type,
+                )
+                .outerjoin(User, Message.sender_id == User.id)
+                .outerjoin(media_sub, and_(
+                    media_sub.c.message_id == Message.id,
+                    media_sub.c.chat_id == Message.chat_id,
+                ))
+                .where(Message.chat_id == chat_id)
+                .order_by(Message.date.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [
+                {
+                    "id": r[0], "text": r[1], "ai_comment": r[2], "ocr_text": r[3],
+                    "date": str(r[4]), "sender": f"{r[5] or ''} {r[6] or ''}".strip(),
+                    "media_type": r[7],
+                }
+                for r in result
+            ]
 
     async def close(self) -> None:
         """Close database connections."""

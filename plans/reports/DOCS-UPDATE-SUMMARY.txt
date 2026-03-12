@@ -1,0 +1,129 @@
+================================================================================
+DOCUMENTATION UPDATE SUMMARY: Viewer Advanced Features Implementation
+================================================================================
+
+Assessment Date: 2026-03-11
+Status: COMPLETE ✅
+
+EVALUATION RESULTS
+─────────────────────────────────────────────────────────────────────────────
+
+The "Viewer Advanced Features" implementation (10 completed phases) introduces
+5 major technical additions that required documentation updates:
+
+1. FTS5 full-text search system
+2. Theme system (7 themes with auto-detect)
+3. Keyboard navigation shortcuts
+4. Context menus (message, chat, lightbox)
+5. Message permalinks with deep-link routing
+
+DOCUMENTATION UPDATES PERFORMED
+─────────────────────────────────────────────────────────────────────────────
+
+✅ FILE 1: /docs/CHANGELOG.md
+   - Added v7.3.0 section with 12+ new feature entries
+   - Documented FTS5 search architecture and query sanitization
+   - Listed all 7 themes with auto-detect support
+   - Detailed keyboard shortcuts and context menu features
+   - Included 2 bug fixes (message date grouping, FTS status persistence)
+   - Lines added: ~60
+
+✅ FILE 2: /docs/ROADMAP.md
+   - Marked 3 items complete in "Viewer Polish" section
+   - Created new "v7.3.0 — Viewer Advanced Features" section
+   - Separated future work (Elasticsearch, semantic search)
+   - Updated "Recently Completed" table with 5 v7.3.0 features
+   - Lines added: ~25
+
+✅ FILE 3: /README.md
+   - Enhanced Features section with 5 new feature bullets:
+     • Full-text search (SQLite FTS5 + fallback)
+     • Theme system (7 themes, auto-detect)
+     • Keyboard shortcuts (j/k, arrows, Space, Escape)
+     • Context menus (right-click actions)
+     • Message permalinks (shareable deep links)
+   - Lines added: ~8
+
+TOTAL: 3 files updated, ~93 lines added, 0 lines removed
+IMPACT SCOPE: Feature documentation, roadmap, user-facing feature list
+
+KEY TECHNICAL DETAILS DOCUMENTED
+─────────────────────────────────────────────────────────────────────────────
+
+FTS5 Search System
+  • File: src/db/fts.py (new 116-line module)
+  • Contentless FTS5 virtual table design
+  • Query sanitization to prevent injection
+  • Batch indexing with crash recovery (checkpoint every 1000 rows)
+  • Status tracking via app_settings table
+  • Endpoint: GET /api/search?q=query&chat_id=X&limit=50&offset=0
+  • Fallback to ILIKE for PostgreSQL/unavailable FTS
+
+Theme System
+  • 6 dark themes: Midnight, Telegram Classic, AMOLED Black, Nord, Monokai,
+    Solarized Dark
+  • 1 light theme: Light Default
+  • Auto-detect via prefers-color-scheme media query
+  • 4 localStorage keys: tg-theme, tg-theme-auto, tg-theme-dark,
+    tg-theme-light
+  • CSS custom properties: var(--tg-*)
+
+Keyboard Navigation
+  • Arrow keys (⬆/⬇): Browse messages
+  • j/k: Navigation shortcuts
+  • Space/PageDown: Scroll faster
+  • Escape: Close lightbox and modals
+
+Context Menus
+  • Messages: Copy text, copy permalink, delete (admin only)
+  • Chats: Access chat options
+  • Lightbox: Image operations
+
+Message Permalinks
+  • Format: #/chat/{chat_id}/msg/{msg_id}
+  • Shareable deep links to specific messages
+  • Copy link button in context menu
+
+COVERAGE ASSESSMENT
+─────────────────────────────────────────────────────────────────────────────
+
+✅ Feature list (README)        — Complete
+✅ Changelog                    — Complete
+✅ Roadmap                      — Complete
+⚠️ API documentation           — Partial (in CHANGELOG, needs dedicated docs)
+⚠️ System architecture          — Missing (no docs/system-architecture.md)
+⚠️ Code standards              — Missing (no docs/code-standards.md)
+⚠️ Keyboard reference          — Missing (not user guide)
+⚠️ Theme customization         — Missing (CSS variable list not documented)
+
+RECOMMENDATIONS FOR FUTURE WORK
+─────────────────────────────────────────────────────────────────────────────
+
+HIGH PRIORITY:
+  1. Create docs/api-reference.md — Document all endpoints including /api/search
+  2. Create docs/user-guide.md — Keyboard shortcuts quick reference
+  3. Create docs/system-architecture.md — FTS5 index architecture, search flow
+
+MEDIUM PRIORITY:
+  1. CLI documentation — Manual FTS index rebuild instructions
+  2. Theme CSS variable reference — Full --tg-* list
+  3. Search best practices — FTS5 query syntax, limitations
+
+LOW PRIORITY:
+  1. Keyboard shortcuts cheat sheet — Printable reference
+  2. Performance tuning guide — Index rebuild batch sizes
+  3. Migration guide v7.2→v7.3 — For existing deployments
+
+FILES READY FOR REVIEW
+─────────────────────────────────────────────────────────────────────────────
+
+Full assessment report:
+  → /home/phenix/projects/apps/tele-private/repo/dev/plans/reports/
+     docs-manager-260311-1902-viewer-advanced-features-assessment.md
+
+Updated documentation:
+  → /home/phenix/projects/apps/tele-private/repo/dev/docs/CHANGELOG.md
+  → /home/phenix/projects/apps/tele-private/repo/dev/docs/ROADMAP.md
+  → /home/phenix/projects/apps/tele-private/repo/dev/README.md
+
+================================================================================

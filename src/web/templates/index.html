@@ -235,7 +235,39 @@
             width: auto;
             word-wrap: break-word;
             overflow-wrap: anywhere;
-            overflow: hidden;
+            overflow: visible; /* v8.1: allow tail pseudo-element to show */
+            position: relative;
+        }
+
+        /* v8.1: Bubble tails — smooth rounded tails matching Telegram style */
+        .bubble-tail-out::after {
+            content: '';
+            position: absolute;
+            right: -6px;
+            bottom: 0;
+            width: 9px;
+            height: 14px;
+            background: var(--bubble-bg, var(--tg-own-msg));
+            border-bottom-left-radius: 12px;
+        }
+        .bubble-tail-in::after {
+            content: '';
+            position: absolute;
+            left: -6px;
+            bottom: 0;
+            width: 9px;
+            height: 14px;
+            background: var(--bubble-bg, var(--tg-other-msg));
+            border-bottom-right-radius: 12px;
+        }
+
+        /* v8.1: Smooth message appear animation (#4) */
+        @keyframes msgAppear {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .msg-appear {
+            animation: msgAppear 0.25s ease-out both;
         }
 
         @media (min-width: 768px) {
@@ -435,6 +467,15 @@
         @keyframes toast-slide-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toast-slide-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(20px); } }
 
+        /* AI side panel transitions */
+        .ai-panel-enter-active { transition: width 0.25s ease, opacity 0.25s ease; }
+        .ai-panel-leave-active { transition: width 0.2s ease, opacity 0.15s ease; }
+        .ai-panel-enter-from, .ai-panel-leave-to { width: 0 !important; min-width: 0 !important; opacity: 0; overflow: hidden; }
+        .ai-side-panel { transition: width 0.25s ease; }
+        @media (max-width: 768px) {
+            .ai-side-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 30; width: 100% !important; max-width: 100% !important; }
+        }
+
         /* Search highlighting */
         mark { background: #ffeb3b; color: #000; border-radius: 2px; padding: 0 1px; }
         mark.current { background: #ff9800; }
@@ -616,16 +657,6 @@
                                     <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
                                 </svg>
                             </button>
-                        </div>
-                    </div>
-                    <!-- AI Assistant stub -->
-                    <div class="relative">
-                        <button @click="showAiComingSoon = !showAiComingSoon" class="p-1" style="color: var(--tg-muted);" title="AI Assistant" aria-label="AI Assistant">
-                            <i class="fas fa-brain text-xs"></i>
-                        </button>
-                        <div v-if="showAiComingSoon" class="absolute right-0 top-full mt-1 p-3 rounded-lg shadow-lg text-sm w-48 z-30" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border); color: var(--tg-text);">
-                            <div class="font-semibold mb-1">AI Assistant</div>
-                            <div class="text-xs" style="color: var(--tg-muted);">Coming soon.</div>
                         </div>
                     </div>
                     <!-- Settings (all users) -->
@@ -927,18 +958,26 @@
                                             <span v-if="chat.is_forum" class="text-blue-400 mr-1 text-xs" title="Forum">#</span>
                                             {{ getChatName(chat) }}
                                         </h3>
-                                        <span class="text-xs text-tg-muted">{{ formatDate(chat.last_message_date) }}</span>
+                                        <div class="flex items-center gap-1.5">
+                                            <!-- v8.1: Unread indicator dot -->
+                                            <span v-if="hasUnread(chat)" class="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+                                            <span class="text-xs text-tg-muted" :class="{'text-blue-400 font-medium': hasUnread(chat)}">{{ formatDate(chat.last_message_date) }}</span>
+                                        </div>
                                     </div>
+                                    <!-- v8.1: Last message preview (like Telegram Web) -->
                                     <p class="text-sm text-tg-muted truncate">
-                                        <span v-if="chat.username" class="text-blue-400 font-mono">@{{ chat.username }}</span>
-                                        <span v-if="chat.username"> • </span>{{ chat.type }}
-                                        <span v-if="chat.is_forum" class="text-blue-400/70"> • Forum</span>
-                                        <span v-if="chat.type !== 'private' && chat.participants_count">
-                                            • {{ chat.participants_count }} participants
-                                        </span>
-                                        <span class="text-tg-muted/70 text-xs font-mono ml-1">
-                                            • ID: {{ chat.id }}
-                                        </span>
+                                        <template v-if="chat.last_message_text || chat.last_message_media_type">
+                                            <span v-if="chat.type !== 'private' && chat.last_message_sender"
+                                                class="text-blue-400 font-medium">{{ chat.last_message_sender }}:&nbsp;</span>
+                                            <span v-if="chat.last_message_media_type && !chat.last_message_text"
+                                                class="text-blue-400/70 italic">{{ {photo:'Photo',video:'Video',voice:'Voice message',audio:'Audio',sticker:'Sticker',animation:'GIF',document:'File'}[chat.last_message_media_type] || chat.last_message_media_type }}</span>
+                                            <span v-if="chat.last_message_text" class="opacity-80">{{ chat.last_message_text.substring(0, 100) }}</span>
+                                        </template>
+                                        <template v-else>
+                                            <span v-if="chat.username" class="text-blue-400 font-mono text-xs">@{{ chat.username }}</span>
+                                            <span v-if="chat.username"> • </span>
+                                            <span class="text-xs">{{ chat.type }}</span>
+                                        </template>
                                     </p>
                                 </div>
                             </div>
@@ -1058,6 +1097,16 @@
                                         d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                                 </svg>
                             </button>
+
+                            <!-- AI Assistant Panel Toggle -->
+                            <button @click="showAiPanel = !showAiPanel"
+                                class="p-1.5 sm:p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
+                                :style="showAiPanel ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
+                                title="AI Assistant">
+                                <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
+                                </svg>
+                            </button>
                         </div>
                     </div>
 
@@ -1146,10 +1195,17 @@
                                 </div>
                             </div>
                             <!-- Regular Message (hide duplicate album messages - only show first in group) -->
-                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="flex" :class="isOwnMessage(msg) ? 'justify-end' : 'justify-start'">
+                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="flex items-end gap-1.5" :class="isOwnMessage(msg) ? 'justify-end' : 'justify-start'">
+                                <!-- v8.1: Sender mini-avatar for incoming group messages -->
+                                <div v-if="!isOwnMessage(msg) && isGroup && showSenderName(index)"
+                                    class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mb-0.5"
+                                    :style="{ background: `hsl(${getSenderColor(msg)}, 50%, 40%)` }">
+                                    {{ getSenderInitial(msg) }}
+                                </div>
+                                <div v-else-if="!isOwnMessage(msg) && isGroup" class="w-7 shrink-0"></div>
                                 <div class="message-bubble group relative p-3 text-sm shadow-sm text-gray-100"
-                                    :class="isOwnMessage(msg) ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md'"
-                                    :style="getSenderStyle(msg)"
+                                    :class="[isOwnMessage(msg) ? 'rounded-2xl rounded-br-md bubble-tail-out' : 'rounded-2xl rounded-bl-md bubble-tail-in', initialLoadDone ? 'msg-appear' : '']"
+                                    :style="[getSenderStyle(msg), {'--bubble-bg': getMessageBackground(msg)}]"
                                     @contextmenu.prevent="openContextMenu($event, 'message', msg)">
                                     <!-- Permalink icon (hover) -->
                                     <button @click.stop="copyPermalink(msg)"
@@ -1269,20 +1325,50 @@
                                                 @error="handleImageError($event, msg)">
                                         </div>
 
-                                        <!-- Audio / Voice Notes -->
+                                        <!-- v8.1: Voice Notes — waveform visualization -->
+                                        <div v-else-if="msg.media?.type === 'voice'"
+                                            class="w-full min-w-[250px] max-w-sm p-3 rounded-xl">
+                                            <div class="flex items-center gap-3">
+                                                <button @click="toggleVoicePlay($event, msg)"
+                                                    class="w-10 h-10 rounded-full bg-blue-500 hover:bg-blue-400 flex items-center justify-center shrink-0 transition-colors">
+                                                    <svg v-if="!voicePlaying[msg.id]" class="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                                        <path d="M8 5v14l11-7z"/>
+                                                    </svg>
+                                                    <svg v-else class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                                                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                                                    </svg>
+                                                </button>
+                                                <div class="flex-1 flex items-end gap-px h-8">
+                                                    <div v-for="(h, i) in getWaveformBars(msg)" :key="i"
+                                                        class="flex-1 rounded-full transition-all duration-150"
+                                                        :style="{ background: voicePlaying[msg.id] && voiceProgress[msg.id] > (i / WAVEFORM_BARS) ? 'var(--tg-accent, #3b82f6)' : 'var(--tg-muted, rgba(255,255,255,0.3))', height: h + '%', minWidth: '2px', maxWidth: '4px' }">
+                                                    </div>
+                                                </div>
+                                                <span class="text-xs shrink-0 tabular-nums" style="color: var(--tg-muted);">
+                                                    {{ formatDuration(msg.media?.duration) }}
+                                                </span>
+                                            </div>
+                                            <audio :ref="el => { if (el) voiceAudioRefs[msg.id] = el }"
+                                                preload="metadata" :src="getMediaUrl(msg)"
+                                                @timeupdate="updateVoiceProgress(msg, $event)"
+                                                @ended="voicePlaying[msg.id] = false; voiceProgress[msg.id] = 0"
+                                                class="hidden">
+                                            </audio>
+                                        </div>
+
+                                        <!-- Audio (music, non-voice) -->
                                         <div v-else-if="isAudioFile(msg)"
                                             class="w-full min-w-[250px] max-w-md bg-gradient-to-r from-gray-800 to-gray-700 p-3 rounded-xl shadow-lg">
-                                            <audio 
-                                                controls 
-                                                preload="metadata" 
-                                                class="w-full" 
+                                            <audio
+                                                controls
+                                                preload="metadata"
+                                                class="w-full"
                                                 style="height: 40px; min-height: 40px;"
                                                 :src="getMediaUrl(msg)"
                                                 @error="console.error('Audio load error:', getMediaUrl(msg))">
                                                 Your browser does not support audio playback.
                                             </audio>
                                             <div class="flex items-center gap-2 mt-2 text-xs text-gray-400">
-                                                <span>🎵</span>
                                                 <span class="truncate">{{ getDocumentDisplayName(msg) }}</span>
                                             </div>
                                         </div>
@@ -1364,6 +1450,22 @@
                                     <div class="whitespace-pre-wrap break-words message-text"
                                         v-html="linkifyText(msg.text)"></div>
 
+                                    <!-- OCR text extracted from image -->
+                                    <div v-if="msg.ocr_text" class="mt-1.5 px-2 py-1.5 rounded text-xs" style="background: var(--tg-hover); border-left: 2px solid var(--tg-accent);">
+                                        <div class="flex items-center gap-1 mb-0.5" style="color: var(--tg-accent);">
+                                            <i class="fas fa-eye text-[10px]"></i><span class="font-medium">OCR</span>
+                                        </div>
+                                        <div style="color: var(--tg-muted);">{{ msg.ocr_text }}</div>
+                                    </div>
+
+                                    <!-- AI annotation -->
+                                    <div v-if="msg.ai_comment" class="mt-1.5 px-2 py-1.5 rounded text-xs" style="background: var(--tg-hover); border-left: 2px solid #a78bfa;">
+                                        <div class="flex items-center gap-1 mb-0.5" style="color: #a78bfa;">
+                                            <i class="fas fa-brain text-[10px]"></i><span class="font-medium">AI</span>
+                                        </div>
+                                        <div style="color: var(--tg-muted);">{{ msg.ai_comment }}</div>
+                                    </div>
+
                                     <!-- Reactions -->
                                     <div v-if="msg.reactions && msg.reactions.length > 0" class="mt-2 flex flex-wrap gap-1.5">
                                         <div v-for="reaction in msg.reactions" :key="reaction.emoji"
@@ -1417,6 +1519,204 @@
                     </div>
                 </template>
             </div>
+
+            <!-- AI Assistant Side Panel (IDE-style) -->
+            <transition name="ai-panel">
+            <div v-if="showAiPanel && selectedChat" class="ai-side-panel flex flex-col border-l" style="background: var(--tg-bg); border-color: var(--tg-border); width: 380px; min-width: 320px; max-width: 480px;">
+                <!-- Panel Header -->
+                <div class="flex items-center justify-between px-4 py-3 border-b" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-5 h-5" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
+                        </svg>
+                        <span class="font-semibold text-sm" style="color: var(--tg-text);">AI Assistant</span>
+                    </div>
+                    <button @click="showAiPanel = false" class="p-1 rounded hover:bg-white/10 transition-colors" style="color: var(--tg-muted);" title="Close panel">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Model Selector -->
+                <div class="px-4 py-3 border-b" style="border-color: var(--tg-border);">
+                    <label class="text-xs font-medium mb-1.5 block" style="color: var(--tg-muted);">Model</label>
+                    <select v-model="aiSelectedModel" class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/50" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                        <option value="auto">Auto (server default)</option>
+                        <optgroup label="Z-AI / GLM">
+                            <option value="GLM-5">GLM-5</option>
+                            <option value="GLM-4.7">GLM-4.7</option>
+                            <option value="GLM-4.5-Air">GLM-4.5 Air</option>
+                        </optgroup>
+                        <optgroup label="MiniMax">
+                            <option value="MiniMax-M2.5">MiniMax M2.5</option>
+                            <option value="MiniMax-M2.5-highspeed">MiniMax M2.5 Highspeed</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <!-- AI Tools Tabs -->
+                <div class="flex border-b" style="border-color: var(--tg-border);">
+                    <button v-for="tab in aiTabs" :key="tab.id" @click="aiActiveTab = tab.id"
+                        class="flex-1 px-3 py-2.5 text-xs font-medium transition-colors relative"
+                        :style="aiActiveTab === tab.id ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'">
+                        <i :class="tab.icon" class="mr-1"></i>{{ tab.label }}
+                        <div v-if="aiActiveTab === tab.id" class="absolute bottom-0 left-2 right-2 h-0.5 rounded-t" style="background: var(--tg-accent);"></div>
+                    </button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="flex-1 overflow-y-auto">
+                    <!-- Chat Tab: AI conversation -->
+                    <div v-if="aiActiveTab === 'chat'" class="flex flex-col h-full">
+                        <div class="flex-1 overflow-y-auto p-4 space-y-3">
+                            <div v-if="aiMessages.length === 0" class="text-center py-8">
+                                <svg class="w-12 h-12 mx-auto mb-3 opacity-30" style="color: var(--tg-muted);" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
+                                </svg>
+                                <p class="text-sm" style="color: var(--tg-muted);">Ask about this chat or get AI help</p>
+                                <div class="mt-3 space-y-1.5">
+                                    <button @click="aiPromptInput = 'Summarize the recent messages'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-compress-alt mr-1.5" style="color: var(--tg-accent);"></i>Summarize recent messages
+                                    </button>
+                                    <button @click="aiPromptInput = 'What are the key topics discussed?'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-tags mr-1.5" style="color: var(--tg-accent);"></i>Identify key topics
+                                    </button>
+                                    <button @click="aiPromptInput = 'Draft a reply to the last message'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-reply mr-1.5" style="color: var(--tg-accent);"></i>Draft a reply
+                                    </button>
+                                    <button @click="runBatchOcr" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-eye mr-1.5" style="color: var(--tg-accent);"></i>OCR all images in chat
+                                    </button>
+                                    <button @click="aiPromptInput = 'List all OCR text found in images'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-file-alt mr-1.5" style="color: var(--tg-accent);"></i>Show OCR inventory
+                                    </button>
+                                </div>
+                            </div>
+                            <template v-for="(msg, i) in aiMessages" :key="i">
+                                <div class="flex gap-2" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                                    <div class="max-w-[85%] rounded-xl px-3 py-2 text-sm"
+                                        :style="msg.role === 'user' ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                        <div style="white-space: pre-wrap;">{{ msg.content }}</div>
+                                        <div class="text-[10px] mt-1 opacity-60">{{ msg.time }}</div>
+                                    </div>
+                                </div>
+                            </template>
+                            <div v-if="aiLoading" class="flex gap-2 justify-start">
+                                <div class="rounded-xl px-3 py-2 text-sm" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                    <div class="flex gap-1">
+                                        <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 0ms;"></span>
+                                        <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 150ms;"></span>
+                                        <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 300ms;"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Input -->
+                        <div class="p-3 border-t" style="border-color: var(--tg-border);">
+                            <div class="flex gap-2">
+                                <input v-model="aiPromptInput" @keydown.enter.prevent="sendAiMessage" type="text"
+                                    placeholder="Ask AI about this chat..."
+                                    class="flex-1 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/50"
+                                    style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                <button @click="sendAiMessage" :disabled="!aiPromptInput.trim() || aiLoading"
+                                    class="px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                                    style="background: var(--tg-accent); color: #fff;">
+                                    <i class="fas fa-paper-plane text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sort Tab: Chat history sorting -->
+                    <div v-if="aiActiveTab === 'sort'" class="p-4 space-y-4">
+                        <div>
+                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Sort Messages By</label>
+                            <div class="space-y-1.5">
+                                <button v-for="opt in aiSortOptions" :key="opt.id" @click="aiSortBy = opt.id"
+                                    class="w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2 transition-colors"
+                                    :style="aiSortBy === opt.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <i :class="opt.icon" class="w-4 text-center"></i>
+                                    <span>{{ opt.label }}</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Filter</label>
+                            <div class="space-y-1.5">
+                                <button v-for="f in aiFilterOptions" :key="f.id" @click="toggleAiFilter(f.id)"
+                                    class="w-full text-left px-3 py-2 rounded-lg text-xs flex items-center gap-2 transition-colors"
+                                    :style="aiActiveFilters.includes(f.id) ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <i :class="f.icon" class="w-4 text-center"></i>
+                                    <span>{{ f.label }}</span>
+                                </button>
+                            </div>
+                        </div>
+                        <button @click="applyAiSort" class="w-full py-2.5 rounded-lg text-sm font-medium transition-colors" style="background: var(--tg-accent); color: #fff;">
+                            <i class="fas fa-check mr-1.5"></i>Apply Sort & Filter
+                        </button>
+                    </div>
+
+                    <!-- Auto-Reply Tab -->
+                    <div v-if="aiActiveTab === 'auto'" class="p-4 space-y-4">
+                        <div class="rounded-xl p-4" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-sm font-medium" style="color: var(--tg-text);">Auto-Reply</span>
+                                <button @click="aiAutoReplyEnabled = !aiAutoReplyEnabled"
+                                    class="w-10 h-5 rounded-full transition-colors relative"
+                                    :style="aiAutoReplyEnabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
+                                    <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+                                        :class="aiAutoReplyEnabled ? 'translate-x-5' : 'translate-x-0.5'"></span>
+                                </button>
+                            </div>
+                            <p class="text-xs mb-3" style="color: var(--tg-muted);">When enabled, AI will draft or send replies automatically when you're away.</p>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Mode</label>
+                                    <select v-model="aiAutoReplyMode" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="draft">Draft only (review before sending)</option>
+                                        <option value="auto">Auto-send after delay</option>
+                                    </select>
+                                </div>
+                                <div v-if="aiAutoReplyMode === 'auto'">
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Delay before sending</label>
+                                    <select v-model="aiAutoReplyDelay" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="30">30 seconds</option>
+                                        <option value="60">1 minute</option>
+                                        <option value="300">5 minutes</option>
+                                        <option value="900">15 minutes</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Persona / Tone</label>
+                                    <select v-model="aiAutoReplyTone" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="professional">Professional</option>
+                                        <option value="friendly">Friendly</option>
+                                        <option value="concise">Concise</option>
+                                        <option value="custom">Custom instructions...</option>
+                                    </select>
+                                </div>
+                                <div v-if="aiAutoReplyTone === 'custom'">
+                                    <textarea v-model="aiAutoReplyCustom" rows="3" placeholder="Describe how AI should reply on your behalf..."
+                                        class="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none"
+                                        style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rounded-xl p-4" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                            <div class="text-sm font-medium mb-2" style="color: var(--tg-text);">Status</div>
+                            <div class="flex items-center gap-2 text-xs" style="color: var(--tg-muted);">
+                                <span class="w-2 h-2 rounded-full" :style="aiAutoReplyEnabled ? 'background: #22c55e;' : 'background: var(--tg-border);'"></span>
+                                {{ aiAutoReplyEnabled ? 'Active — monitoring for new messages' : 'Disabled' }}
+                            </div>
+                            <div v-if="aiAutoReplyEnabled" class="mt-2 text-xs" style="color: var(--tg-muted);">
+                                Drafts pending: {{ aiDraftCount }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </transition>
         </div>
 
         <!-- Date Picker Modal -->
@@ -1848,6 +2148,7 @@
                 const loading = ref(false)
                 const loadingChats = ref(true)  // Start as true, loading on init
                 const loadingStats = ref(true)  // Start as true, loading on init
+                const initialLoadDone = ref(false) // v8.1: gates msg-appear animation
                 const page = ref(0)
                 const hasMore = ref(true)
                 const messagesContainer = ref(null)
@@ -1924,7 +2225,112 @@
                 // Settings modal
                 const viewerTimezone = ref('Europe/Madrid')  // Default, updated from config or localStorage
                 const showSettingsModal = ref(false)
-                const showAiComingSoon = ref(false)
+                // AI Assistant panel state
+                const showAiPanel = ref(false)
+                const aiSelectedModel = ref('auto')
+                const aiActiveTab = ref('chat')
+                const aiTabs = [
+                    { id: 'chat', label: 'Chat', icon: 'fas fa-comment-dots' },
+                    { id: 'sort', label: 'Sort', icon: 'fas fa-sort-amount-down' },
+                    { id: 'auto', label: 'Auto', icon: 'fas fa-robot' },
+                ]
+                const aiMessages = ref([])
+                const aiLoading = ref(false)
+                const aiPromptInput = ref('')
+                const aiSortBy = ref('date')
+                const aiSortOptions = [
+                    { id: 'date', label: 'Date (default)', icon: 'fas fa-calendar' },
+                    { id: 'sender', label: 'By Sender', icon: 'fas fa-user' },
+                    { id: 'length', label: 'By Length', icon: 'fas fa-align-left' },
+                    { id: 'media', label: 'Media First', icon: 'fas fa-image' },
+                    { id: 'relevance', label: 'AI Relevance', icon: 'fas fa-brain' },
+                ]
+                const aiFilterOptions = [
+                    { id: 'text', label: 'Text Only', icon: 'fas fa-font' },
+                    { id: 'media', label: 'Has Media', icon: 'fas fa-photo-video' },
+                    { id: 'links', label: 'Has Links', icon: 'fas fa-link' },
+                    { id: 'forwarded', label: 'Forwarded', icon: 'fas fa-share' },
+                ]
+                const aiActiveFilters = ref([])
+                const aiAutoReplyEnabled = ref(false)
+                const aiAutoReplyMode = ref('draft')
+                const aiAutoReplyDelay = ref('60')
+                const aiAutoReplyTone = ref('professional')
+                const aiAutoReplyCustom = ref('')
+                const aiDraftCount = ref(0)
+
+                const toggleAiFilter = (id) => {
+                    const i = aiActiveFilters.value.indexOf(id)
+                    if (i >= 0) aiActiveFilters.value.splice(i, 1)
+                    else aiActiveFilters.value.push(id)
+                }
+
+                const sendAiMessage = async () => {
+                    const text = aiPromptInput.value.trim()
+                    if (!text || aiLoading.value) return
+                    const now = new Date()
+                    const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    aiMessages.value.push({ role: 'user', content: text, time })
+                    aiPromptInput.value = ''
+                    aiLoading.value = true
+                    try {
+                        // Build context from recent visible messages
+                        const ctx = sortedMessages.value.slice(0, 30).map(m => ({
+                            sender: m.sender_name || m.sender_id,
+                            text: m.text || (m.media?.type ? `[${m.media.type}]` : ''),
+                        }))
+                        const model = aiSelectedModel.value === 'auto' ? undefined : aiSelectedModel.value
+                        const res = await fetch('/api/ai/chat', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: text, model, chat_id: selectedChat.value?.id, context: ctx }),
+                        })
+                        const t2 = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            aiMessages.value.push({ role: 'assistant', content: data.reply, time: t2 })
+                        } else {
+                            const err = await res.json().catch(() => ({ detail: 'AI service error' }))
+                            aiMessages.value.push({ role: 'assistant', content: `Error: ${err.detail || 'Request failed'}`, time: t2 })
+                        }
+                    } catch (e) {
+                        const t2 = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        aiMessages.value.push({ role: 'assistant', content: 'Network error — could not reach AI service.', time: t2 })
+                    } finally {
+                        aiLoading.value = false
+                    }
+                }
+
+                const applyAiSort = () => {
+                    showToast(`Sort: ${aiSortBy.value}, Filters: ${aiActiveFilters.value.length ? aiActiveFilters.value.join(', ') : 'none'}`)
+                }
+
+                const aiOcrRunning = ref(false)
+                const runBatchOcr = async () => {
+                    if (!selectedChat.value || aiOcrRunning.value) return
+                    aiOcrRunning.value = true
+                    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    aiMessages.value.push({ role: 'user', content: 'OCR all images in this chat', time })
+                    try {
+                        const res = await fetch(`/api/ai/ocr-batch/${selectedChat.value.id}`, {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ limit: 50 }),
+                        })
+                        const t2 = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            aiMessages.value.push({ role: 'assistant', content: data.queued > 0 ? `Started OCR on ${data.queued} images. Processing in background — results will be saved to each message's OCR field.` : 'All images already processed.', time: t2 })
+                        } else {
+                            const err = await res.json().catch(() => ({}))
+                            aiMessages.value.push({ role: 'assistant', content: `OCR error: ${err.detail || 'Failed'}`, time: t2 })
+                        }
+                    } catch (e) {
+                        aiMessages.value.push({ role: 'assistant', content: 'Network error running OCR.', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })
+                    } finally {
+                        aiOcrRunning.value = false
+                    }
+                }
                 const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
                 const settingsTimezoneAuto = ref(localStorage.getItem('tg-tz-auto') !== 'false')
                 const settingsTimezone = ref(localStorage.getItem('tg-viewer-timezone') || detectedTimezone)
@@ -3109,6 +3515,22 @@
                     showAdminPanel.value = false
                 }
 
+                // v8.1: Unread badge tracking via localStorage
+                let _savedSeen = {}
+                try { _savedSeen = JSON.parse(localStorage.getItem('tg_last_seen') || '{}') } catch {}
+                const lastSeenMap = Vue.reactive(_savedSeen)
+                const markChatSeen = (chat) => {
+                    if (chat.last_message_id) {
+                        lastSeenMap[chat.id] = chat.last_message_id
+                        localStorage.setItem('tg_last_seen', JSON.stringify(lastSeenMap))
+                    }
+                }
+                const hasUnread = (chat) => {
+                    if (!chat.last_message_id) return false
+                    const seen = lastSeenMap[chat.id]
+                    return !seen || chat.last_message_id > seen
+                }
+
                 const filteredChats = computed(() => {
                     // If searching, use server-side search results
                     if (searchQuery.value.trim()) {
@@ -3280,8 +3702,14 @@
                     messageSearchQuery.value = ''
                     chatStats.value = null  // Reset stats when changing chat
                     pinnedMessages.value = []  // Reset pinned messages when changing chat
+                    // v8.1: Clear voice message state to prevent memory leak
+                    Object.keys(voicePlaying).forEach(k => { delete voicePlaying[k] })
+                    Object.keys(voiceProgress).forEach(k => { delete voiceProgress[k] })
+                    Object.keys(voiceAudioRefs).forEach(k => { delete voiceAudioRefs[k] })
                     currentPinnedIndex.value = 0
                     showPinnedOnly.value = false  // Exit pinned-only view when changing chat
+                    // v8.1: Mark chat as seen (for unread badge)
+                    markChatSeen(chat)
                     await loadMessages()
                     if (chatVersion !== myVersion) return  // Another chat was selected, abort
                     await loadChatStats(chat.id)  // Load stats for this chat
@@ -3289,6 +3717,10 @@
                     await nextTick()
                     if (chatVersion !== myVersion) return
                     scrollToBottom()
+                    // v8.1: Enable message appear animation only after initial render
+                    if (!initialLoadDone.value) {
+                        requestAnimationFrame(() => { initialLoadDone.value = true })
+                    }
                     // Setup observer for auto-loading older messages
                     setupMessagesScrollObserver()
                     // Start auto-refresh for new messages
@@ -3558,6 +3990,12 @@
                     return 'Deleted Account'
                 }
 
+                // v8.1: Get first letter of sender name for mini-avatar
+                const getSenderInitial = (msg) => {
+                    const name = getSenderName(msg)
+                    return name ? name.charAt(0).toUpperCase() : '?'
+                }
+
                 // Get name for forwarded message source
                 const getForwardName = (msg) => {
                     // First check raw_data for the resolved name
@@ -3588,6 +4026,56 @@
                     return filename.endsWith('.ogg') || filename.endsWith('.mp3') ||
                         filename.endsWith('.wav') || filename.endsWith('.m4a') ||
                         filename.endsWith('.opus') || filename.endsWith('.flac')
+                }
+
+                // v8.1: Voice message waveform state
+                const WAVEFORM_BARS = 32
+                const voicePlaying = Vue.reactive({})
+                const voiceProgress = Vue.reactive({})
+                const voiceAudioRefs = Vue.reactive({})
+
+                const getWaveformBars = (msg) => {
+                    // Generate deterministic pseudo-waveform from message ID
+                    const bars = []
+                    let seed = msg.id || 1
+                    for (let i = 0; i < WAVEFORM_BARS; i++) {
+                        seed = (seed * 16807 + 13) % 2147483647
+                        bars.push(20 + (seed % 80)) // 20-100% height range
+                    }
+                    return bars
+                }
+
+                const toggleVoicePlay = (event, msg) => {
+                    const audio = voiceAudioRefs[msg.id]
+                    if (!audio) return
+                    if (voicePlaying[msg.id]) {
+                        audio.pause()
+                        voicePlaying[msg.id] = false
+                    } else {
+                        // Pause all other voice messages
+                        Object.keys(voicePlaying).forEach(k => {
+                            if (voicePlaying[k] && voiceAudioRefs[k]) {
+                                voiceAudioRefs[k].pause()
+                                voicePlaying[k] = false
+                            }
+                        })
+                        audio.play().catch(() => {})
+                        voicePlaying[msg.id] = true
+                    }
+                }
+
+                const updateVoiceProgress = (msg, event) => {
+                    const audio = event.target
+                    if (audio.duration) {
+                        voiceProgress[msg.id] = audio.currentTime / audio.duration
+                    }
+                }
+
+                const formatDuration = (seconds) => {
+                    if (!seconds) return '0:00'
+                    const m = Math.floor(seconds / 60)
+                    const s = Math.floor(seconds % 60)
+                    return `${m}:${s.toString().padStart(2, '0')}`
                 }
 
                 const exportChat = () => {
@@ -3897,7 +4385,7 @@
                         if (contextMenu.visible) { closeContextMenu(); return }
                         if (showDatePickerModal.value) { closeDatePicker(); return }
                         if (showSettingsModal.value) { showSettingsModal.value = false; return }
-                        if (showAiComingSoon.value) { showAiComingSoon.value = false; return }
+                        if (showAiPanel.value) { showAiPanel.value = false; return }
                         if (searchBarVisible.value) { clearSearch(); return }
                         return
                     }
@@ -4485,12 +4973,15 @@
                 return {
                     chats,
                     filteredChats,
+                    hasUnread,
+                    markChatSeen,
                     selectedChat,
                     messages,
                     sortedMessages,
                     searchQuery,
                     messageSearchQuery,
                     loading,
+                    initialLoadDone,
                     isGroup,
                     selectChat,
                     chatStats,
@@ -4504,6 +4995,7 @@
                     searchMessages,
                     isOwnMessage,
                     getSenderName,
+                    getSenderInitial,
                     getForwardName,
                     showSenderName,
                     showDateSeparator,
@@ -4609,7 +5101,28 @@
                     toast,
                     showToast,
                     showSettingsModal,
-                    showAiComingSoon,
+                    showAiPanel,
+                    aiSelectedModel,
+                    aiActiveTab,
+                    aiTabs,
+                    aiMessages,
+                    aiLoading,
+                    aiPromptInput,
+                    sendAiMessage,
+                    aiSortBy,
+                    aiSortOptions,
+                    aiFilterOptions,
+                    aiActiveFilters,
+                    toggleAiFilter,
+                    applyAiSort,
+                    aiOcrRunning,
+                    runBatchOcr,
+                    aiAutoReplyEnabled,
+                    aiAutoReplyMode,
+                    aiAutoReplyDelay,
+                    aiAutoReplyTone,
+                    aiAutoReplyCustom,
+                    aiDraftCount,
                     settingsTimezone,
                     settingsTimezoneAuto,
                     detectedTimezone,
@@ -4625,10 +5138,20 @@
                     toggleThemeAutoDetect,
                     // Colors / avatars
                     getSenderStyle,
+                    getMessageBackground,
+                    getSenderColor,
                     getSenderNameColor,
                     getPollPercentage,
                     isDeletedChat,
                     isAudioFile,
+                    WAVEFORM_BARS,
+                    voicePlaying,
+                    voiceProgress,
+                    voiceAudioRefs,
+                    getWaveformBars,
+                    toggleVoicePlay,
+                    updateVoiceProgress,
+                    formatDuration,
                     exportChat,
                     // Error states
                     chatsError,
