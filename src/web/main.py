@@ -2652,6 +2652,81 @@ async def ai_chat_context(
 
 
 # ============================================================================
+# Media / Members / Density Endpoints (Phase 5–7)
+# ============================================================================
+
+
+@app.get("/api/chats/{chat_id}/media")
+async def get_chat_media(
+    chat_id: int,
+    user: UserContext = Depends(require_auth),
+    media_type: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    before: int | None = Query(None),
+):
+    """Get media messages for a chat with optional type filter and cursor pagination."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    valid_types = {"photo", "video", "voice", "document", "animation"}
+    if media_type and media_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid media_type. Must be one of: {', '.join(sorted(valid_types))}")
+
+    try:
+        result = await db.get_media_messages(chat_id, media_type=media_type, limit=limit, before=before)
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching media messages: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/chats/{chat_id}/members")
+async def get_chat_members(
+    chat_id: int,
+    user: UserContext = Depends(require_auth),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Get unique senders in a chat with message counts."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        members = await db.get_chat_members(chat_id, limit=limit, offset=offset)
+        return {"members": members}
+    except Exception as e:
+        logger.error(f"Error fetching chat members: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/chats/{chat_id}/density")
+async def get_chat_density(
+    chat_id: int,
+    user: UserContext = Depends(require_auth),
+    granularity: str = Query("week"),
+    timezone: str | None = Query(None),
+):
+    """Get message count per time period for timeline/heatmap visualisation."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if granularity not in ("day", "week", "month"):
+        raise HTTPException(status_code=400, detail="granularity must be day, week, or month")
+
+    tz_str = timezone or config.viewer_timezone or "UTC"
+
+    try:
+        density = await db.get_message_density(chat_id, granularity=granularity, timezone=tz_str)
+        return {"density": density, "granularity": granularity}
+    except Exception as e:
+        logger.error(f"Error fetching message density: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ============================================================================
 # Real-time WebSocket Endpoints (v5.0)
 # ============================================================================
 

@@ -371,6 +371,63 @@
             background: #475569 !important;
         }
 
+        /* Floating Date Badge */
+        .floating-date-badge {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 15;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.85);
+            background: rgba(0,0,0,0.45);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        /* Search Keyword Highlight */
+        .search-highlight {
+            background: rgba(250, 204, 21, 0.3);
+            color: inherit;
+            border-radius: 2px;
+            padding: 0 1px;
+        }
+
+        /* Skeleton Shimmer */
+        .skeleton-shimmer {
+            background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer {
+            from { background-position: -200% 0; }
+            to { background-position: 200% 0; }
+        }
+
+        /* Context Menu Entry Animation */
+        .ctx-menu-enter {
+            animation: ctx-menu-in 0.1s ease-out;
+        }
+        @keyframes ctx-menu-in {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        /* Reduced Motion */
+        @media (prefers-reduced-motion: reduce) {
+            .msg-appear,
+            .skeleton-shimmer,
+            .ctx-menu-enter,
+            .floating-date-badge {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+
         /* Scroll to Bottom Button */
         .scroll-to-bottom-btn {
             position: absolute;
@@ -1004,7 +1061,7 @@
                                 </template>
                             </div>
                             <div class="min-w-0 flex-1 max-w-[180px] sm:max-w-xs">
-                                <h2 class="font-bold text-base sm:text-lg truncate">{{ getChatName(selectedChat) }}</h2>
+                                <h2 class="font-bold text-base sm:text-lg truncate cursor-pointer hover:opacity-80 transition-opacity" @click="openProfile">{{ getChatName(selectedChat) }}</h2>
                                 <p class="text-xs text-tg-muted truncate">
                                     <template v-if="currentNav.type === 'chat' && currentNav.topicTitle">
                                         # {{ currentNav.topicTitle }}
@@ -1040,7 +1097,30 @@
                                             d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                     </svg>
                                 </div>
-                                <!-- Advanced search toggle -->
+                                <!-- Date filter fields — inline, LEFT of the toggle button -->
+                                <div v-if="showAdvancedSearch" class="flex items-center gap-1.5">
+                                    <input v-model="searchDateFrom" type="date"
+                                        class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none w-[120px]"
+                                        title="From date">
+                                    <span class="text-gray-500 text-xs">&mdash;</span>
+                                    <input v-model="searchDateTo" type="date"
+                                        class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none w-[120px]"
+                                        title="To date">
+                                    <!-- Confirm: greyed when empty, green when dates present -->
+                                    <button @click="searchMessages"
+                                        :disabled="!searchDateFrom && !searchDateTo"
+                                        :class="(searchDateFrom || searchDateTo) ? 'text-green-400 hover:text-green-300' : 'text-gray-600 cursor-not-allowed'"
+                                        class="p-1 rounded transition-colors" title="Apply date filter">
+                                        <i class="fas fa-check text-xs"></i>
+                                    </button>
+                                    <!-- Clear dates -->
+                                    <button v-if="searchDateFrom || searchDateTo"
+                                        @click="searchDateFrom = ''; searchDateTo = ''; searchMessages()"
+                                        class="text-gray-400 hover:text-white text-xs px-1" title="Clear dates">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <!-- Advanced search toggle (stays anchored) -->
                                 <button @click="showAdvancedSearch = !showAdvancedSearch"
                                     :class="showAdvancedSearch ? 'text-blue-400' : 'text-gray-400'"
                                     class="p-1.5 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
@@ -1049,25 +1129,20 @@
                                 </button>
                             </div>
 
-                            <!-- Advanced search date fields (collapsed by default) -->
-                            <div v-if="showAdvancedSearch"
-                                 class="flex items-center gap-2 w-full mt-1 sm:mt-0 sm:w-auto">
-                                <input v-model="searchDateFrom" type="date"
-                                    @change="searchMessages"
-                                    class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
-                                    title="From date">
-                                <span class="text-gray-500 text-xs">&mdash;</span>
-                                <input v-model="searchDateTo" type="date"
-                                    @change="searchMessages"
-                                    class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
-                                    title="To date">
-                                <button v-if="searchDateFrom || searchDateTo"
-                                    @click="searchDateFrom = ''; searchDateTo = ''; searchMessages()"
-                                    class="text-gray-400 hover:text-white text-xs px-1" title="Clear dates">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-
+                            <!-- Timeline Toggle (Phase 7) -->
+                            <button @click="showTimeline = !showTimeline; if(showTimeline && !timelineDensity.length) loadTimeline()"
+                                :class="showTimeline ? 'text-blue-400' : 'text-gray-400'"
+                                class="p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
+                                title="Activity Timeline">
+                                <i class="fas fa-chart-bar text-xs sm:text-sm"></i>
+                            </button>
+                            <!-- Media Panel Toggle (Phase 5) -->
+                            <button @click="showMediaPanel ? showMediaPanel = false : openMediaPanel()"
+                                :class="showMediaPanel ? 'text-blue-400' : 'text-gray-400'"
+                                class="p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
+                                title="Shared Media">
+                                <i class="fas fa-photo-video text-xs sm:text-sm"></i>
+                            </button>
                             <!-- Export Button - always visible -->
                             <button @click="exportChat"
                                 class="p-1.5 sm:p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
@@ -1093,8 +1168,9 @@
                     <!-- Pinned Message Banner (only shown in normal view, not in pinned-only view) -->
                     <!-- Click on message content → scroll to message + cycle to next -->
                     <!-- Click on pin icon (right side) → open pinned messages view -->
-                    <div v-if="pinnedMessage && !showPinnedOnly" 
-                        class="px-4 py-2 bg-tg-sidebar/80 backdrop-blur-sm border-b border-gray-700 flex items-center gap-3">
+                    <div v-if="pinnedMessage && !showPinnedOnly"
+                        class="px-4 py-2 bg-tg-sidebar/80 backdrop-blur-sm border-b border-gray-700 flex items-center gap-3"
+                        @contextmenu.prevent="openContextMenu($event, 'pinned-message', pinnedMessage)">
                         <!-- Pin icon on left -->
                         <div class="text-blue-400">
                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -1147,8 +1223,121 @@
                         </div>
                     </div>
 
+                    <!-- Timeline Strip (Phase 7) -->
+                    <div v-if="showTimeline && timelineDensity.length > 0" class="px-4 py-2 border-b overflow-x-auto" style="border-color: var(--tg-border); background: var(--tg-sidebar);">
+                        <div class="flex items-center gap-1 mb-1">
+                            <button v-for="g in ['day','week','month']" :key="g" @click="timelineGranularity = g; loadTimeline()"
+                                :class="timelineGranularity === g ? 'text-blue-400 bg-blue-400/10' : 'text-tg-muted'"
+                                class="px-2 py-0.5 rounded text-[10px] font-medium">{{ g }}</button>
+                        </div>
+                        <div class="flex items-end gap-px min-w-max" style="height: 32px;">
+                            <div v-for="d in timelineDensity" :key="d.date" @click="timelineJumpToDate(d.date)"
+                                class="cursor-pointer hover:opacity-80 transition-opacity rounded-t-sm"
+                                :style="{ width: timelineGranularity === 'day' ? '3px' : '8px', height: Math.max(2, (d.count / maxDensity) * 32) + 'px', background: getDensityColor(d.count) }"
+                                :title="`${d.date}: ${d.count} messages`"></div>
+                        </div>
+                        <div class="flex justify-between text-[10px] text-tg-muted mt-1">
+                            <span>{{ timelineDensity[0]?.date }}</span>
+                            <span>{{ timelineDensity[timelineDensity.length - 1]?.date }}</span>
+                        </div>
+                    </div>
+                    <div v-else-if="showTimeline && timelineLoading" class="flex justify-center py-3 border-b" style="border-color: var(--tg-border); background: var(--tg-sidebar);"><div class="loading-spinner"></div></div>
+
                     <!-- Messages - uses flex-col-reverse for instant scroll-to-bottom -->
                     <div class="flex-1 relative min-h-0">
+                    <!-- Media Panel (Phase 5) -->
+                    <div v-if="showMediaPanel" class="absolute inset-y-0 right-0 w-80 z-30 flex flex-col border-l" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                        <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
+                            <button @click="showMediaPanel = false" class="text-tg-muted hover:text-white"><i class="fas fa-times"></i></button>
+                            <span class="font-semibold text-white text-sm">Shared Media</span>
+                        </div>
+                        <div class="flex border-b" style="border-color: var(--tg-border);">
+                            <button v-for="tab in mediaPanelTabs" :key="tab.key" @click="mediaPanelTab = tab.key; loadMediaPanel(true)"
+                                :class="mediaPanelTab === tab.key ? 'text-blue-400 border-blue-400' : 'text-tg-muted border-transparent'"
+                                class="flex-1 py-2 text-xs font-medium border-b-2 transition-colors">
+                                <i class="fas" :class="tab.icon"></i>
+                            </button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-2">
+                            <div v-if="['photo','video'].includes(mediaPanelTab)" class="grid grid-cols-3 gap-1">
+                                <div v-for="item in mediaPanelItems" :key="item.id" @click="openMedia(item)" class="aspect-square cursor-pointer overflow-hidden rounded hover:opacity-80">
+                                    <img :src="getMediaUrl(item)" class="w-full h-full object-cover" loading="lazy">
+                                </div>
+                            </div>
+                            <div v-else class="space-y-1">
+                                <div v-for="item in mediaPanelItems" :key="item.id" class="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
+                                    <i class="fas text-tg-muted" :class="mediaPanelTab === 'voice' ? 'fa-microphone' : 'fa-file'"></i>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-sm truncate text-white">{{ item.media?.file_name || item.text?.substring(0, 40) || 'File' }}</div>
+                                        <div class="text-xs text-tg-muted">{{ formatDateFull(item.date) }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <button v-if="mediaPanelHasMore && !mediaPanelLoading" @click="loadMediaPanel()" class="w-full py-2 text-xs text-blue-400 hover:text-blue-300">Load more</button>
+                            <div v-if="mediaPanelLoading" class="flex justify-center py-4"><div class="loading-spinner"></div></div>
+                            <div v-if="!mediaPanelLoading && mediaPanelItems.length === 0" class="text-center py-8 text-tg-muted text-xs">No media found</div>
+                        </div>
+                    </div>
+
+                    <!-- Profile Sidebar (Phase 6) -->
+                    <div v-if="showProfilePanel" class="absolute inset-y-0 right-0 w-80 z-30 flex flex-col border-l overflow-y-auto" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                        <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
+                            <button @click="showProfilePanel = false" class="text-tg-muted hover:text-white"><i class="fas fa-times"></i></button>
+                            <span class="font-semibold text-white text-sm">Profile</span>
+                        </div>
+                        <div class="flex flex-col items-center py-6 px-4">
+                            <div class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white"
+                                :style="{ background: `hsl(${getSenderColor({sender_id: selectedChat.id})}, 50%, 40%)` }">
+                                {{ getInitials(selectedChat) }}
+                            </div>
+                            <div class="mt-3 text-lg font-semibold text-white">{{ getChatName(selectedChat) }}</div>
+                            <div v-if="selectedChat.username" class="text-sm text-blue-400">@{{ selectedChat.username }}</div>
+                            <div class="text-xs text-tg-muted mt-1">{{ selectedChat.type }}</div>
+                        </div>
+                        <div v-if="chatStats" class="flex justify-around px-4 py-3 border-t border-b" style="border-color: var(--tg-border);">
+                            <div class="text-center">
+                                <div class="text-lg font-bold text-white">{{ chatStats.message_count?.toLocaleString() }}</div>
+                                <div class="text-xs text-tg-muted">Messages</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-lg font-bold text-white">{{ chatStats.media_files?.toLocaleString() }}</div>
+                                <div class="text-xs text-tg-muted">Media</div>
+                            </div>
+                            <div v-if="selectedChat.member_count" class="text-center">
+                                <div class="text-lg font-bold text-white">{{ selectedChat.member_count }}</div>
+                                <div class="text-xs text-tg-muted">Members</div>
+                            </div>
+                        </div>
+                        <div class="px-4 py-2 space-y-1">
+                            <button @click="openMediaPanel()" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 text-sm text-gray-300">
+                                <i class="fas fa-photo-video w-5 text-center text-tg-muted"></i> Shared Media
+                            </button>
+                            <button v-if="selectedChat.username" @click="window.open(`https://t.me/${selectedChat.username}`, '_blank')"
+                                class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 text-sm text-gray-300">
+                                <i class="fab fa-telegram w-5 text-center text-tg-muted"></i> Open in Telegram
+                            </button>
+                        </div>
+                        <div v-if="isGroup && profileMembers.length > 0" class="px-4 py-3 border-t" style="border-color: var(--tg-border);">
+                            <div class="text-xs text-tg-muted mb-2">Members ({{ profileMembers.length }})</div>
+                            <div class="space-y-1 max-h-64 overflow-y-auto">
+                                <div v-for="member in profileMembers" :key="member.sender_id" class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 text-sm">
+                                    <div class="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                                        :style="{ background: `hsl(${getSenderColor({sender_id: member.sender_id})}, 50%, 40%)` }">
+                                        {{ (member.name || '?')[0] }}
+                                    </div>
+                                    <div class="flex-1 min-w-0"><div class="text-white truncate">{{ member.name }}</div></div>
+                                    <div class="text-xs text-tg-muted">{{ member.message_count }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-else-if="isGroup && profileMembersLoading" class="flex justify-center py-4"><div class="loading-spinner"></div></div>
+                    </div>
+
+                    <!-- Floating Date Badge (Phase 1) -->
+                    <div v-if="floatingDate" class="floating-date-badge"
+                        :style="{ opacity: floatingDateVisible ? 1 : 0 }">
+                        {{ floatingDate }}
+                    </div>
                     <!-- Search bar (absolute overlay at top) -->
                     <div v-show="searchBarVisible" class="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2 border-b shadow-lg" style="background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 20;">
                         <i class="fas fa-search text-xs" style="color: var(--tg-muted);"></i>
@@ -1168,8 +1357,10 @@
                             <div class="loading-spinner"></div>
                         </div>
 
-                        <div v-if="loading && messages.length === 0" class="text-center py-4 text-tg-muted">
-                            Loading messages...
+                        <div v-if="loading && messages.length === 0" class="space-y-3 p-4">
+                            <div v-for="i in 6" :key="i" class="flex gap-2" :class="i % 3 === 0 ? 'justify-end' : ''">
+                                <div class="skeleton-shimmer rounded-2xl h-12" :style="{ width: (35 + (i * 7) % 30) + '%' }"></div>
+                            </div>
                         </div>
 
                         <template v-for="(msg, index) in sortedMessages" :key="msg.id">
@@ -1182,18 +1373,22 @@
                                 </div>
                             </div>
                             <!-- Regular Message (hide duplicate album messages - only show first in group) -->
-                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="flex items-end gap-1.5" :class="isOwnMessage(msg) ? 'justify-end' : 'justify-start'">
+                            <div v-else-if="!isHiddenAlbumMessage(msg, index)" class="flex items-end gap-1.5" :class="[isOwnMessage(msg) ? 'justify-end' : 'justify-start', isLastInGroup(index) ? 'mb-2' : 'mb-0.5']">
                                 <!-- v8.1: Sender mini-avatar for incoming group messages -->
-                                <div v-if="!isOwnMessage(msg) && isGroup && showSenderName(index)"
-                                    class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mb-0.5"
-                                    :style="{ background: `hsl(${getSenderColor(msg)}, 50%, 40%)` }">
+                                <div v-if="!isOwnMessage(msg) && isGroup && isLastInGroup(index)"
+                                    class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mb-0.5 cursor-pointer"
+                                    :style="{ background: `hsl(${getSenderColor(msg)}, 50%, 40%)` }"
+                                    @contextmenu.prevent="openContextMenu($event, 'sender', msg)">
                                     {{ getSenderInitial(msg) }}
                                 </div>
                                 <div v-else-if="!isOwnMessage(msg) && isGroup" class="w-7 shrink-0"></div>
                                 <div class="message-bubble group relative p-3 text-sm shadow-sm text-gray-100"
-                                    :class="[isOwnMessage(msg) ? 'rounded-2xl rounded-br-md bubble-tail-out' : 'rounded-2xl rounded-bl-md bubble-tail-in', initialLoadDone ? 'msg-appear' : '']"
+                                    :data-msg-id="msg.id"
+                                    :class="[getBubbleGroupClass(msg, index), initialLoadDone ? 'msg-appear' : '']"
                                     :style="[getSenderStyle(msg), {'--bubble-bg': getMessageBackground(msg)}]"
-                                    @contextmenu.prevent="openContextMenu($event, 'message', msg)">
+                                    @contextmenu.prevent="openContextMenu($event, 'message', msg)"
+                                    @touchstart="startLongPress($event, 'message', msg)"
+                                    @touchend="cancelLongPress" @touchmove="cancelLongPress">
                                     <!-- Permalink icon (hover) -->
                                     <button @click.stop="copyPermalink(msg)"
                                         class="absolute top-1 right-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity p-1 rounded text-[10px]"
@@ -1202,7 +1397,8 @@
                                     </button>
                                     <!-- Sender Name (if group and first in sequence) -->
                                     <div v-if="!isOwnMessage(msg) && isGroup && showSenderName(index)"
-                                        class="text-xs font-bold mb-1" :style="{ color: getSenderNameColor(msg) }">
+                                        class="text-xs font-bold mb-1 cursor-pointer hover:underline" :style="{ color: getSenderNameColor(msg) }"
+                                        @contextmenu.prevent="openContextMenu($event, 'sender', msg)">
                                         {{ getSenderName(msg) }}
                                     </div>
 
@@ -1435,7 +1631,8 @@
 
                                     <!-- Text with clickable links -->
                                     <div class="whitespace-pre-wrap break-words message-text"
-                                        v-html="linkifyText(msg.text)"></div>
+                                        @contextmenu="handleTextContextMenu($event, msg)"
+                                        v-html="linkifyText(msg.text, messageSearchQuery)"></div>
 
                                     <!-- OCR text extracted from image -->
                                     <div v-if="msg.ocr_text" class="mt-1.5 px-2 py-1.5 rounded text-xs" style="background: var(--tg-hover); border-left: 2px solid var(--tg-accent);">
@@ -1690,13 +1887,16 @@
         <!-- Admin Panel removed — consolidated into Unified Settings Modal -->
         <!-- Context Menu -->
         <div v-if="contextMenu.visible" class="fixed z-[9999]" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @keydown="handleMenuKeydown" role="menu" aria-label="Context menu">
-            <div class="rounded-lg shadow-2xl py-1 min-w-[180px] border" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
-                <button v-for="(item, i) in contextMenu.items" :key="i" @click="item.action(); closeContextMenu()"
-                    class="ctx-menu-item w-full px-3 py-2 text-left text-xs flex items-center gap-2.5 transition-colors outline-none focus:bg-white/10 hover:bg-white/10"
-                    style="color: var(--tg-text);" role="menuitem" tabindex="-1">
-                    <i class="fas w-4 text-center" :class="item.icon" style="color: var(--tg-muted);"></i>
-                    <span>{{ item.label }}</span>
-                </button>
+            <div class="ctx-menu-enter rounded-lg shadow-2xl py-1 min-w-[180px] border" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                <template v-for="(item, i) in contextMenu.items" :key="i">
+                    <hr v-if="item.separator" class="my-1" style="border-color: var(--tg-border);">
+                    <button v-else @click="item.action(); closeContextMenu()"
+                        class="ctx-menu-item w-full px-3 py-2 text-left text-xs flex items-center gap-2.5 transition-colors outline-none focus:bg-white/10 hover:bg-white/10"
+                        style="color: var(--tg-text);" role="menuitem" tabindex="-1">
+                        <i class="fas w-4 text-center" :class="item.icon" style="color: var(--tg-muted);"></i>
+                        <span>{{ item.label }}</span>
+                    </button>
+                </template>
             </div>
         </div>
         <!-- Context menu backdrop (click outside to close) -->
@@ -2185,6 +2385,31 @@
                 const loadingNewer = ref(false)
                 const contextMode = ref(false)
                 const pendingTargetMsgId = ref(null)
+                // Floating date badge (Phase 1)
+                const floatingDate = ref('')
+                const floatingDateVisible = ref(false)
+                let floatingDateTimer = null
+                // Media panel (Phase 5)
+                const showMediaPanel = ref(false)
+                const mediaPanelTab = ref('photo')
+                const mediaPanelItems = ref([])
+                const mediaPanelLoading = ref(false)
+                const mediaPanelHasMore = ref(true)
+                const mediaPanelTabs = [
+                    { key: 'photo', label: 'Photos', icon: 'fa-image' },
+                    { key: 'video', label: 'Videos', icon: 'fa-video' },
+                    { key: 'document', label: 'Files', icon: 'fa-file' },
+                    { key: 'voice', label: 'Voice', icon: 'fa-microphone' },
+                ]
+                // Profile panel (Phase 6)
+                const showProfilePanel = ref(false)
+                const profileMembers = ref([])
+                const profileMembersLoading = ref(false)
+                // Timeline (Phase 7)
+                const showTimeline = ref(false)
+                const timelineDensity = ref([])
+                const timelineLoading = ref(false)
+                const timelineGranularity = ref('week')
                 // Advanced search state
                 const showAdvancedSearch = ref(false)
                 const searchDateFrom = ref('')
@@ -2449,9 +2674,40 @@
                             items.push({ label: 'Open Media', icon: 'fa-image', action: () => { closeContextMenu(); openMedia(data) }})
                             if (!noDownload.value) items.push({ label: 'Download', icon: 'fa-download', action: () => { window.open(getMediaUrl(data) + '?download=1', '_blank') }})
                         }
+                    } else if (type === 'sender') {
+                        // Phase 2: Sender context menu (on sender name/avatar)
+                        const name = data.first_name || data.sender_name || 'User'
+                        const username = data.username || data.sender_username
+                        if (username) items.push({ label: `Copy @${username}`, icon: 'fa-at', action: () => copyToClipboard(`@${username}`) })
+                        items.push({ label: 'Copy User ID', icon: 'fa-hashtag', action: () => copyToClipboard(String(data.sender_id)) })
+                        if (username) items.push({ label: 'Open in Telegram', icon: 'fa-paper-plane', action: () => window.open(`https://t.me/${username}`, '_blank') })
+                        items.push({ label: 'Search by Sender', icon: 'fa-search', action: () => {
+                            closeContextMenu()
+                            messageSearchQuery.value = `from:${data.sender_id}`
+                            searchMessages()
+                        }})
+                    } else if (type === 'link') {
+                        // Phase 2: Link context menu (on <a> tags in messages)
+                        const url = data.href
+                        const text = data.text
+                        items.push({ label: 'Open Link', icon: 'fa-external-link-alt', action: () => window.open(url, '_blank') })
+                        items.push({ label: 'Copy Link Address', icon: 'fa-link', action: () => copyToClipboard(url) })
+                        if (text && text !== url) items.push({ label: 'Copy Link Text', icon: 'fa-copy', action: () => copyToClipboard(text) })
+                    } else if (type === 'pinned-message') {
+                        // Phase 2: Pinned message banner context menu
+                        if (data.text) items.push({ label: 'Copy Pinned Text', icon: 'fa-copy', action: () => copyToClipboard(data.text) })
+                        items.push({ label: 'Jump to Message', icon: 'fa-arrow-right', action: () => { closeContextMenu(); scrollToMessage(data.id) }})
+                        items.push({ label: 'View All Pinned', icon: 'fa-thumbtack', action: () => { closeContextMenu(); openPinnedView() }})
+                    } else if (type === 'image-in-message') {
+                        // Phase 2: Inline image context menu
+                        items.push({ label: 'View Full Size', icon: 'fa-expand', action: () => { closeContextMenu(); openMedia(data) }})
+                        if (!noDownload.value) items.push({ label: 'Download Image', icon: 'fa-download', action: () => window.open(getMediaUrl(data) + '?download=1', '_blank') })
+                        items.push({ label: 'Open in New Tab', icon: 'fa-external-link-alt', action: () => window.open(getMediaUrl(data), '_blank') })
                     } else if (type === 'chat') {
                         items.push({ label: 'Open Chat', icon: 'fa-comment', action: () => { closeContextMenu(); selectChat(data) }})
                         items.push({ label: 'Copy Chat ID', icon: 'fa-hashtag', action: () => copyToClipboard(String(data.id)) })
+                        if (data.username) items.push({ label: 'Copy Chat Link', icon: 'fa-link', action: () => copyToClipboard(`https://t.me/${data.username}`) })
+                        if (data.username) items.push({ label: 'Open in Telegram', icon: 'fa-paper-plane', action: () => window.open(`https://t.me/${data.username}`, '_blank') })
                     } else if (type === 'lightbox') {
                         if (!noDownload.value) items.push({ label: 'Download', icon: 'fa-download', action: () => { window.open(getMediaUrl(data) + '?download=1', '_blank') }})
                         items.push({ label: 'Open in New Tab', icon: 'fa-external-link-alt', action: () => { window.open(getMediaUrl(data), '_blank') }})
@@ -2466,6 +2722,32 @@
                         const first = document.querySelector('.ctx-menu-item')
                         if (first) first.focus()
                     })
+                }
+
+                // Link context menu delegation (Phase 2) — catches <a> right-clicks inside message text
+                const handleTextContextMenu = (e, msg) => {
+                    const link = e.target.closest('a')
+                    if (link) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        openContextMenu(e, 'link', { href: link.href, text: link.textContent })
+                    }
+                    // If not a link, let the event bubble up to the message bubble's contextmenu handler
+                }
+
+                // Mobile long-press support (Phase 2)
+                let longPressTimer = null
+                const startLongPress = (e, type, data) => {
+                    longPressTimer = setTimeout(() => {
+                        if (navigator.vibrate) navigator.vibrate(50)
+                        const touch = e.touches[0]
+                        const fakeEvent = { clientX: touch.clientX, clientY: touch.clientY, shiftKey: false }
+                        openContextMenu(fakeEvent, type, data)
+                    }, 500)
+                }
+                const cancelLongPress = () => {
+                    clearTimeout(longPressTimer)
+                    longPressTimer = null
                 }
                 const handleMenuKeydown = (e) => {
                     const items = document.querySelectorAll('.ctx-menu-item')
@@ -3809,6 +4091,11 @@
                     Object.keys(voiceAudioRefs).forEach(k => { delete voiceAudioRefs[k] })
                     currentPinnedIndex.value = 0
                     showPinnedOnly.value = false  // Exit pinned-only view when changing chat
+                    showMediaPanel.value = false  // Close panels when switching chats
+                    showProfilePanel.value = false
+                    showTimeline.value = false
+                    timelineDensity.value = []
+                    profileMembers.value = []
 
                     // v9.0: Context mode — load messages around target instead of latest
                     if (opts.targetMsgId) {
@@ -4107,7 +4394,33 @@
                         // With flex-col-reverse: scrollTop is NEGATIVE when scrolled up from bottom
                         // scrollTop=0 is at bottom (newest), scrollTop=-1000 means scrolled up 1000px
                         showScrollToBottom.value = scrollTop < -300
+                        // Floating date badge (Phase 1): find topmost visible date separator
+                        updateFloatingDate(e.target)
                     })
+                }
+
+                const updateFloatingDate = (container) => {
+                    if (!container) return
+                    const separators = container.querySelectorAll('.msg-date-group')
+                    const containerTop = container.getBoundingClientRect().top + 40
+                    let currentDate = ''
+                    for (const sep of separators) {
+                        const rect = sep.getBoundingClientRect()
+                        if (rect.top <= containerTop) {
+                            currentDate = sep.textContent.trim()
+                            break
+                        }
+                    }
+                    if (currentDate && currentDate !== floatingDate.value) {
+                        floatingDate.value = currentDate
+                        floatingDateVisible.value = true
+                        clearTimeout(floatingDateTimer)
+                        floatingDateTimer = setTimeout(() => { floatingDateVisible.value = false }, 2000)
+                    } else if (currentDate) {
+                        floatingDateVisible.value = true
+                        clearTimeout(floatingDateTimer)
+                        floatingDateTimer = setTimeout(() => { floatingDateVisible.value = false }, 2000)
+                    }
                 }
                 
                 // Manual load more function (fallback for when infinite scroll doesn't trigger)
@@ -4319,6 +4632,130 @@
                     
                     const nextDate = moment.utc(nextMsg.date).tz(viewerTimezone.value).format('YYYY-MM-DD')
                     return currDate !== nextDate
+                }
+
+                // Phase 5: Media panel functions
+                const loadMediaPanel = async (reset = false) => {
+                    if (!selectedChat.value) return
+                    mediaPanelLoading.value = true
+                    if (reset) { mediaPanelItems.value = []; mediaPanelHasMore.value = true }
+                    const lastId = mediaPanelItems.value.length > 0 ? mediaPanelItems.value[mediaPanelItems.value.length - 1].id : null
+                    const params = new URLSearchParams({ media_type: mediaPanelTab.value, limit: '50' })
+                    if (lastId) params.set('before', lastId)
+                    try {
+                        const res = await fetch(`/api/chats/${selectedChat.value.id}/media?${params}`, { credentials: 'include' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            mediaPanelItems.value.push(...data.messages)
+                            mediaPanelHasMore.value = data.has_more
+                        }
+                    } catch (e) { console.error('Media panel load error:', e) }
+                    mediaPanelLoading.value = false
+                }
+                const openMediaPanel = () => {
+                    showMediaPanel.value = true
+                    showProfilePanel.value = false
+                    loadMediaPanel(true)
+                }
+
+                // Phase 6: Profile panel functions
+                const openProfile = async () => {
+                    if (!selectedChat.value) return
+                    showProfilePanel.value = true
+                    showMediaPanel.value = false
+                    if (isGroup.value) {
+                        profileMembersLoading.value = true
+                        try {
+                            const res = await fetch(`/api/chats/${selectedChat.value.id}/members`, { credentials: 'include' })
+                            if (res.ok) {
+                                const data = await res.json()
+                                profileMembers.value = data.members
+                            }
+                        } catch (e) { console.error('Members load error:', e) }
+                        profileMembersLoading.value = false
+                    }
+                }
+
+                // Phase 7: Timeline functions
+                const loadTimeline = async () => {
+                    if (!selectedChat.value) return
+                    timelineLoading.value = true
+                    const params = new URLSearchParams({ granularity: timelineGranularity.value, timezone: viewerTimezone.value })
+                    try {
+                        const res = await fetch(`/api/chats/${selectedChat.value.id}/density?${params}`, { credentials: 'include' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            timelineDensity.value = data.density
+                        }
+                    } catch (e) { console.error('Timeline load error:', e) }
+                    timelineLoading.value = false
+                }
+                const maxDensity = computed(() => Math.max(1, ...timelineDensity.value.map(d => d.count)))
+                const getDensityColor = (count) => {
+                    if (count === 0) return 'rgba(255,255,255,0.05)'
+                    const intensity = count / maxDensity.value
+                    if (intensity < 0.25) return 'rgba(59, 130, 246, 0.2)'
+                    if (intensity < 0.50) return 'rgba(59, 130, 246, 0.4)'
+                    if (intensity < 0.75) return 'rgba(59, 130, 246, 0.6)'
+                    return 'rgba(59, 130, 246, 0.9)'
+                }
+                const timelineJumpToDate = async (dateStr) => {
+                    const params = new URLSearchParams({ date: dateStr, timezone: viewerTimezone.value })
+                    try {
+                        const res = await fetch(`/api/chats/${selectedChat.value.id}/messages/by-date?${params}`, { credentials: 'include' })
+                        if (res.ok) {
+                            const msg = await res.json()
+                            if (msg.id) {
+                                // Use existing context navigation
+                                const ctxRes = await fetch(`/api/chats/${selectedChat.value.id}/messages/${msg.id}/context`, { credentials: 'include' })
+                                if (ctxRes.ok) {
+                                    const ctxData = await ctxRes.json()
+                                    messages.value = ctxData.messages || []
+                                    hasMore.value = ctxData.has_older !== false
+                                    hasMoreNewer.value = ctxData.has_newer !== false
+                                    contextMode.value = true
+                                    await nextTick()
+                                    scrollToMessage(msg.id)
+                                }
+                            }
+                        }
+                    } catch (e) { console.error('Timeline jump error:', e) }
+                }
+
+                // Phase 3: Message grouping helpers
+                const isSameGroup = (a, b) => {
+                    if (!a || !b) return false
+                    if (a.sender_id !== b.sender_id) return false
+                    if (a.raw_data?.service_type === 'service' || b.raw_data?.service_type === 'service') return false
+                    const dayA = moment.utc(a.date).tz(viewerTimezone.value).format('YYYY-MM-DD')
+                    const dayB = moment.utc(b.date).tz(viewerTimezone.value).format('YYYY-MM-DD')
+                    if (dayA !== dayB) return false
+                    if (Math.abs(new Date(a.date) - new Date(b.date)) > 5 * 60 * 1000) return false
+                    return true
+                }
+                // First in group = visually top = higher index in flex-col-reverse
+                const isFirstInGroup = (index) => {
+                    return !isSameGroup(sortedMessages.value[index], sortedMessages.value[index + 1])
+                }
+                // Last in group = visually bottom = lower index in flex-col-reverse
+                const isLastInGroup = (index) => {
+                    return !isSameGroup(sortedMessages.value[index], sortedMessages.value[index - 1])
+                }
+                const getBubbleGroupClass = (msg, index) => {
+                    const own = isOwnMessage(msg)
+                    const first = isFirstInGroup(index)
+                    const last = isLastInGroup(index)
+                    if (own) {
+                        if (first && last) return 'rounded-2xl rounded-br-md bubble-tail-out'
+                        if (first) return 'rounded-2xl rounded-br-lg'
+                        if (last) return 'rounded-2xl rounded-tr-lg rounded-br-md bubble-tail-out'
+                        return 'rounded-lg'
+                    } else {
+                        if (first && last) return 'rounded-2xl rounded-bl-md bubble-tail-in'
+                        if (first) return 'rounded-2xl rounded-bl-lg'
+                        if (last) return 'rounded-2xl rounded-tl-lg rounded-bl-md bubble-tail-in'
+                        return 'rounded-lg'
+                    }
                 }
 
                 const getChatName = (chat) => {
@@ -4768,27 +5205,41 @@
                     return div.innerHTML
                 }
 
-                const linkifyText = (text) => {
+                const linkifyText = (text, highlight = '') => {
                     if (!text) return ''
                     const escaped = escapeHtml(text)
+                    let result = escaped
+                    // Phase 4: Highlight search keyword
+                    if (highlight && highlight.length >= 2) {
+                        const escapedQ = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                        result = result.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="search-highlight">$1</mark>')
+                    }
                     const urlRegex = /(https?:\/\/[^\s<]+)/g
-                    return escaped.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+                    result = result.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+                    return result
                 }
 
                 const scrollToMessage = (msgId) => {
-                    // Find message element by ID and scroll to it
-                    const msgIndex = sortedMessages.value.findIndex(m => m.id === msgId)
-                    if (msgIndex !== -1) {
+                    const exists = sortedMessages.value.some(m => m.id === msgId)
+                    if (exists) {
                         nextTick(() => {
                             const container = messagesContainer.value
-                            const msgElements = container.querySelectorAll('.message-bubble')
-                            if (msgElements[msgIndex]) {
-                                msgElements[msgIndex].scrollIntoView({ behavior: 'smooth', block: 'center' })
+                            const el = container.querySelector(`.message-bubble[data-msg-id="${msgId}"]`)
+                            if (el) {
+                                // Manual centering — scrollIntoView is unreliable in flex-col-reverse
+                                const containerRect = container.getBoundingClientRect()
+                                const elRect = el.getBoundingClientRect()
+                                const offset = elRect.top - containerRect.top
+                                    - (containerRect.height / 2) + (elRect.height / 2)
+                                // Use instant for large jumps (smooth fails over big distances in flex-col-reverse)
+                                const behavior = Math.abs(offset) > 800 ? 'instant' : 'smooth'
+                                container.scrollTo({
+                                    top: container.scrollTop + offset,
+                                    behavior
+                                })
                                 // Highlight briefly
-                                msgElements[msgIndex].style.backgroundColor = '#1e40af'
-                                setTimeout(() => {
-                                    msgElements[msgIndex].style.backgroundColor = ''
-                                }, 1000)
+                                el.style.backgroundColor = '#1e40af'
+                                setTimeout(() => { el.style.backgroundColor = '' }, 1500)
                             }
                         })
                     } else {
@@ -5296,6 +5747,36 @@
                     editTokenForm,
                     startEditToken,
                     saveEditToken,
+                    // Floating date badge (Phase 1)
+                    floatingDate,
+                    floatingDateVisible,
+                    // Message grouping (Phase 3)
+                    isFirstInGroup,
+                    isLastInGroup,
+                    getBubbleGroupClass,
+                    // Media panel (Phase 5)
+                    showMediaPanel,
+                    mediaPanelTab,
+                    mediaPanelItems,
+                    mediaPanelLoading,
+                    mediaPanelHasMore,
+                    mediaPanelTabs,
+                    loadMediaPanel,
+                    openMediaPanel,
+                    // Profile panel (Phase 6)
+                    showProfilePanel,
+                    profileMembers,
+                    profileMembersLoading,
+                    openProfile,
+                    // Timeline (Phase 7)
+                    showTimeline,
+                    timelineDensity,
+                    timelineLoading,
+                    timelineGranularity,
+                    loadTimeline,
+                    maxDensity,
+                    getDensityColor,
+                    timelineJumpToDate,
                     // Context menu & permalink
                     contextMenu,
                     openContextMenu,
@@ -5303,6 +5784,9 @@
                     handleMenuKeydown,
                     copyToClipboard,
                     copyPermalink,
+                    startLongPress,
+                    cancelLongPress,
+                    handleTextContextMenu,
                     chatListFocusIndex,
                     // Toast & settings
                     toast,

@@ -2556,6 +2556,172 @@ class DatabaseAdapter:
                 for r in result
             ]
 
+    async def get_media_messages(
+        self,
+        chat_id: int,
+        media_type: str | None = None,
+        limit: int = 50,
+        before: int | None = None,
+    ) -> dict[str, Any]:
+        """Get messages that have media for a chat, with optional type filter.
+
+        Args:
+            chat_id: Chat ID
+            media_type: Optional filter (photo, video, voice, document, animation)
+            limit: Max results (caller clamps to 1..200)
+            before: Message-ID cursor for pagination (return messages with id < before)
+
+        Returns:
+            Dict with "messages" list and "has_more" bool
+        """
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(
+                    Message,
+                    User.first_name,
+                    User.last_name,
+                    User.username,
+                    Media.id.label("media_id"),
+                    Media.type.label("media_type"),
+                    Media.file_path.label("media_file_path"),
+                    Media.file_name.label("media_file_name"),
+                    Media.file_size.label("media_file_size"),
+                    Media.mime_type.label("media_mime_type"),
+                    Media.width.label("media_width"),
+                    Media.height.label("media_height"),
+                    Media.duration.label("media_duration"),
+                )
+                .join(Media, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+                .outerjoin(User, Message.sender_id == User.id)
+                .where(Message.chat_id == chat_id)
+            )
+
+            if media_type:
+                stmt = stmt.where(Media.type == media_type)
+
+            if before is not None:
+                stmt = stmt.where(Message.id < before)
+
+            # Fetch limit+1 to determine has_more
+            stmt = stmt.order_by(Message.id.desc()).limit(limit + 1)
+
+            result = await session.execute(stmt)
+            rows = result.all()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+
+            messages = []
+            for row in rows:
+                msg = self._message_to_dict(row.Message)
+                msg["first_name"] = row.first_name
+                msg["last_name"] = row.last_name
+                msg["username"] = row.username
+                msg["media"] = {
+                    "id": row.media_id,
+                    "type": row.media_type,
+                    "file_path": row.media_file_path,
+                    "file_name": row.media_file_name,
+                    "file_size": row.media_file_size,
+                    "mime_type": row.media_mime_type,
+                    "width": row.media_width,
+                    "height": row.media_height,
+                    "duration": row.media_duration,
+                }
+                messages.append(msg)
+
+            return {"messages": messages, "has_more": has_more}
+
+    async def get_chat_members(
+        self,
+        chat_id: int,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get unique senders in a chat with message counts.
+
+        Args:
+            chat_id: Chat ID
+            limit: Max results
+            offset: Pagination offset
+
+        Returns:
+            List of dicts with sender_id, name, username, message_count
+        """
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(
+                    Message.sender_id,
+                    func.count(Message.id).label("message_count"),
+                    User.first_name,
+                    User.last_name,
+                    User.username,
+                )
+                .outerjoin(User, Message.sender_id == User.id)
+                .where(and_(Message.chat_id == chat_id, Message.sender_id.isnot(None)))
+                .group_by(Message.sender_id, User.first_name, User.last_name, User.username)
+                .order_by(func.count(Message.id).desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.execute(stmt)
+            return [
+                {
+                    "sender_id": row.sender_id,
+                    "name": f"{row.first_name or ''} {row.last_name or ''}".strip() or None,
+                    "username": row.username,
+                    "message_count": row.message_count,
+                }
+                for row in result
+            ]
+
+    async def get_message_density(
+        self,
+        chat_id: int,
+        granularity: str = "week",
+        timezone: str = "UTC",
+    ) -> list[dict[str, Any]]:
+        """Get message counts grouped by time period for timeline/heatmap.
+
+        Args:
+            chat_id: Chat ID
+            granularity: "day", "week", or "month"
+            timezone: IANA timezone string (used for SQLite strftime offset)
+
+        Returns:
+            List of dicts with "date" and "count"
+        """
+        async with self.db_manager.async_session_factory() as session:
+            if self._is_sqlite:
+                # SQLite: use strftime for grouping
+                fmt_map = {
+                    "day": "%Y-%m-%d",
+                    "week": "%Y-W%W",
+                    "month": "%Y-%m",
+                }
+                fmt = fmt_map.get(granularity, "%Y-W%W")
+                date_label = func.strftime(fmt, Message.date).label("period")
+            else:
+                # PostgreSQL: use date_trunc
+                trunc_map = {
+                    "day": "day",
+                    "week": "week",
+                    "month": "month",
+                }
+                trunc = trunc_map.get(granularity, "week")
+                date_label = func.date_trunc(trunc, Message.date).label("period")
+
+            stmt = (
+                select(date_label, func.count(Message.id).label("count"))
+                .where(Message.chat_id == chat_id)
+                .group_by("period")
+                .order_by(text("period ASC"))
+            )
+            result = await session.execute(stmt)
+            return [
+                {"date": str(row.period), "count": row.count}
+                for row in result
+            ]
+
     async def close(self) -> None:
         """Close database connections."""
         await self.db_manager.close()
