@@ -1504,7 +1504,7 @@
                     </div>
                     <!-- Semantic search results overlay -->
                     <div v-if="searchBarVisible && semanticSearchMode && semanticResults.length > 0" class="absolute left-0 right-0 overflow-y-auto border-b shadow-lg" style="top: 41px; max-height: 60vh; background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 19;">
-                        <div v-for="result in semanticResults" :key="result.id" @click="scrollToMessage(result.id); clearMsgSearch()" class="px-4 py-2.5 cursor-pointer hover:bg-white/5 border-b" style="border-color: var(--tg-border);">
+                        <div v-for="result in semanticResults" :key="result.id" @click="selectChat(selectedChat, { targetMsgId: result.id }); clearMsgSearch()" class="px-4 py-2.5 cursor-pointer hover:bg-white/5 border-b" style="border-color: var(--tg-border);">
                             <div class="flex items-center justify-between mb-1">
                                 <span class="text-xs font-medium" style="color: var(--tg-accent);">{{ result.sender_name || 'Unknown' }}</span>
                                 <div class="flex items-center gap-2">
@@ -5864,8 +5864,9 @@
                             if (!resp.ok) { showToast?.('Embedding failed: ' + resp.status, 'error'); break }
                             const data = await resp.json()
                             embeddingStats.value = { total: data.total, embedded: data.embedded }
-                            hasMore = data.embedded > 0 && data.embedded < data.total
-                            if (data.embedded === 0 || data.message) break
+                            // batch_stored=0 when all done; message key present on early "already embedded" return
+                            if (data.batch_stored === 0 || data.message) break
+                            hasMore = data.embedded < data.total
                         }
                         showToast?.('Embedding complete', 'success')
                     } catch (e) {

@@ -439,8 +439,8 @@ _AI_CONFIG_DEFAULTS = {
     "ai.chat.model_name": "qwen3-next-80b-a3b",
     "ai.chat.fallback_url": "",
     "ai.chat.fallback_model": "",
-    "ai.embedding.api_url": "http://localhost:8886/v1",
-    "ai.embedding.model_name": "bge-m3",
+    "ai.embedding.api_url": "http://localhost:11434/v1",
+    "ai.embedding.model_name": "qwen3-embedding:8b",
     "ai.tts.api_url": "http://localhost:8880/v1",
     "ai.tts.model_name": "kokoro",
     "ai.system_prompt": (
@@ -480,16 +480,16 @@ async def _get_vision_config() -> dict:
 
 
 async def _get_embedding_config() -> dict:
-    """Read embedding model config from app_settings for semantic search."""
+    """Read embedding model config from app_settings, falling back to env vars."""
     settings = await db.get_all_settings()
-    api_url = settings.get("ai.embedding.api_url", "http://localhost:11434/v1")
+    api_url = settings.get("ai.embedding.api_url", "") or config.ollama_url
     # Strip /v1 suffix to get raw Ollama base URL (we need /api/embed, not OpenAI compat)
     base_url = api_url.rstrip("/")
     if base_url.endswith("/v1"):
         base_url = base_url[:-3]
     return {
         "base_url": base_url,
-        "model_name": settings.get("ai.embedding.model_name", "qwen3-embedding:8b"),
+        "model_name": settings.get("ai.embedding.model_name", "") or config.ollama_embed_model,
     }
 
 
@@ -1672,7 +1672,8 @@ async def trigger_embedding(
 
     messages = await db.get_unembedded_messages(chat_id, limit=limit)
     if not messages:
-        return {"embedded": 0, "message": "All messages already embedded"}
+        counts = await db.get_embedding_count(chat_id)
+        return {"batch_stored": 0, "message": "All messages already embedded", **counts}
 
     texts = [m["text"][:2000] for m in messages]  # Truncate long messages
 
@@ -1696,7 +1697,7 @@ async def trigger_embedding(
     ]
     stored = await db.store_embeddings(chat_id, embeddings, model)
     counts = await db.get_embedding_count(chat_id)
-    return {"embedded": stored, **counts}
+    return {"batch_stored": stored, **counts}
 
 
 @app.get("/api/semantic/search")
