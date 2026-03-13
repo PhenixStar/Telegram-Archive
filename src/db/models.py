@@ -426,6 +426,31 @@ class ViewerToken(Base):
     )
 
 
+class MessageEmbedding(Base):
+    """Vector embeddings for semantic search.
+
+    v9.1.0: Stores Ollama-generated embeddings per message.
+    """
+
+    __tablename__ = "message_embeddings"
+
+    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    embedding: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array of floats
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=func.now())
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id", "chat_id"],
+            ["messages.id", "messages.chat_id"],
+            name="fk_embedding_message",
+            ondelete="CASCADE",
+        ),
+        Index("idx_embeddings_chat", "chat_id"),
+    )
+
+
 class AppSettings(Base):
     """Key-value settings shared between backup and viewer containers.
 

@@ -256,6 +256,15 @@ class Config:
         self.ai_model = os.getenv("AI_MODEL", "GLM-5")
 
         # =====================================================================
+        # SEMANTIC SEARCH (Ollama embeddings)
+        # =====================================================================
+        # URL of the Ollama API (use host.docker.internal for Docker containers)
+        self.ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+        self.ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:8b")
+        # Max messages per embedding batch request
+        self.ollama_embed_batch = int(os.getenv("OLLAMA_EMBED_BATCH", "50"))
+
+        # =====================================================================
         # OCR CONFIGURATION
         # =====================================================================
         # Global kill switch — overrides per-chat toggles

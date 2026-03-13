@@ -18,6 +18,7 @@ from functools import wraps
 from typing import Any
 
 from sqlalchemy import and_, delete, func, or_, select, text, update
+from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -30,6 +31,7 @@ from .models import (
     ForumTopic,
     Media,
     Message,
+    MessageEmbedding,
     Metadata,
     Reaction,
     SyncStatus,
@@ -2784,6 +2786,134 @@ class DatabaseAdapter:
                 {"date": str(row.period), "count": row.count}
                 for row in result
             ]
+
+    # ------------------------------------------------------------------
+    # Semantic search (v9.1.0)
+    # ------------------------------------------------------------------
+
+    async def get_unembedded_messages(self, chat_id: int, limit: int = 100) -> list[dict]:
+        """Get messages that haven't been embedded yet."""
+        async with self.db_manager.async_session_factory() as session:
+            embedded_subq = select(MessageEmbedding.message_id).where(
+                MessageEmbedding.chat_id == chat_id
+            )
+            stmt = (
+                select(Message.id, Message.text, Message.ocr_text)
+                .where(Message.chat_id == chat_id)
+                .where(Message.id.notin_(embedded_subq))
+                .where(or_(Message.text.isnot(None), Message.ocr_text.isnot(None)))
+                .where(or_(Message.text != "", Message.ocr_text != ""))
+                .order_by(Message.date.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+            return [
+                {
+                    "id": r.id,
+                    "text": (r.text or "") + (" " + r.ocr_text if r.ocr_text else ""),
+                }
+                for r in rows
+            ]
+
+    async def store_embeddings(self, chat_id: int, embeddings: list[dict], model: str) -> int:
+        """Store message embeddings. Each dict has 'message_id' and 'embedding' (list of floats)."""
+        stored = 0
+        async with self.db_manager.async_session_factory() as session:
+            for emb in embeddings:
+                obj = MessageEmbedding(
+                    message_id=emb["message_id"],
+                    chat_id=chat_id,
+                    model=model,
+                    embedding=json.dumps(emb["embedding"]),
+                )
+                session.add(obj)
+                stored += 1
+            try:
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+        return stored
+
+    async def get_embedding_count(self, chat_id: int) -> dict:
+        """Get embedding progress for a chat."""
+        async with self.db_manager.async_session_factory() as session:
+            total_stmt = (
+                select(func.count())
+                .select_from(Message)
+                .where(Message.chat_id == chat_id)
+                .where(or_(Message.text.isnot(None), Message.ocr_text.isnot(None)))
+                .where(or_(Message.text != "", Message.ocr_text != ""))
+            )
+            total = (await session.execute(total_stmt)).scalar() or 0
+
+            embedded_stmt = (
+                select(func.count())
+                .select_from(MessageEmbedding)
+                .where(MessageEmbedding.chat_id == chat_id)
+            )
+            embedded = (await session.execute(embedded_stmt)).scalar() or 0
+        return {"total": total, "embedded": embedded}
+
+    async def semantic_search(
+        self, chat_id: int, query_embedding: list[float], limit: int = 20
+    ) -> list[dict]:
+        """Find messages most similar to query_embedding using cosine similarity."""
+        import math
+
+        async with self.db_manager.async_session_factory() as session:
+            stmt = select(MessageEmbedding).where(MessageEmbedding.chat_id == chat_id)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+
+        if not rows:
+            return []
+
+        def cosine_sim(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = math.sqrt(sum(x * x for x in a))
+            norm_b = math.sqrt(sum(x * x for x in b))
+            return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
+        scored = []
+        for row in rows:
+            emb = json.loads(row.embedding)
+            sim = cosine_sim(query_embedding, emb)
+            scored.append((row.message_id, sim))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        top = scored[:limit]
+        if not top:
+            return []
+
+        msg_ids = [m[0] for m in top]
+        sim_map = {m[0]: m[1] for m in top}
+
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(Message)
+                .options(selectinload(Message.sender))
+                .where(Message.chat_id == chat_id)
+                .where(Message.id.in_(msg_ids))
+            )
+            result = await session.execute(stmt)
+            msgs = result.scalars().all()
+
+        results = []
+        for msg in msgs:
+            results.append(
+                {
+                    "id": msg.id,
+                    "chat_id": chat_id,
+                    "text": msg.text,
+                    "date": msg.date.isoformat() if msg.date else None,
+                    "sender_name": msg.sender.first_name if msg.sender else None,
+                    "similarity": round(sim_map.get(msg.id, 0), 4),
+                }
+            )
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        return results
 
     async def close(self) -> None:
         """Close database connections."""

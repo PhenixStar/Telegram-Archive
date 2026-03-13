@@ -42,6 +42,7 @@ from .models import (
     ForumTopic,
     Media,
     Message,
+    MessageEmbedding,
     Metadata,
     Reaction,
     SyncStatus,
@@ -69,6 +70,7 @@ __all__ = [
     "ViewerAuditLog",
     "ViewerSession",
     "ViewerToken",
+    "MessageEmbedding",
     "AppSettings",
     # Database management
     "DatabaseManager",

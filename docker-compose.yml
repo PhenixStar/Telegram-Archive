@@ -165,6 +165,8 @@ services:
       - /home/phenix/projects/apps/tele-private/database:/data/backups
       # Mount media from backup dir
       - /home/phenix/projects/apps/tele-private/database/backups/media:/data/backups/media
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - telegram-network
     # Security hardening

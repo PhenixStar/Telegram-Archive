@@ -17,14 +17,14 @@
 | 7 | Offline mode (SW cache) | sw.js | 2h | DONE |
 | 8 | Smart date grouping in search | index.html | 1h | DONE |
 | 9 | PWA install prompt | index.html | 30m | DONE |
-| 10 | Semantic search (Ollama embeddings) | adapter.py, main.py, index.html | 4h | TODO |
+| 10 | Semantic search (Ollama embeddings) | adapter.py, main.py, index.html | 4h | DONE |
 | 11 | Smart highlights (regex tags) | index.html | 1.5h | DONE |
 
 ## Implementation Order
 Batch by file to minimize context switches:
 1. **Frontend-only** (index.html): 1, 5, 6, 8, 9, 11 — DONE
 2. **Backend+Frontend**: 2, 3, 4 — DONE
-3. **Infrastructure**: 7 — DONE, 10 — TODO
+3. **Infrastructure**: 7 — DONE, 10 — DONE
 
 ## Key Decisions
 - Desktop-first, mobile-snappy (match Telegram's responsive feel)

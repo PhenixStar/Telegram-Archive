@@ -1442,6 +1442,28 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- Semantic Search Embeddings (admin only) -->
+                        <div v-if="userRole === 'master' && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                            <div class="text-xs text-tg-muted mb-1">Semantic Search</div>
+                            <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
+                                <div class="flex items-center gap-2 text-sm text-gray-300">
+                                    <i class="fas fa-brain w-5 text-center text-tg-muted"></i>
+                                    <span>Embeddings</span>
+                                </div>
+                                <span class="text-xs" style="color: var(--tg-muted);">
+                                    {{ embeddingStats.embedded }}/{{ embeddingStats.total }}
+                                </span>
+                            </div>
+                            <div v-if="embeddingStats.total > 0" class="px-3 py-1">
+                                <div class="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div class="h-1.5 rounded-full transition-all" style="background: var(--tg-accent);" :style="{ width: (embeddingStats.total > 0 ? Math.round(embeddingStats.embedded / embeddingStats.total * 100) : 0) + '%' }"></div>
+                                </div>
+                            </div>
+                            <button @click="triggerEmbedding" :disabled="embeddingRunning" class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-white" :style="{ background: embeddingRunning ? 'var(--tg-muted)' : 'var(--tg-accent)' }">
+                                <i :class="embeddingRunning ? 'fas fa-spinner fa-spin' : 'fas fa-bolt'" class="text-xs"></i>
+                                {{ embeddingRunning ? 'Embedding...' : (embeddingStats.embedded >= embeddingStats.total && embeddingStats.total > 0 ? 'All embedded' : 'Embed messages') }}
+                            </button>
+                        </div>
                         <div v-if="isGroup && profileMembers.length > 0" class="px-4 py-3 border-t" style="border-color: var(--tg-border);">
                             <div class="text-xs text-tg-muted mb-2">Members ({{ profileMembers.length }})</div>
                             <div class="space-y-1 max-h-64 overflow-y-auto">
@@ -1465,14 +1487,33 @@
                     </div>
                     <!-- Search bar (absolute overlay at top) -->
                     <div v-show="searchBarVisible" class="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2 border-b shadow-lg" style="background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 20;">
-                        <i class="fas fa-search text-xs" style="color: var(--tg-muted);"></i>
-                        <input ref="searchInput" v-model="msgSearchQuery" @input="handleSearchInput" @keydown.enter.prevent="navigateSearchMatch(1)" @keydown.escape.prevent="clearMsgSearch" type="text" placeholder="Search messages..." class="flex-1 bg-transparent text-sm outline-none" style="color: var(--tg-text);">
-                        <span v-if="msgSearchQuery && searchMatchCount >= 0" class="text-xs whitespace-nowrap" style="color: var(--tg-muted);">
+                        <button @click="semanticSearchMode = !semanticSearchMode; handleSearchInput()" class="p-1 rounded hover:opacity-80" :style="{ color: semanticSearchMode ? 'var(--tg-accent)' : 'var(--tg-muted)' }" :title="semanticSearchMode ? 'Semantic search (AI)' : 'Text search'">
+                            <i :class="semanticSearchMode ? 'fas fa-brain' : 'fas fa-search'" class="text-xs"></i>
+                        </button>
+                        <input ref="searchInput" v-model="msgSearchQuery" @input="handleSearchInput" @keydown.enter.prevent="navigateSearchMatch(1)" @keydown.escape.prevent="clearMsgSearch" type="text" :placeholder="semanticSearchMode ? 'Semantic search (find similar meaning)...' : 'Search messages...'" class="flex-1 bg-transparent text-sm outline-none" style="color: var(--tg-text);">
+                        <span v-if="semanticSearchLoading" class="text-xs whitespace-nowrap" style="color: var(--tg-accent);"><i class="fas fa-spinner fa-spin"></i></span>
+                        <span v-else-if="msgSearchQuery && !semanticSearchMode && searchMatchCount >= 0" class="text-xs whitespace-nowrap" style="color: var(--tg-muted);">
                             {{ searchMatchCount > 0 ? `${searchMatchIndex + 1} / ${searchMatchCount}` : 'No matches' }}
                         </span>
-                        <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(-1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Previous match"><i class="fas fa-chevron-up text-xs"></i></button>
-                        <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Next match"><i class="fas fa-chevron-down text-xs"></i></button>
+                        <span v-else-if="msgSearchQuery && semanticSearchMode && semanticResults.length > 0" class="text-xs whitespace-nowrap" style="color: var(--tg-muted);">
+                            {{ semanticResults.length }} similar
+                        </span>
+                        <button v-if="!semanticSearchMode && searchMatchCount > 0" @click="navigateSearchMatch(-1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Previous match"><i class="fas fa-chevron-up text-xs"></i></button>
+                        <button v-if="!semanticSearchMode && searchMatchCount > 0" @click="navigateSearchMatch(1)" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Next match"><i class="fas fa-chevron-down text-xs"></i></button>
                         <button @click="clearMsgSearch" class="p-1 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Close search"><i class="fas fa-times text-xs"></i></button>
+                    </div>
+                    <!-- Semantic search results overlay -->
+                    <div v-if="searchBarVisible && semanticSearchMode && semanticResults.length > 0" class="absolute left-0 right-0 overflow-y-auto border-b shadow-lg" style="top: 41px; max-height: 60vh; background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 19;">
+                        <div v-for="result in semanticResults" :key="result.id" @click="scrollToMessage(result.id); clearMsgSearch()" class="px-4 py-2.5 cursor-pointer hover:bg-white/5 border-b" style="border-color: var(--tg-border);">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-xs font-medium" style="color: var(--tg-accent);">{{ result.sender_name || 'Unknown' }}</span>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: var(--tg-accent); color: white;">{{ Math.round(result.similarity * 100) }}%</span>
+                                    <span class="text-[10px]" style="color: var(--tg-muted);">{{ result.date ? new Date(result.date).toLocaleDateString() : '' }}</span>
+                                </div>
+                            </div>
+                            <div class="text-sm line-clamp-2" style="color: var(--tg-text);">{{ result.text }}</div>
+                        </div>
                     </div>
                     <div ref="messagesContainer" class="h-full overflow-y-auto overflow-x-hidden p-4 flex flex-col-reverse gap-1 messages-scroll" @scroll="handleScroll">
                         <!-- v9.0: Newer messages sentinel (visual bottom in flex-col-reverse = first DOM child) -->
@@ -5244,8 +5285,9 @@
                     if (!selectedChat.value) return
                     showProfilePanel.value = true
                     showMediaPanel.value = false
-                    // Load OCR status for admin
+                    // Load OCR + embedding status for admin
                     loadOcrStatus()
+                    loadEmbeddingStats()
                     if (chatOcrEnabled.value) startOcrPolling()
                     if (isGroup.value) {
                         profileMembersLoading.value = true
@@ -5687,9 +5729,19 @@
                 const handleSearchInput = () => {
                     clearTimeout(msgSearchDebounceTimer)
                     if (searchAbortCtrl) searchAbortCtrl.abort()
+                    // Semantic mode: route to semantic handler
+                    if (semanticSearchMode.value) {
+                        semanticResults.value = []
+                        clearSearchHighlights()
+                        searchMatchCount.value = 0
+                        searchMatchIndex.value = -1
+                        msgSearchDebounceTimer = setTimeout(() => handleSemanticSearch(), 500)
+                        return
+                    }
+                    // Text mode: existing behavior
                     msgSearchDebounceTimer = setTimeout(async () => {
                         const q = msgSearchQuery.value.trim()
-                        if (!q) { clearSearchHighlights(); searchMatchCount.value = 0; searchMatchIndex.value = -1; return }
+                        if (!q) { clearSearchHighlights(); searchMatchCount.value = 0; searchMatchIndex.value = -1; semanticResults.value = []; return }
                         if (!selectedChat.value) return
                         searchAbortCtrl = new AbortController()
                         try {
@@ -5769,6 +5821,8 @@
                     msgSearchQuery.value = ''
                     searchMatchCount.value = 0
                     searchMatchIndex.value = -1
+                    semanticResults.value = []
+                    semanticSearchLoading.value = false
                     clearSearchHighlights()
                     // Reload original messages if we had searched
                     if (hadQuery && selectedChat.value) {
@@ -5782,6 +5836,63 @@
 
                 // Alias for backward compat with Phase 6 keyboard handler
                 const clearSearch = clearMsgSearch
+
+                // Semantic search (v9.1.0)
+                const semanticSearchMode = ref(false)
+                const semanticResults = ref([])
+                const semanticSearchLoading = ref(false)
+                const embeddingStats = ref({ total: 0, embedded: 0 })
+                const embeddingRunning = ref(false)
+
+                const loadEmbeddingStats = async () => {
+                    if (!selectedChat.value) return
+                    try {
+                        const resp = await fetch(`/api/semantic/status?chat_id=${selectedChat.value.id}`, { credentials: 'include' })
+                        if (resp.ok) embeddingStats.value = await resp.json()
+                    } catch {}
+                }
+
+                const triggerEmbedding = async () => {
+                    if (!selectedChat.value || embeddingRunning.value) return
+                    embeddingRunning.value = true
+                    try {
+                        let hasMore = true
+                        while (hasMore) {
+                            const resp = await fetch(`/api/semantic/embed?chat_id=${selectedChat.value.id}&limit=50`, {
+                                method: 'POST', credentials: 'include'
+                            })
+                            if (!resp.ok) { showToast?.('Embedding failed: ' + resp.status, 'error'); break }
+                            const data = await resp.json()
+                            embeddingStats.value = { total: data.total, embedded: data.embedded }
+                            hasMore = data.embedded > 0 && data.embedded < data.total
+                            if (data.embedded === 0 || data.message) break
+                        }
+                        showToast?.('Embedding complete', 'success')
+                    } catch (e) {
+                        showToast?.('Embedding error: ' + e.message, 'error')
+                    } finally {
+                        embeddingRunning.value = false
+                        await loadEmbeddingStats()
+                    }
+                }
+
+                const handleSemanticSearch = async () => {
+                    const q = msgSearchQuery.value.trim()
+                    if (!q || !selectedChat.value) { semanticResults.value = []; return }
+                    semanticSearchLoading.value = true
+                    try {
+                        const resp = await fetch(`/api/semantic/search?q=${encodeURIComponent(q)}&chat_id=${selectedChat.value.id}&limit=20`, {
+                            credentials: 'include'
+                        })
+                        if (!resp.ok) { semanticResults.value = []; return }
+                        const data = await resp.json()
+                        semanticResults.value = data.results || []
+                    } catch {
+                        semanticResults.value = []
+                    } finally {
+                        semanticSearchLoading.value = false
+                    }
+                }
 
                 const escapeHtml = (text) => {
                     const div = document.createElement('div')
@@ -6295,6 +6406,14 @@
                     handleSearchInput,
                     navigateSearchMatch,
                     clearMsgSearch,
+                    // Semantic search (v9.1.0)
+                    semanticSearchMode,
+                    semanticResults,
+                    semanticSearchLoading,
+                    embeddingStats,
+                    embeddingRunning,
+                    triggerEmbedding,
+                    loadEmbeddingStats,
                     // Auth
                     isAuthenticated,
                     authRequired,

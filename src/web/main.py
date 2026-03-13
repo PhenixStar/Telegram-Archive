@@ -479,6 +479,20 @@ async def _get_vision_config() -> dict:
     }
 
 
+async def _get_embedding_config() -> dict:
+    """Read embedding model config from app_settings for semantic search."""
+    settings = await db.get_all_settings()
+    api_url = settings.get("ai.embedding.api_url", "http://localhost:11434/v1")
+    # Strip /v1 suffix to get raw Ollama base URL (we need /api/embed, not OpenAI compat)
+    base_url = api_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-3]
+    return {
+        "base_url": base_url,
+        "model_name": settings.get("ai.embedding.model_name", "qwen3-embedding:8b"),
+    }
+
+
 async def _seed_ai_config_defaults():
     """Seed default AI config values into app_settings if not already set."""
     existing = await db.get_all_settings()
@@ -1626,6 +1640,98 @@ async def search_messages_global(
         "method": method,
         "has_more": len(results) == limit,
     }
+
+
+@app.get("/api/semantic/status")
+async def semantic_status(
+    chat_id: int = Query(..., description="Chat ID to check"),
+    user: UserContext = Depends(require_auth),
+):
+    """Check embedding progress for a chat."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+    counts = await db.get_embedding_count(chat_id)
+    return counts
+
+
+@app.post("/api/semantic/embed")
+async def trigger_embedding(
+    chat_id: int = Query(..., description="Chat ID to embed"),
+    limit: int = Query(50, description="Max messages to embed per batch"),
+    user: UserContext = Depends(require_master),
+):
+    """Trigger embedding generation for a chat (master only)."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    emb_cfg = await _get_embedding_config()
+    ollama_url = emb_cfg["base_url"]
+    model = emb_cfg["model_name"]
+
+    messages = await db.get_unembedded_messages(chat_id, limit=limit)
+    if not messages:
+        return {"embedded": 0, "message": "All messages already embedded"}
+
+    texts = [m["text"][:2000] for m in messages]  # Truncate long messages
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                f"{ollama_url}/api/embed",
+                json={"model": model, "input": texts},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Ollama embedding failed: {e!s}")
+
+    vectors = data.get("embeddings", [])
+    if len(vectors) != len(messages):
+        raise HTTPException(status_code=502, detail="Embedding count mismatch")
+
+    embeddings = [
+        {"message_id": messages[i]["id"], "embedding": vectors[i]} for i in range(len(messages))
+    ]
+    stored = await db.store_embeddings(chat_id, embeddings, model)
+    counts = await db.get_embedding_count(chat_id)
+    return {"embedded": stored, **counts}
+
+
+@app.get("/api/semantic/search")
+async def semantic_search_endpoint(
+    q: str = Query(..., min_length=2, description="Search query"),
+    chat_id: int = Query(..., description="Chat ID to search"),
+    limit: int = Query(20, ge=1, le=100),
+    user: UserContext = Depends(require_auth),
+):
+    """Semantic search using embeddings -- finds conceptually similar messages."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    emb_cfg = await _get_embedding_config()
+    ollama_url = emb_cfg["base_url"]
+    model = emb_cfg["model_name"]
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{ollama_url}/api/embed",
+                json={"model": model, "input": q},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Embedding query failed: {e!s}")
+
+    query_embedding = data.get("embeddings", [[]])[0]
+    if not query_embedding:
+        raise HTTPException(status_code=502, detail="Empty embedding returned")
+
+    results = await db.semantic_search(chat_id, query_embedding, limit=limit)
+    return {"results": results, "total": len(results), "method": "semantic"}
 
 
 @app.get("/api/fts/status")
