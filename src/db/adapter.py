@@ -1761,6 +1761,28 @@ class DatabaseAdapter:
                     msg["media_path"] = row.media_file_path
                 yield msg
 
+    async def get_boundary_message_id(self, chat_id: int, direction: str = "first") -> int | None:
+        """Return the oldest or newest message ID for a chat.
+
+        Args:
+            chat_id: Chat ID to query
+            direction: 'first' for oldest, 'last' for newest
+
+        Returns:
+            Message ID or None if chat has no messages
+        """
+        order = Message.date.asc() if direction == "first" else Message.date.desc()
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(Message.id)
+                .where(Message.chat_id == chat_id)
+                .order_by(order)
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return row
+
     # ========== Forum Topic Operations (v6.2.0) ==========
 
     @retry_on_locked()

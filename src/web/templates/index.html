@@ -538,6 +538,45 @@
         mark.current { background: #ff9800; }
         [data-theme^="light"] mark { background: #ffeb3b; color: #000; }
 
+        /* Sidebar resize handle */
+        .sidebar-resize-handle {
+            width: 4px; cursor: col-resize; background: transparent;
+            transition: background 0.15s; flex-shrink: 0; z-index: 10;
+        }
+        .sidebar-resize-handle:hover, .sidebar-resize-handle.active {
+            background: var(--tg-accent, #3b82f6);
+        }
+
+        /* Link preview card */
+        .link-preview-card {
+            border-left: 3px solid var(--tg-accent, #3b82f6);
+            background: var(--tg-hover); border-radius: 0 8px 8px 0;
+            overflow: hidden; margin-top: 6px; cursor: pointer;
+        }
+        .link-preview-card:hover { opacity: 0.85; }
+
+        /* Smart highlight badges */
+        .smart-badge {
+            display: inline-block; font-size: 10px; padding: 0 4px;
+            border-radius: 3px; font-weight: 500; vertical-align: baseline;
+            margin: 0 1px; line-height: 1.4;
+        }
+        .smart-badge-money { background: #065f46; color: #6ee7b7; }
+        .smart-badge-phone { background: #1e3a5f; color: #93c5fd; }
+        .smart-badge-email { background: #5b21b6; color: #c4b5fd; }
+        .smart-badge-date { background: #713f12; color: #fcd34d; }
+        [data-theme^="light"] .smart-badge-money { background: #d1fae5; color: #065f46; }
+        [data-theme^="light"] .smart-badge-phone { background: #dbeafe; color: #1e40af; }
+        [data-theme^="light"] .smart-badge-email { background: #ede9fe; color: #5b21b6; }
+        [data-theme^="light"] .smart-badge-date { background: #fef3c7; color: #92400e; }
+
+        /* PWA install banner */
+        .pwa-install-banner {
+            background: linear-gradient(135deg, #1e40af 0%, #7c3aed 100%);
+            color: white; padding: 8px 16px; display: flex; align-items: center;
+            gap: 12px; font-size: 13px; z-index: 20;
+        }
+
         /* Image blur-up loading */
         .img-blur-up {
             position: relative;
@@ -666,7 +705,9 @@
         <div v-else class="flex w-full h-full bg-tg-bg">
             <!-- Sidebar - hidden on mobile when chat is selected -->
             <div class="bg-tg-sidebar flex flex-col border-r border-gray-700"
-                :class="{'hidden md:flex': selectedChat, 'w-full md:w-1/4 md:min-w-[300px]': true}">
+                :class="{'hidden md:flex': selectedChat, 'w-full md:w-auto': true}"
+                :style="{ width: sidebarWidth + 'px', minWidth: '220px', maxWidth: '600px' }"
+                ref="sidebarRef">
                 <!-- User bar -->
                 <div class="flex items-center gap-2 px-3 py-1 border-b border-gray-700">
                     <span v-if="authRequired && isAuthenticated" class="text-xs text-gray-400 truncate flex-1">{{ currentUsername }}</span>
@@ -1006,27 +1047,46 @@
                             </div>
                         </div>
                         
-                        <!-- Global message search results -->
+                        <!-- Global message search results with smart date grouping -->
                         <div v-if="globalMessageResults.length > 0" class="border-t" style="border-color: var(--tg-border);">
-                            <div class="px-3 py-1.5 text-xs font-medium" style="color: var(--tg-muted);">Messages</div>
-                            <div v-for="result in globalMessageResults" :key="result.chat_id + '-' + result.id"
-                                @click="navigateToMessage(result)"
-                                class="px-3 py-2 cursor-pointer hover:bg-tg-hover transition-colors border-b" style="border-color: var(--tg-border);">
-                                <div class="flex items-center gap-2 mb-0.5">
-                                    <span class="text-xs font-medium truncate" style="color: var(--tg-text);">{{ result.first_name || result.username || 'Unknown' }}</span>
-                                    <span class="text-xs truncate" style="color: var(--tg-muted);">in {{ chats.find(c => c.id === result.chat_id)?.title || 'Chat ' + result.chat_id }}</span>
-                                    <span class="text-xs ml-auto shrink-0" style="color: var(--tg-muted);">{{ result.date ? new Date(result.date).toLocaleDateString() : '' }}</span>
-                                </div>
-                                <div class="text-xs truncate" style="color: var(--tg-muted);" v-html="result.snippet || (result.text || '').substring(0, 100)"></div>
+                            <div class="px-3 py-1.5 text-xs font-medium flex items-center justify-between" style="color: var(--tg-muted);">
+                                <span>Messages</span>
+                                <span v-if="globalSearchTotal > globalMessageResults.length" class="text-[10px] opacity-70">{{ globalMessageResults.length }} of {{ globalSearchTotal }}</span>
                             </div>
+                            <template v-for="(group, groupName) in groupedMessageResults" :key="groupName">
+                                <div class="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider" style="color: var(--tg-accent); background: var(--tg-hover);">{{ groupName }}</div>
+                                <div v-for="result in group" :key="result.chat_id + '-' + result.id"
+                                    @click="navigateToMessage(result)"
+                                    class="px-3 py-2 cursor-pointer hover:bg-tg-hover transition-colors border-b" style="border-color: var(--tg-border);">
+                                    <div class="flex items-center gap-2 mb-0.5">
+                                        <span class="text-xs font-medium truncate" style="color: var(--tg-text);">{{ result.first_name || result.username || 'Unknown' }}</span>
+                                        <span class="text-xs truncate" style="color: var(--tg-muted);">in {{ chats.find(c => c.id === result.chat_id)?.title || 'Chat ' + result.chat_id }}</span>
+                                        <span class="text-xs ml-auto shrink-0" style="color: var(--tg-muted);">{{ result.date ? new Date(result.date).toLocaleDateString() : '' }}</span>
+                                    </div>
+                                    <div class="text-xs truncate" style="color: var(--tg-muted);" v-html="result.snippet || (result.text || '').substring(0, 100)"></div>
+                                </div>
+                            </template>
                         </div>
                         <!-- Search results info -->
                         <div v-if="searchQuery && !loadingChats" class="p-3 text-center text-xs text-tg-muted border-t border-gray-700/50">
-                            <span v-if="searchResults.length > 0 || globalMessageResults.length > 0">Found {{ searchResults.length }} chats<span v-if="globalMessageResults.length > 0">, {{ globalMessageResults.length }} messages</span> matching "{{ searchQuery }}"</span>
+                            <span v-if="searchResults.length > 0 || globalMessageResults.length > 0">Found {{ searchResults.length }} chats<span v-if="globalMessageResults.length > 0">, {{ globalSearchTotal || globalMessageResults.length }} messages</span> matching "{{ searchQuery }}"</span>
                             <span v-else>No results found</span>
                         </div>
                     </template>
                 </div>
+            </div>
+
+            <!-- Sidebar Resize Handle (desktop only) -->
+            <div class="sidebar-resize-handle hidden md:block"
+                :class="{ active: sidebarResizing }"
+                @mousedown.prevent="startSidebarResize"></div>
+
+            <!-- PWA Install Banner -->
+            <div v-if="pwaInstallPrompt && !pwaBannerDismissed" class="pwa-install-banner md:hidden w-full">
+                <i class="fas fa-download"></i>
+                <span class="flex-1">Install app for offline access</span>
+                <button @click="installPwa" class="px-3 py-1 bg-white/20 rounded-lg text-xs font-medium hover:bg-white/30">Install</button>
+                <button @click="pwaBannerDismissed = true" class="p-1 hover:opacity-70"><i class="fas fa-times text-xs"></i></button>
             </div>
 
             <!-- Main Chat Area - full width on mobile -->
@@ -1157,15 +1217,26 @@
                                 title="Shared Media">
                                 <i class="fas fa-photo-video text-xs sm:text-sm"></i>
                             </button>
-                            <!-- Export Button - always visible -->
-                            <button @click="exportChat"
-                                class="p-1.5 sm:p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
-                                title="Export Chat to JSON">
-                                <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                </svg>
-                            </button>
+                            <!-- Export Button with format dropdown -->
+                            <div class="relative shrink-0">
+                                <button @click="showExportMenu = !showExportMenu"
+                                    class="p-1.5 sm:p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                                    title="Export Chat">
+                                    <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                    </svg>
+                                </button>
+                                <div v-if="showExportMenu" @click.stop class="absolute right-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 min-w-[120px]">
+                                    <div v-if="showExportMenu" @click="showExportMenu = false" class="fixed inset-0 z-40"></div>
+                                    <button @click="exportChat('json'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
+                                        <i class="fas fa-code w-4 text-center"></i> Export JSON
+                                    </button>
+                                    <button @click="exportChat('csv'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
+                                        <i class="fas fa-table w-4 text-center"></i> Export CSV
+                                    </button>
+                                </div>
+                            </div>
 
                             <!-- AI Assistant Panel Toggle -->
                             <button @click="showAiPanel = !showAiPanel"
@@ -1263,7 +1334,13 @@
                     <div v-if="showMediaPanel" class="absolute inset-y-0 right-0 w-80 z-30 flex flex-col border-l" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
                         <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
                             <button @click="showMediaPanel = false" class="text-tg-muted hover:text-white"><i class="fas fa-times"></i></button>
-                            <span class="font-semibold text-white text-sm">Shared Media</span>
+                            <span class="font-semibold text-white text-sm flex-1">Shared Media</span>
+                            <button v-if="['photo','video'].includes(mediaPanelTab)"
+                                @click="mediaGridLarge = !mediaGridLarge"
+                                class="p-1.5 rounded hover:bg-white/10 text-tg-muted hover:text-white transition-colors"
+                                :title="mediaGridLarge ? 'Small grid' : 'Large grid'">
+                                <i class="fas" :class="mediaGridLarge ? 'fa-th' : 'fa-th-large'"></i>
+                            </button>
                         </div>
                         <div class="flex border-b" style="border-color: var(--tg-border);">
                             <button v-for="tab in mediaPanelTabs" :key="tab.key" @click="mediaPanelTab = tab.key; loadMediaPanel(true)"
@@ -1273,7 +1350,7 @@
                             </button>
                         </div>
                         <div class="flex-1 overflow-y-auto p-2">
-                            <div v-if="['photo','video'].includes(mediaPanelTab)" class="grid grid-cols-3 gap-1">
+                            <div v-if="['photo','video'].includes(mediaPanelTab)" class="grid gap-1" :class="mediaGridLarge ? 'grid-cols-2' : 'grid-cols-3'">
                                 <div v-for="item in mediaPanelItems" :key="item.id" @click="openMedia(item)" class="aspect-square cursor-pointer overflow-hidden rounded hover:opacity-80">
                                     <img :src="getMediaUrl(item)" class="w-full h-full object-cover" loading="lazy">
                                 </div>
@@ -1687,10 +1764,25 @@
                                         </a>
                                     </div>
 
-                                    <!-- Text with clickable links -->
+                                    <!-- Text with clickable links + smart highlights -->
                                     <div class="whitespace-pre-wrap break-words message-text"
                                         @contextmenu="handleTextContextMenu($event, msg)"
                                         v-html="linkifyText(msg.text, messageSearchQuery)"></div>
+
+                                    <!-- Link preview card from raw_data -->
+                                    <div v-if="getLinkPreview(msg)" class="link-preview-card"
+                                        @click="window.open(getLinkPreview(msg).url, '_blank')">
+                                        <div class="flex">
+                                            <div class="flex-1 p-2.5 min-w-0">
+                                                <div class="text-[10px] font-medium truncate" style="color: var(--tg-accent);">{{ getLinkPreview(msg).site_name }}</div>
+                                                <div class="text-xs font-semibold truncate mt-0.5" style="color: var(--tg-text);">{{ getLinkPreview(msg).title }}</div>
+                                                <div v-if="getLinkPreview(msg).description" class="text-[11px] mt-0.5 line-clamp-2" style="color: var(--tg-muted);">{{ getLinkPreview(msg).description }}</div>
+                                            </div>
+                                            <div v-if="getLinkPreview(msg).photo_url" class="w-16 h-16 shrink-0">
+                                                <img :src="getLinkPreview(msg).photo_url" class="w-full h-full object-cover" loading="lazy" @error="$event.target.parentElement.style.display='none'">
+                                            </div>
+                                        </div>
+                                    </div>
 
                                     <!-- OCR text extracted from image -->
                                     <div v-if="msg.ocr_text" class="mt-1.5 px-2 py-1.5 rounded text-xs" style="background: var(--tg-hover); border-left: 2px solid var(--tg-accent);">
@@ -1749,15 +1841,25 @@
                         <div ref="scrollAnchor"></div>
                     </div>
 
-                    <!-- Scroll to Bottom Button -->
-                    <button v-if="showScrollToBottom" 
-                        @click="scrollToLatest"
-                        class="scroll-to-bottom-btn"
-                        title="Scroll to latest messages">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
-                        </svg>
-                    </button>
+                    <!-- Jump to First/Last + Scroll to Bottom -->
+                    <div class="absolute bottom-4 right-4 flex flex-col gap-2 z-20">
+                        <button v-if="showScrollToBottom" @click="jumpToBoundary('first')"
+                            class="w-10 h-10 rounded-full bg-tg-sidebar/90 backdrop-blur shadow-lg flex items-center justify-center text-tg-muted hover:text-white transition-colors"
+                            title="Jump to oldest message">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
+                                <path stroke-linecap="round" stroke-width="2" d="M5 10h14"></path>
+                            </svg>
+                        </button>
+                        <button v-if="showScrollToBottom"
+                            @click="scrollToLatest"
+                            class="scroll-to-bottom-btn"
+                            title="Scroll to latest messages">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+                            </svg>
+                        </button>
+                    </div>
                     </div>
                 </template>
             </div>
@@ -2582,6 +2684,18 @@
                     { key: 'document', label: 'Files', icon: 'fa-file' },
                     { key: 'voice', label: 'Voice', icon: 'fa-microphone' },
                 ]
+                const mediaGridLarge = ref(false)
+                // Sidebar resize state
+                const sidebarRef = ref(null)
+                const sidebarWidth = ref(parseInt(localStorage.getItem('tg_sidebar_width')) || 320)
+                const sidebarResizing = ref(false)
+                // PWA install
+                const pwaInstallPrompt = ref(null)
+                const pwaBannerDismissed = ref(localStorage.getItem('tg_pwa_dismissed') === '1')
+                // Global search total
+                const globalSearchTotal = ref(0)
+                // Export menu
+                const showExportMenu = ref(false)
                 // Profile panel (Phase 6)
                 const showProfilePanel = ref(false)
                 const profileMembers = ref([])
@@ -3286,6 +3400,7 @@
                     if (!query) {
                         searchResults.value = []
                         globalMessageResults.value = []
+                        globalSearchTotal.value = 0
                         searchLoading.value = false
                         return
                     }
@@ -3304,6 +3419,7 @@
                             if (msgRes.ok) {
                                 const msgData = await msgRes.json()
                                 globalMessageResults.value = msgData.results || []
+                                globalSearchTotal.value = msgData.total || globalMessageResults.value.length
                             }
                         } catch (e) {
                             console.error('Search failed:', e)
@@ -4954,11 +5070,105 @@
                     return `${m}:${s.toString().padStart(2, '0')}`
                 }
 
-                const exportChat = () => {
+                const exportChat = (format = 'json') => {
                     if (!selectedChat.value) return
-                    const url = `/api/chats/${selectedChat.value.id}/export`
+                    const url = `/api/chats/${selectedChat.value.id}/export?format=${format}`
                     window.open(url, '_blank')
                 }
+
+                // Jump to first or last message in chat
+                const jumpToBoundary = async (direction) => {
+                    if (!selectedChat.value) return
+                    try {
+                        const res = await fetch(`/api/chats/${selectedChat.value.id}/boundary?direction=${direction}`, { credentials: 'include' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            if (data.message_id) {
+                                selectChat(selectedChat.value, { targetMsgId: data.message_id })
+                            }
+                        }
+                    } catch (e) { console.error('Jump to boundary failed:', e) }
+                }
+
+                // Sidebar resize handlers
+                const startSidebarResize = (e) => {
+                    sidebarResizing.value = true
+                    const startX = e.clientX
+                    const startW = sidebarWidth.value
+                    const onMove = (ev) => {
+                        const newW = Math.max(220, Math.min(600, startW + (ev.clientX - startX)))
+                        sidebarWidth.value = newW
+                    }
+                    const onUp = () => {
+                        sidebarResizing.value = false
+                        localStorage.setItem('tg_sidebar_width', sidebarWidth.value)
+                        document.removeEventListener('mousemove', onMove)
+                        document.removeEventListener('mouseup', onUp)
+                    }
+                    document.addEventListener('mousemove', onMove)
+                    document.addEventListener('mouseup', onUp)
+                }
+
+                // Link preview from raw_data
+                const _linkPreviewCache = new WeakMap()
+                const getLinkPreview = (msg) => {
+                    if (!msg.raw_data) return null
+                    if (_linkPreviewCache.has(msg)) return _linkPreviewCache.get(msg)
+                    let preview = null
+                    try {
+                        const raw = typeof msg.raw_data === 'string' ? JSON.parse(msg.raw_data) : msg.raw_data
+                        const wp = raw?.web_page || raw?.webpage || raw?.media?.webpage
+                        if (wp && (wp.title || wp.site_name)) {
+                            preview = {
+                                url: wp.url || '',
+                                site_name: wp.site_name || new URL(wp.url || '').hostname,
+                                title: wp.title || '',
+                                description: wp.description || '',
+                                photo_url: wp.photo?.sizes?.[0]?.url || wp.photo?.url || null
+                            }
+                        }
+                    } catch (_) {}
+                    _linkPreviewCache.set(msg, preview)
+                    return preview
+                }
+
+                // Smart date grouping for search results
+                const groupedMessageResults = computed(() => {
+                    const groups = {}
+                    const now = new Date()
+                    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+                    const weekAgo = new Date(today.getTime() - 7 * 86400000)
+                    const monthAgo = new Date(today.getTime() - 30 * 86400000)
+                    for (const r of globalMessageResults.value) {
+                        const d = r.date ? new Date(r.date) : null
+                        let label = 'Older'
+                        if (d) {
+                            if (d >= today) label = 'Today'
+                            else if (d >= new Date(today.getTime() - 86400000)) label = 'Yesterday'
+                            else if (d >= weekAgo) label = 'This Week'
+                            else if (d >= monthAgo) label = 'This Month'
+                        }
+                        if (!groups[label]) groups[label] = []
+                        groups[label].push(r)
+                    }
+                    return groups
+                })
+
+                // PWA install
+                const installPwa = async () => {
+                    if (!pwaInstallPrompt.value) return
+                    pwaInstallPrompt.value.prompt()
+                    const result = await pwaInstallPrompt.value.userChoice
+                    if (result.outcome === 'accepted') {
+                        pwaInstallPrompt.value = null
+                        pwaBannerDismissed.value = true
+                        localStorage.setItem('tg_pwa_dismissed', '1')
+                    }
+                }
+                window.addEventListener('beforeinstallprompt', (e) => {
+                    e.preventDefault()
+                    pwaInstallPrompt.value = e
+                })
 
                 const showSenderName = (index) => {
                     // With flex-col-reverse: index 0 = newest (bottom), higher index = older (top)
@@ -5574,6 +5784,14 @@
                     }
                     const urlRegex = /(https?:\/\/[^\s<]+)/g
                     result = result.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+                    // Smart highlights: money, phone, email, dates (skip inside HTML tags)
+                    result = result.replace(/(?<![<\w])(?:[$€£¥₫₹])\s?[\d,]+(?:\.\d{1,2})?/g, '<span class="smart-badge smart-badge-money">$&</span>')
+                    result = result.replace(/(?<![<\w\d])(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}(?![<\w\d])/g, (m) => {
+                        const digits = m.replace(/\D/g, '')
+                        return digits.length >= 7 && digits.length <= 15 ? `<span class="smart-badge smart-badge-phone">${m}</span>` : m
+                    })
+                    result = result.replace(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, '<span class="smart-badge smart-badge-email">$1</span>')
+                    result = result.replace(/\b(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})\b/g, '<span class="smart-badge smart-badge-date">$1</span>')
                     return result
                 }
 
@@ -6121,6 +6339,25 @@
                     mediaPanelTabs,
                     loadMediaPanel,
                     openMediaPanel,
+                    mediaGridLarge,
+                    // Sidebar resize
+                    sidebarRef,
+                    sidebarWidth,
+                    sidebarResizing,
+                    startSidebarResize,
+                    // Jump to boundary
+                    jumpToBoundary,
+                    // Link previews
+                    getLinkPreview,
+                    // Smart date grouping
+                    groupedMessageResults,
+                    globalSearchTotal,
+                    // PWA install
+                    pwaInstallPrompt,
+                    pwaBannerDismissed,
+                    installPwa,
+                    // Export menu
+                    showExportMenu,
                     // Profile panel (Phase 6)
                     showProfilePanel,
                     profileMembers,

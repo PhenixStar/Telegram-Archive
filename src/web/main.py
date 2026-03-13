@@ -7,8 +7,10 @@ v5.0: WebSocket support for real-time updates and notifications.
 """
 
 import asyncio
+import csv
 import glob
 import hashlib
+import io
 import json
 import logging
 import os
@@ -1933,10 +1935,16 @@ async def get_message_by_date(
 
 
 @app.get("/api/chats/{chat_id}/export")
-async def export_chat(chat_id: int, user: UserContext = Depends(require_auth)):
-    """Export chat history to JSON."""
+async def export_chat(
+    chat_id: int,
+    format: str = Query("json", description="Export format: json or csv"),
+    user: UserContext = Depends(require_auth),
+):
+    """Export chat history to JSON or CSV."""
     if user.no_download:
         raise HTTPException(status_code=403, detail="Downloads disabled for this account")
+    if format not in ("json", "csv"):
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'json' or 'csv'")
     user_chat_ids = get_user_chat_ids(user)
     if user_chat_ids is not None and chat_id not in user_chat_ids:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -1949,6 +1957,41 @@ async def export_chat(chat_id: int, user: UserContext = Depends(require_auth)):
         chat_name = chat.get("title") or chat.get("username") or str(chat_id)
         # Sanitize filename
         safe_name = "".join(c for c in chat_name if c.isalnum() or c in (" ", "-", "_")).strip()
+
+        if format == "csv":
+            filename = f"{safe_name}_export.csv"
+            include_media = True
+
+            async def iter_csv():
+                # Write CSV header
+                buf = io.StringIO()
+                writer = csv.writer(buf)
+                writer.writerow(["id", "date", "sender_name", "text", "media_type", "media_file"])
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
+
+                async for msg in db.get_messages_for_export(chat_id, include_media=include_media):
+                    writer.writerow([
+                        msg.get("id", ""),
+                        msg.get("date", ""),
+                        msg.get("sender", {}).get("name", ""),
+                        msg.get("text", "") or "",
+                        msg.get("media_type", "") or "",
+                        msg.get("media_path", "") or "",
+                    ])
+                    yield buf.getvalue()
+                    buf.seek(0)
+                    buf.truncate(0)
+
+            encoded_filename = quote(filename)
+            return StreamingResponse(
+                iter_csv(),
+                media_type="text/csv; charset=utf-8",
+                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+            )
+
+        # Default: JSON export
         filename = f"{safe_name}_export.json"
 
         async def iter_json():
@@ -1973,6 +2016,31 @@ async def export_chat(chat_id: int, user: UserContext = Depends(require_auth)):
         raise
     except Exception as e:
         logger.error(f"Error exporting chat: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/chats/{chat_id}/boundary")
+async def get_boundary_message(
+    chat_id: int,
+    direction: str = Query("first", description="Jump direction: 'first' (oldest) or 'last' (newest)"),
+    user: UserContext = Depends(require_auth),
+):
+    """Return the first or last message ID in a chat for jump-to navigation."""
+    if direction not in ("first", "last"):
+        raise HTTPException(status_code=400, detail="direction must be 'first' or 'last'")
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        message_id = await db.get_boundary_message_id(chat_id, direction)
+        if message_id is None:
+            raise HTTPException(status_code=404, detail="No messages found in this chat")
+        return {"message_id": message_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching boundary message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
