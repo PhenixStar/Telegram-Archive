@@ -2573,6 +2573,68 @@ async def set_setting(key: str, request: Request, user: UserContext = Depends(re
 
 
 # ============================================================================
+# Backup Schedule Endpoints (admin-only)
+# ============================================================================
+
+
+@app.get("/api/admin/backup-config")
+async def get_backup_config(user: UserContext = Depends(require_master)):
+    """Get current backup schedule configuration from app_settings."""
+    schedule = await db.get_setting("backup.schedule") or config.schedule
+    active_boost = (await db.get_setting("backup.active_boost") or "false").lower() == "true"
+    heartbeat = await db.get_setting("backup.viewer_heartbeat")
+    return {
+        "schedule": schedule,
+        "default_schedule": config.schedule,
+        "active_boost": active_boost,
+        "viewer_heartbeat": heartbeat,
+    }
+
+
+@app.put("/api/admin/backup-config")
+async def set_backup_config(request: Request, user: UserContext = Depends(require_master)):
+    """Update backup schedule configuration. Scheduler picks up changes within 30s."""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    updated = {}
+
+    # Validate and set cron schedule
+    if "schedule" in data:
+        cron = data["schedule"].strip()
+        parts = cron.split()
+        if len(parts) != 5:
+            raise HTTPException(status_code=400, detail="Invalid cron format (need 5 fields: min hour day month dow)")
+        await db.set_setting("backup.schedule", cron)
+        updated["schedule"] = cron
+
+    # Toggle active-viewer boost
+    if "active_boost" in data:
+        val = "true" if data["active_boost"] else "false"
+        await db.set_setting("backup.active_boost", val)
+        updated["active_boost"] = data["active_boost"]
+
+    await db.create_audit_log(
+        username=user.username, role="master",
+        action=f"backup_config_updated:{','.join(updated.keys())}",
+        endpoint="/api/admin/backup-config",
+        ip_address=request.client.host if request.client else None,
+    )
+
+    return {"updated": updated}
+
+
+@app.post("/api/admin/backup-heartbeat")
+async def backup_heartbeat(user: UserContext = Depends(require_auth)):
+    """Record viewer activity heartbeat. Used by scheduler to detect active viewers."""
+    from datetime import datetime, timezone
+    await db.set_setting("backup.viewer_heartbeat", datetime.now(timezone.utc).isoformat())
+    return {"ok": True}
+
+
+# ============================================================================
 # AI Assistant Endpoints
 # ============================================================================
 

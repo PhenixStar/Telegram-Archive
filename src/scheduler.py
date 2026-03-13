@@ -14,15 +14,24 @@ import asyncio
 import logging
 import signal
 import sys
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from .config import Config
 from .connection import TelegramConnection
 from .telegram_backup import run_backup
 
 logger = logging.getLogger(__name__)
+
+# Active-viewer boost interval (seconds)
+ACTIVE_BOOST_INTERVAL = 120  # 2 minutes
+# How recently a viewer heartbeat must be to count as "active"
+VIEWER_HEARTBEAT_FRESHNESS = 300  # 5 minutes
+# How often to poll app_settings for schedule changes
+SETTINGS_POLL_INTERVAL = 30  # seconds
 
 
 class BackupScheduler:
@@ -44,12 +53,19 @@ class BackupScheduler:
         self.scheduler = AsyncIOScheduler()
         self.running = False
 
+        # Current effective schedule (tracks what's active to avoid unnecessary reschedules)
+        self._current_schedule: str = config.schedule
+        self._boost_active: bool = False
+
         # Shared Telegram connection (used by both backup and listener)
         self._connection: TelegramConnection | None = None
 
         # Real-time listener (optional)
         self._listener = None
         self._listener_task: asyncio.Task | None = None
+
+        # DB adapter for reading app_settings (lazy init)
+        self._db = None
 
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -59,6 +75,91 @@ class BackupScheduler:
         """Handle shutdown signals."""
         logger.info(f"Received signal {signum}, shutting down gracefully...")
         self.stop()
+
+    async def _init_db(self):
+        """Initialize DB adapter for reading app_settings."""
+        if self._db:
+            return
+        try:
+            from .db.base import DatabaseManager
+            from .db.adapter import DatabaseAdapter
+            db_manager = DatabaseManager(self.config)
+            await db_manager.initialize()
+            self._db = DatabaseAdapter(db_manager)
+            logger.info("DB adapter initialized for settings polling")
+        except Exception as e:
+            logger.warning(f"Failed to init DB adapter for settings: {e}")
+
+    async def _check_schedule_settings(self):
+        """
+        Poll app_settings for backup schedule overrides and active-viewer boost.
+
+        Keys read from app_settings:
+          - backup.schedule:       cron string override (e.g. "*/30 * * * *")
+          - backup.active_boost:   "true"/"false" — enable 2-min interval when viewer active
+          - backup.viewer_heartbeat: ISO timestamp of last viewer activity
+        """
+        if not self._db:
+            await self._init_db()
+        if not self._db:
+            return
+
+        try:
+            db_schedule = await self._db.get_setting("backup.schedule")
+            boost_enabled = (await self._db.get_setting("backup.active_boost") or "").lower() == "true"
+            heartbeat_str = await self._db.get_setting("backup.viewer_heartbeat")
+
+            # Check if viewer is actively engaged
+            viewer_active = False
+            if boost_enabled and heartbeat_str:
+                try:
+                    last_beat = datetime.fromisoformat(heartbeat_str)
+                    # Compare timezone-aware: strip tzinfo if present for safe comparison
+                    now = datetime.utcnow()
+                    beat_naive = last_beat.replace(tzinfo=None)
+                    viewer_active = (now - beat_naive) < timedelta(seconds=VIEWER_HEARTBEAT_FRESHNESS)
+                except (ValueError, TypeError):
+                    pass
+
+            # Determine target schedule
+            if viewer_active and boost_enabled:
+                # Active boost mode — 2-min interval
+                if not self._boost_active:
+                    self._apply_interval_schedule(ACTIVE_BOOST_INTERVAL)
+                    self._boost_active = True
+                    logger.info("Active viewer detected — boosted to 2-min backup interval")
+            else:
+                # Normal mode — use DB override or env default
+                target = db_schedule or self.config.schedule
+                if self._boost_active or target != self._current_schedule:
+                    self._apply_cron_schedule(target)
+                    self._boost_active = False
+                    self._current_schedule = target
+                    logger.info(f"Backup schedule set to: {target}")
+
+        except Exception as e:
+            logger.warning(f"Settings poll error: {e}")
+
+    def _apply_cron_schedule(self, cron_str: str):
+        """Replace the backup job with a new cron schedule."""
+        try:
+            parts = cron_str.split()
+            if len(parts) != 5:
+                logger.error(f"Invalid cron: {cron_str}")
+                return
+            minute, hour, day, month, day_of_week = parts
+            trigger = CronTrigger(minute=minute, hour=hour, day=day, month=month, day_of_week=day_of_week)
+            self.scheduler.reschedule_job("telegram_backup", trigger=trigger)
+        except Exception as e:
+            logger.error(f"Failed to apply cron schedule: {e}")
+
+    def _apply_interval_schedule(self, seconds: int):
+        """Replace the backup job with an interval schedule."""
+        try:
+            trigger = IntervalTrigger(seconds=seconds)
+            self.scheduler.reschedule_job("telegram_backup", trigger=trigger)
+        except Exception as e:
+            logger.error(f"Failed to apply interval schedule: {e}")
 
     async def _run_backup_job(self):
         """
@@ -239,10 +340,20 @@ class BackupScheduler:
         except Exception as e:
             logger.error(f"Initial backup failed: {e}", exc_info=True)
 
+        # Initialize DB for settings polling
+        await self._init_db()
+
         # Keep running until stopped
+        settings_check_counter = 0
         try:
             while self.running:
                 await asyncio.sleep(1)
+                settings_check_counter += 1
+
+                # Poll app_settings for schedule changes every SETTINGS_POLL_INTERVAL seconds
+                if settings_check_counter >= SETTINGS_POLL_INTERVAL:
+                    settings_check_counter = 0
+                    await self._check_schedule_settings()
 
                 # Check if listener task died unexpectedly and restart it
                 if self.config.enable_listener and self._listener_task:

@@ -2454,6 +2454,9 @@
                             <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Listener
                             </button>
+                            <button @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Backup
+                            </button>
                         </div>
                         <!-- Viewers Tab -->
                         <div v-if="adminActiveTab === 'viewers'">
@@ -2684,6 +2687,60 @@
                                     <p class="mb-2"><strong style="color: var(--tg-text);">always</strong> — Listener always runs (legacy behavior)</p>
                                     <p><strong style="color: var(--tg-text);">off</strong> — Listener never runs</p>
                                     <p class="mt-3" style="opacity: 0.6;">Mode is configured via <code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> env var</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Backup Tab -->
+                        <div v-if="adminActiveTab === 'backup'">
+                            <div class="space-y-4">
+                                <!-- Schedule -->
+                                <div class="rounded-lg p-4" style="background: var(--tg-bg);">
+                                    <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Backup Schedule</h3>
+                                    <div class="space-y-3">
+                                        <div>
+                                            <label class="text-xs block mb-1" style="color: var(--tg-muted);">Cron Expression</label>
+                                            <div class="flex items-center gap-2">
+                                                <input v-model="backupConfig.schedule" placeholder="0 */6 * * *" class="flex-1 rounded px-3 py-2 text-sm font-mono" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                                <button @click="saveBackupConfig" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded shrink-0">Save</button>
+                                            </div>
+                                            <div class="text-[10px] mt-1" style="color: var(--tg-muted);">Default: {{ backupConfig.default_schedule || '0 */6 * * *' }}</div>
+                                        </div>
+                                        <!-- Preset buttons -->
+                                        <div class="flex flex-wrap gap-1.5">
+                                            <button v-for="preset in [
+                                                { label: 'Every 30min', cron: '*/30 * * * *' },
+                                                { label: 'Every 1h', cron: '0 * * * *' },
+                                                { label: 'Every 2h', cron: '0 */2 * * *' },
+                                                { label: 'Every 6h', cron: '0 */6 * * *' },
+                                                { label: 'Every 12h', cron: '0 */12 * * *' },
+                                                { label: 'Daily', cron: '0 0 * * *' },
+                                            ]" :key="preset.cron" @click="backupConfig.schedule = preset.cron; saveBackupConfig()"
+                                                class="px-2 py-1 text-[10px] rounded transition-colors"
+                                                :style="backupConfig.schedule === preset.cron ? 'background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3)' : 'color: var(--tg-muted); border: 1px solid var(--tg-border)'">
+                                                {{ preset.label }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Active Viewer Boost -->
+                                <div class="rounded-lg p-4" style="background: var(--tg-bg);">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <h3 class="text-sm font-medium" style="color: var(--tg-text);">Active Viewer Boost</h3>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="backupConfig.active_boost" @change="saveBackupConfig" class="sr-only peer">
+                                            <div class="w-9 h-5 rounded-full peer peer-checked:bg-blue-600 transition-colors" style="background: var(--tg-border);"></div>
+                                            <div class="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform peer-checked:translate-x-4"></div>
+                                        </label>
+                                    </div>
+                                    <p class="text-xs" style="color: var(--tg-muted);">When enabled and someone is actively viewing, backup interval drops to <strong style="color: var(--tg-text);">every 2 minutes</strong>. Returns to normal schedule when no viewers are active for 5 minutes.</p>
+                                    <div v-if="backupConfig.viewer_heartbeat" class="mt-2 text-[10px]" style="color: var(--tg-muted);">
+                                        Last viewer activity: {{ new Date(backupConfig.viewer_heartbeat).toLocaleString() }}
+                                    </div>
+                                </div>
+                                <!-- Info -->
+                                <div class="rounded-lg p-4 text-xs" style="background: var(--tg-bg); color: var(--tg-muted);">
+                                    <p class="mb-2">The backup scheduler polls for config changes every <strong style="color: var(--tg-text);">30 seconds</strong>.</p>
+                                    <p>Schedule changes take effect on the next poll cycle — no container restart needed.</p>
                                 </div>
                             </div>
                         </div>
@@ -3265,6 +3322,9 @@
                 const lastBackupTimeSource = ref('metadata')  // Source of last backup time: 'metadata' (UTC) or 'sync_status' (server local)
                 const listenerActive = ref(false)  // Whether real-time listener is active
                 const listenerInfo = ref({ mode: 'off', status: 'stopped', grace_period: 300, viewer_count: 0 })
+
+                // Backup config (admin)
+                const backupConfig = ref({ schedule: '', default_schedule: '', active_boost: false, viewer_heartbeat: null })
                 const showDatePickerModal = ref(false)
                 const datePickerInput = ref(null)
                 const selectedDate = ref(null)
@@ -3770,6 +3830,44 @@
                     }
                 }
 
+                // Backup config management
+                const loadBackupConfig = async () => {
+                    try {
+                        const res = await fetch('/api/admin/backup-config', { headers: { 'Authorization': `Bearer ${authToken.value}` } })
+                        if (res.ok) {
+                            backupConfig.value = await res.json()
+                        }
+                    } catch (e) {
+                        console.error('Failed to load backup config', e)
+                    }
+                }
+
+                const saveBackupConfig = async () => {
+                    try {
+                        const res = await fetch('/api/admin/backup-config', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken.value}` },
+                            body: JSON.stringify({ schedule: backupConfig.value.schedule, active_boost: backupConfig.value.active_boost })
+                        })
+                        if (res.ok) {
+                            showToast('Backup config saved — scheduler picks up changes within 30s')
+                        }
+                    } catch (e) {
+                        console.error('Failed to save backup config', e)
+                    }
+                }
+
+                // Viewer heartbeat — sends a pulse every 2 min when user is active
+                let heartbeatInterval = null
+                const startViewerHeartbeat = () => {
+                    if (heartbeatInterval) return
+                    const sendBeat = () => {
+                        fetch('/api/admin/backup-heartbeat', { method: 'POST', credentials: 'include' }).catch(() => {})
+                    }
+                    sendBeat()  // Send immediately
+                    heartbeatInterval = setInterval(sendBeat, 120000)  // Then every 2 min
+                }
+
                 const formatStatsTime = (isoString) => {
                     if (!isoString) return 'Never calculated'
                     const date = moment(isoString)
@@ -3867,6 +3965,7 @@
                                 await loadFolders()
                                 await loadArchivedCount()
                                 setupInfiniteScroll()
+                                startViewerHeartbeat()  // Notify backup scheduler of active viewer
 
                                 // Handle deep link from push notification or permalink
                                 const urlParams = new URLSearchParams(window.location.search)
@@ -4349,6 +4448,7 @@
                             await loadFolders()
                             await loadArchivedCount()
                             setupInfiniteScroll()
+                            startViewerHeartbeat()
                             await initNotifications()
 
                             // Handle redirect after login (from permalink 302)
@@ -6627,6 +6727,9 @@
                     listenerActive,
                     listenerInfo,
                     loadListenerStatus,
+                    backupConfig,
+                    loadBackupConfig,
+                    saveBackupConfig,
                     onImageLoad,
                     viewerTimezone,
                     // Date picker
