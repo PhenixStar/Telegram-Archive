@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements-viewer.txt
 COPY src/__init__.py ./src/
 COPY src/config.py ./src/
 COPY src/realtime.py ./src/
+COPY src/ocr_worker.py ./src/
 COPY src/db/ ./src/db/
 COPY src/web/ ./src/web/
 

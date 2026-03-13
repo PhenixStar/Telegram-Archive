@@ -1173,8 +1173,15 @@ class DatabaseAdapter:
                 stmt = stmt.where(Message.reply_to_top_id == topic_id)
 
             if search:
-                escaped = search.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-                stmt = stmt.where(Message.text.ilike(f"%{escaped}%", escape="\\"))
+                import re
+                digits_only = re.sub(r'[^\d]', '', search)
+                is_numeric = bool(digits_only) and len(digits_only) >= 3 and bool(re.match(r'^[\d,.\s]+$', search.strip()))
+                if is_numeric:
+                    normalized = func.replace(func.replace(func.replace(Message.text, ',', ''), '.', ''), ' ', '')
+                    stmt = stmt.where(normalized.contains(digits_only))
+                else:
+                    escaped = search.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+                    stmt = stmt.where(Message.text.ilike(f"%{escaped}%", escape="\\"))
 
             # Date range filtering (applies on top of any pagination mode)
             if date_from is not None:
@@ -2516,6 +2523,40 @@ class DatabaseAdapter:
                 {"message_id": r[0], "chat_id": r[1], "file_path": r[2], "type": r[3], "mime_type": r[4]}
                 for r in result
             ]
+
+    async def get_ocr_progress(self, chat_id: int) -> dict[str, int]:
+        """Get OCR processing progress for a chat: how many photos processed vs total."""
+        async with self.db_manager.async_session_factory() as session:
+            # Total photos with downloaded files
+            total_result = await session.execute(
+                select(func.count(Media.id))
+                .join(Message, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+                .where(
+                    and_(
+                        Media.chat_id == chat_id,
+                        Media.type.in_(["photo", "document"]),
+                        Media.downloaded == 1,
+                    )
+                )
+            )
+            total = total_result.scalar() or 0
+
+            # Photos already OCR'd (ocr_text is not null)
+            processed_result = await session.execute(
+                select(func.count(Media.id))
+                .join(Message, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+                .where(
+                    and_(
+                        Media.chat_id == chat_id,
+                        Media.type.in_(["photo", "document"]),
+                        Media.downloaded == 1,
+                        Message.ocr_text.isnot(None),
+                    )
+                )
+            )
+            processed = processed_result.scalar() or 0
+
+            return {"processed": processed, "total": total}
 
     async def get_ai_context_for_chat(self, chat_id: int, limit: int = 30) -> list[dict[str, Any]]:
         """Get recent messages with AI annotations for AI context building."""

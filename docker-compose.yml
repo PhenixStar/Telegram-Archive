@@ -112,11 +112,13 @@ services:
     #       memory: 512M
 
   telegram-viewer:
-    image: drumsergio/telegram-archive-viewer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.viewer
     container_name: telegram-viewer
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8847:8000"
     environment:
       BACKUP_PATH: /data/backups
 
@@ -147,7 +149,8 @@ services:
       # If viewer shows no data, ensure these match the backup container
       DATABASE_URL: ${DATABASE_URL:-}
       DB_TYPE: ${DB_TYPE:-sqlite}
-      DB_PATH: ${DB_PATH:-/data/backups/telegram_backup.db}
+      # Hardcoded to match volume mount — .env override caused path mismatch
+      DB_PATH: /data/backups/telegram_backup.db
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       POSTGRES_USER: ${POSTGRES_USER:-telegram}
@@ -158,9 +161,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
     volumes:
-      # SQLite needs write access for WAL journal files (.db-wal, .db-shm).
-      # Use :ro only if you are using PostgreSQL as the database backend.
-      - ./data:/data
+      # Mount the active database directory
+      - /home/phenix/projects/apps/tele-private/database:/data/backups
+      # Mount media from backup dir
+      - /home/phenix/projects/apps/tele-private/database/backups/media:/data/backups/media
     networks:
       - telegram-network
     # Security hardening

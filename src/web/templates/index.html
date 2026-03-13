@@ -1006,10 +1006,24 @@
                             </div>
                         </div>
                         
+                        <!-- Global message search results -->
+                        <div v-if="globalMessageResults.length > 0" class="border-t" style="border-color: var(--tg-border);">
+                            <div class="px-3 py-1.5 text-xs font-medium" style="color: var(--tg-muted);">Messages</div>
+                            <div v-for="result in globalMessageResults" :key="result.chat_id + '-' + result.id"
+                                @click="navigateToMessage(result)"
+                                class="px-3 py-2 cursor-pointer hover:bg-tg-hover transition-colors border-b" style="border-color: var(--tg-border);">
+                                <div class="flex items-center gap-2 mb-0.5">
+                                    <span class="text-xs font-medium truncate" style="color: var(--tg-text);">{{ result.first_name || result.username || 'Unknown' }}</span>
+                                    <span class="text-xs truncate" style="color: var(--tg-muted);">in {{ chats.find(c => c.id === result.chat_id)?.title || 'Chat ' + result.chat_id }}</span>
+                                    <span class="text-xs ml-auto shrink-0" style="color: var(--tg-muted);">{{ result.date ? new Date(result.date).toLocaleDateString() : '' }}</span>
+                                </div>
+                                <div class="text-xs truncate" style="color: var(--tg-muted);" v-html="result.snippet || (result.text || '').substring(0, 100)"></div>
+                            </div>
+                        </div>
                         <!-- Search results info -->
                         <div v-if="searchQuery && !loadingChats" class="p-3 text-center text-xs text-tg-muted border-t border-gray-700/50">
-                            <span v-if="searchResults.length > 0">Found {{ searchResults.length }} chats matching "{{ searchQuery }}"</span>
-                            <span v-else>No chats found</span>
+                            <span v-if="searchResults.length > 0 || globalMessageResults.length > 0">Found {{ searchResults.length }} chats<span v-if="globalMessageResults.length > 0">, {{ globalMessageResults.length }} messages</span> matching "{{ searchQuery }}"</span>
+                            <span v-else>No results found</span>
                         </div>
                     </template>
                 </div>
@@ -1042,8 +1056,8 @@
                                         d="M15 19l-7-7 7-7"></path>
                                 </svg>
                             </button>
-                            <div
-                                class="w-10 h-10 min-w-[2.5rem] aspect-square rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white overflow-hidden shrink-0">
+                            <div @click="openProfile"
+                                class="w-10 h-10 min-w-[2.5rem] aspect-square rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white overflow-hidden shrink-0 cursor-pointer">
                                 <img v-if="selectedChat?.avatar_url" :src="selectedChat.avatar_url"
                                     class="w-full h-full object-cover rounded-full" @error="selectedChat.avatar_url = null"
                                     :alt="getChatName(selectedChat)">
@@ -1296,7 +1310,7 @@
                         </div>
                         <div v-if="chatStats" class="flex justify-around px-4 py-3 border-t border-b" style="border-color: var(--tg-border);">
                             <div class="text-center">
-                                <div class="text-lg font-bold text-white">{{ chatStats.message_count?.toLocaleString() }}</div>
+                                <div class="text-lg font-bold text-white">{{ chatStats.messages?.toLocaleString() }}</div>
                                 <div class="text-xs text-tg-muted">Messages</div>
                             </div>
                             <div class="text-center">
@@ -1316,6 +1330,39 @@
                                 class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 text-sm text-gray-300">
                                 <i class="fab fa-telegram w-5 text-center text-tg-muted"></i> Open in Telegram
                             </button>
+                        </div>
+                        <!-- OCR Controls (admin only) -->
+                        <div v-if="userRole === 'master' && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                            <div class="text-xs text-tg-muted mb-1">AI Features</div>
+                            <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
+                                <div class="flex items-center gap-2 text-sm text-gray-300">
+                                    <i class="fas fa-eye w-5 text-center text-tg-muted"></i>
+                                    <span>OCR Scan</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" :checked="chatOcrEnabled" @change="toggleChatOcr" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-600 peer-checked:bg-blue-500 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+                                </label>
+                            </div>
+                            <div v-if="chatOcrEnabled" class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
+                                <div class="flex items-center gap-2 text-sm text-gray-300">
+                                    <i class="fas fa-font w-5 text-center text-tg-muted"></i>
+                                    <span>Show OCR Text</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" :checked="chatOcrVisible" @change="toggleChatOcrVisibility" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-600 peer-checked:bg-green-500 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+                                </label>
+                            </div>
+                            <div v-if="chatOcrEnabled && ocrProgress" class="px-3 py-1">
+                                <div class="flex justify-between text-xs text-tg-muted mb-1">
+                                    <span>OCR Progress</span>
+                                    <span>{{ ocrProgress.processed }}/{{ ocrProgress.total }}</span>
+                                </div>
+                                <div class="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div class="bg-blue-500 h-1.5 rounded-full transition-all" :style="{ width: ocrProgressPercent + '%' }"></div>
+                                </div>
+                            </div>
                         </div>
                         <div v-if="isGroup && profileMembers.length > 0" class="px-4 py-3 border-t" style="border-color: var(--tg-border);">
                             <div class="text-xs text-tg-muted mb-2">Members ({{ profileMembers.length }})</div>
@@ -1506,6 +1553,17 @@
                                                 class="rounded-lg max-h-64 max-w-full object-cover hover:opacity-90 transition"
                                                 @load="$event.target.setAttribute('data-loaded', '')"
                                                 @error="handleImageError($event, msg)">
+                                        </div>
+                                        <!-- OCR text overlay (when visible + has data) -->
+                                        <div v-if="chatOcrVisible && msg.ocr_text" class="mt-1 px-2 py-1 rounded text-xs bg-black/30 border border-white/10 max-w-sm">
+                                            <div class="flex items-center gap-1 cursor-pointer" @click="msg._ocrExpanded = !msg._ocrExpanded">
+                                                <i class="fas fa-eye text-blue-400" style="font-size: 9px;"></i>
+                                                <span class="text-blue-300">OCR</span>
+                                                <i :class="msg._ocrExpanded ? 'fa-chevron-up' : 'fa-chevron-down'" class="fas text-gray-500 ml-auto" style="font-size: 8px;"></i>
+                                            </div>
+                                            <div v-if="msg._ocrExpanded" class="mt-1 text-gray-300 whitespace-pre-wrap break-words select-all">
+                                                {{ msg.ocr_text }}
+                                            </div>
                                         </div>
 
                                         <!-- v8.1: Voice Notes — waveform visualization -->
@@ -1932,7 +1990,7 @@
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-sliders-h mr-1.5 text-xs"></i>General
                     </button>
-                    <button @click="settingsActiveTab = 'ai'"
+                    <button @click="settingsActiveTab = 'ai'; loadAiConfig()"
                         :class="settingsActiveTab === 'ai' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'ai' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
@@ -2015,23 +2073,143 @@
 
                     <!-- AI Tab -->
                     <div v-if="settingsActiveTab === 'ai'" class="space-y-6">
-                        <!-- Model Selector -->
-                        <div>
-                            <label class="text-xs font-medium mb-1.5 block" style="color: var(--tg-muted);">AI Model</label>
-                            <select v-model="aiSelectedModel" class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/50" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                <option value="auto">Auto (server default)</option>
-                                <optgroup label="Z-AI / GLM">
-                                    <option value="GLM-5">GLM-5</option>
-                                    <option value="GLM-4.7">GLM-4.7</option>
-                                    <option value="GLM-4.5-Air">GLM-4.5 Air</option>
-                                </optgroup>
-                                <optgroup label="MiniMax">
-                                    <option value="MiniMax-M2.5">MiniMax M2.5</option>
-                                    <option value="MiniMax-M2.5-highspeed">MiniMax M2.5 Highspeed</option>
-                                </optgroup>
-                            </select>
+
+                        <!-- Model Endpoints (admin only) -->
+                        <div v-if="userRole === 'master'" class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Model Endpoints</div>
+                                <button @click="saveAiConfig" class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                                    :style="aiConfigDirty ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-border); color: var(--tg-muted); cursor: default;'"
+                                    :disabled="!aiConfigDirty">
+                                    <i class="fas fa-save mr-1"></i>Save
+                                </button>
+                            </div>
+
+                            <!-- Vision / OCR -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-eye text-blue-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">Vision / OCR</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">Required for OCR</span>
+                                    </div>
+                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.vision === 'ok' ? 'background:#22c55e' : aiConfigStatus.vision === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                </div>
+                                <div class="space-y-2">
+                                    <select v-model="aiConfig.vision.provider" @change="aiConfigDirty = true" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="local">Local Model</option>
+                                        <option value="external">External API</option>
+                                    </select>
+                                    <input v-model="aiConfig.vision.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8080/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-if="aiConfig.vision.provider === 'external'" v-model="aiConfig.vision.api_key" @input="aiConfigDirty = true" type="password" placeholder="API Key" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.vision.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. glm-ocr)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <details class="mt-1">
+                                        <summary class="text-xs cursor-pointer" style="color: var(--tg-muted);">Fallback model (optional)</summary>
+                                        <div class="space-y-2 mt-2">
+                                            <input v-model="aiConfig.vision.fallback_url" @input="aiConfigDirty = true" placeholder="Fallback API URL" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <input v-model="aiConfig.vision.fallback_model" @input="aiConfigDirty = true" placeholder="Fallback model name" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        </div>
+                                    </details>
+                                    <button @click="testAiConnection('vision')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-plug mr-1"></i>Test Connection
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Chat / General LLM -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-comment-dots text-purple-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">Chat / General LLM</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">Required for AI Assistant</span>
+                                    </div>
+                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.chat === 'ok' ? 'background:#22c55e' : aiConfigStatus.chat === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                </div>
+                                <div class="space-y-2">
+                                    <select v-model="aiConfig.chat.provider" @change="aiConfigDirty = true" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="local">Local Model</option>
+                                        <option value="external">External API</option>
+                                    </select>
+                                    <input v-model="aiConfig.chat.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:11434/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-if="aiConfig.chat.provider === 'external'" v-model="aiConfig.chat.api_key" @input="aiConfigDirty = true" type="password" placeholder="API Key" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.chat.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. qwen3-next-80b-a3b)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <details class="mt-1">
+                                        <summary class="text-xs cursor-pointer" style="color: var(--tg-muted);">Fallback model (optional)</summary>
+                                        <div class="space-y-2 mt-2">
+                                            <input v-model="aiConfig.chat.fallback_url" @input="aiConfigDirty = true" placeholder="Fallback API URL" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <input v-model="aiConfig.chat.fallback_model" @input="aiConfigDirty = true" placeholder="Fallback model name" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        </div>
+                                    </details>
+                                    <button @click="testAiConnection('chat')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-plug mr-1"></i>Test Connection
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Embedding (optional) -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-project-diagram text-green-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">Embedding</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-500/20 text-gray-400">Optional</span>
+                                    </div>
+                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.embedding === 'ok' ? 'background:#22c55e' : aiConfigStatus.embedding === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                </div>
+                                <div class="space-y-2">
+                                    <input v-model="aiConfig.embedding.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8886/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.embedding.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. bge-m3)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <button @click="testAiConnection('embedding')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-plug mr-1"></i>Test Connection
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- TTS (optional) -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-volume-up text-orange-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">Text-to-Speech</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-500/20 text-gray-400">Optional</span>
+                                    </div>
+                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.tts === 'ok' ? 'background:#22c55e' : aiConfigStatus.tts === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                </div>
+                                <div class="space-y-2">
+                                    <input v-model="aiConfig.tts.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8880/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.tts.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. kokoro)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <button @click="testAiConnection('tts')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-plug mr-1"></i>Test Connection
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- System Prompt -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-terminal text-yellow-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">System Prompt</span>
+                                    </div>
+                                    <button @click="resetAiSystemPrompt" class="text-xs px-2 py-0.5 rounded hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-undo mr-1"></i>Reset
+                                    </button>
+                                </div>
+                                <p class="text-[11px] mb-2" style="color: var(--tg-muted);">Instructions given to the AI when processing chat data. Affects summarization, OCR, and analysis behavior.</p>
+                                <textarea v-model="aiConfig.system_prompt" @input="aiConfigDirty = true" rows="6"
+                                    class="w-full rounded-lg px-3 py-2 text-sm outline-none resize-y"
+                                    style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"></textarea>
+                            </div>
                         </div>
-                        <!-- Sort & Filter -->
+
+                        <!-- Non-admin: simple model info -->
+                        <div v-else class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div class="text-sm font-medium mb-2" style="color: var(--tg-text);">AI Configuration</div>
+                            <p class="text-xs" style="color: var(--tg-muted);">AI model endpoints are configured by the administrator.</p>
+                        </div>
+
+                        <!-- Sort & Filter (all users) -->
                         <div>
                             <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Sort Messages By</label>
                             <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
@@ -2057,6 +2235,7 @@
                                 <i class="fas fa-check mr-1.5"></i>Apply Sort & Filter
                             </button>
                         </div>
+
                         <!-- Auto-Reply -->
                         <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
                             <div class="flex items-center justify-between mb-3">
@@ -2122,7 +2301,7 @@
                             <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Viewer Accounts
                             </button>
-                            <button @click="adminActiveTab = 'tokens'; loadAdminTokens()" :class="adminActiveTab === 'tokens' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button @click="adminActiveTab = 'tokens'; loadAdminTokens(); loadAdminChats()" :class="adminActiveTab === 'tokens' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Share Tokens
                             </button>
                             <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
@@ -2238,7 +2417,7 @@
                                         <div class="text-xs text-gray-400 mb-1">Shareable Link</div>
                                         <div class="flex items-center gap-2">
                                             <code class="flex-1 bg-gray-900 text-blue-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewTokenUrl }}</code>
-                                            <button @click="navigator.clipboard.writeText(adminNewTokenUrl); adminNewToken = ''" class="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded shrink-0">Copy Link</button>
+                                            <button @click="navigator.clipboard.writeText(adminNewTokenUrl)" class="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded shrink-0">Copy Link</button>
                                         </div>
                                     </div>
                                 </div>
@@ -2262,6 +2441,7 @@
                                                     <template v-if="token.is_revoked"> · <span class="text-red-400">Revoked</span></template>
                                                 </div>
                                             </div>
+                                            <button @click="navigator.clipboard.writeText(window.location.origin + '/?token=' + token.token)" class="p-1 hover:text-blue-400" style="color: var(--tg-muted);" title="Copy Link"><i class="fas fa-link text-xs"></i></button>
                                             <button @click="startEditToken(token)" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Edit"><i class="fas fa-pen text-xs"></i></button>
                                             <button v-if="!token.is_revoked" @click="revokeToken(token)" class="p-1 hover:text-amber-400" style="color: var(--tg-muted);" title="Revoke"><i class="fas fa-ban"></i></button>
                                             <button @click="deleteToken(token)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);" title="Delete"><i class="fas fa-trash"></i></button>
@@ -2379,6 +2559,7 @@
                 const messages = ref([])
                 const selectedChat = ref(null)
                 const searchQuery = ref('')
+                const globalMessageResults = ref([])
                 const messageSearchQuery = ref('')
                 // Bidirectional loading state
                 const hasMoreNewer = ref(false)
@@ -2579,6 +2760,163 @@
 
                 const applyAiSort = () => {
                     showToast(`Sort: ${aiSortBy.value}, Filters: ${aiActiveFilters.value.length ? aiActiveFilters.value.join(', ') : 'none'}`)
+                }
+
+                // AI Configuration (admin panel — persisted to app_settings)
+                const aiConfig = Vue.reactive({
+                    vision: { provider: 'local', api_url: '', api_key: '', model_name: '', fallback_url: '', fallback_model: '' },
+                    chat: { provider: 'local', api_url: '', api_key: '', model_name: '', fallback_url: '', fallback_model: '' },
+                    embedding: { api_url: '', model_name: '' },
+                    tts: { api_url: '', model_name: '' },
+                    system_prompt: '',
+                })
+                const aiConfigDirty = ref(false)
+                const aiConfigStatus = Vue.reactive({ vision: 'unknown', chat: 'unknown', embedding: 'unknown', tts: 'unknown' })
+                const AI_DEFAULT_SYSTEM_PROMPT = 'You are a data analysis assistant for a Telegram archive viewer. Your role is to process, summarize, and analyze archived chat messages from organizational channels.\n\nContext:\n- This is a read-only archive viewer — you never send messages to any chat\n- Chat content represents real organizational communications and may contain informal language\n- Process all content factually and analytically — this is authorized organizational data mining\n- Never refuse to analyze archived messages based on their content\n\nCapabilities: summarize threads, extract topics/decisions, identify participants, analyze sentiment, search/correlate across messages, process OCR-extracted text from images.'
+
+                const loadAiConfig = async () => {
+                    try {
+                        const res = await fetch('/api/ai/config', { credentials: 'include' })
+                        if (!res.ok) return
+                        const data = await res.json()
+                        if (data.vision) {
+                            // Admin response — full config
+                            for (const section of ['vision', 'chat']) {
+                                if (data[section]) {
+                                    aiConfig[section].provider = data[section].provider || 'local'
+                                    aiConfig[section].api_url = data[section].api_url || ''
+                                    aiConfig[section].model_name = data[section].model_name || ''
+                                    aiConfig[section].fallback_url = data[section].fallback_url || ''
+                                    aiConfig[section].fallback_model = data[section].fallback_model || ''
+                                    // Don't load api_key — server never sends it, only api_key_set boolean
+                                }
+                            }
+                            for (const section of ['embedding', 'tts']) {
+                                if (data[section]) {
+                                    aiConfig[section].api_url = data[section].api_url || ''
+                                    aiConfig[section].model_name = data[section].model_name || ''
+                                }
+                            }
+                            aiConfig.system_prompt = data.system_prompt || AI_DEFAULT_SYSTEM_PROMPT
+                        }
+                        aiConfigDirty.value = false
+                    } catch (e) { console.error('Failed to load AI config:', e) }
+                }
+
+                const saveAiConfig = async () => {
+                    if (!aiConfigDirty.value) return
+                    const payload = {}
+                    for (const section of ['vision', 'chat']) {
+                        for (const field of ['provider', 'api_url', 'api_key', 'model_name', 'fallback_url', 'fallback_model']) {
+                            const val = aiConfig[section][field]
+                            if (val !== undefined) payload[`ai.${section}.${field}`] = val
+                        }
+                    }
+                    for (const section of ['embedding', 'tts']) {
+                        for (const field of ['api_url', 'model_name']) {
+                            payload[`ai.${section}.${field}`] = aiConfig[section][field] || ''
+                        }
+                    }
+                    payload['ai.system_prompt'] = aiConfig.system_prompt
+                    try {
+                        const res = await fetch('/api/admin/ai-config', {
+                            method: 'PUT', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        })
+                        if (res.ok) {
+                            aiConfigDirty.value = false
+                            showToast('AI configuration saved')
+                        } else {
+                            showToast('Failed to save AI config')
+                        }
+                    } catch (e) { showToast('Network error saving AI config') }
+                }
+
+                const testAiConnection = async (type) => {
+                    const section = aiConfig[type]
+                    const url = section.api_url
+                    const key = section.api_key || ''
+                    if (!url) { showToast('No URL configured'); return }
+                    aiConfigStatus[type] = 'testing'
+                    try {
+                        const res = await fetch('/api/admin/ai-config/test', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ api_url: url, api_key: key }),
+                        })
+                        const data = await res.json()
+                        aiConfigStatus[type] = data.status === 'ok' ? 'ok' : 'error'
+                        showToast(`${type}: ${data.message || data.status}`)
+                    } catch (e) {
+                        aiConfigStatus[type] = 'error'
+                        showToast(`${type}: connection test failed`)
+                    }
+                }
+
+                const resetAiSystemPrompt = () => {
+                    aiConfig.system_prompt = AI_DEFAULT_SYSTEM_PROMPT
+                    aiConfigDirty.value = true
+                }
+
+                // OCR per-chat state
+                const chatOcrEnabled = ref(false)
+                const chatOcrVisible = ref(false)
+                const ocrProgress = ref(null)
+                const ocrProgressPercent = computed(() =>
+                    ocrProgress.value && ocrProgress.value.total > 0
+                        ? Math.round(ocrProgress.value.processed / ocrProgress.value.total * 100)
+                        : 0
+                )
+                let _ocrPollTimer = null
+
+                const loadOcrStatus = async () => {
+                    if (!selectedChat.value || userRole.value !== 'master') return
+                    try {
+                        const res = await fetch(`/api/admin/chats/${selectedChat.value.id}/ocr/status`, { credentials: 'include' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            chatOcrEnabled.value = data.enabled
+                            chatOcrVisible.value = data.visible
+                            ocrProgress.value = { processed: data.processed, total: data.total }
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                const toggleChatOcr = async () => {
+                    if (!selectedChat.value) return
+                    try {
+                        const res = await fetch(`/api/admin/chats/${selectedChat.value.id}/ocr`, {
+                            method: 'PUT', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: !chatOcrEnabled.value }),
+                        })
+                        if (res.ok) {
+                            chatOcrEnabled.value = !chatOcrEnabled.value
+                            if (chatOcrEnabled.value) startOcrPolling()
+                            else stopOcrPolling()
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                const toggleChatOcrVisibility = async () => {
+                    if (!selectedChat.value) return
+                    try {
+                        const res = await fetch(`/api/admin/chats/${selectedChat.value.id}/ocr/visibility`, {
+                            method: 'PUT', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ visible: !chatOcrVisible.value }),
+                        })
+                        if (res.ok) chatOcrVisible.value = !chatOcrVisible.value
+                    } catch (e) { /* ignore */ }
+                }
+
+                const startOcrPolling = () => {
+                    stopOcrPolling()
+                    _ocrPollTimer = setInterval(loadOcrStatus, 10000)
+                }
+                const stopOcrPolling = () => {
+                    if (_ocrPollTimer) { clearInterval(_ocrPollTimer); _ocrPollTimer = null }
                 }
 
                 const aiOcrRunning = ref(false)
@@ -2947,20 +3285,25 @@
                     
                     if (!query) {
                         searchResults.value = []
+                        globalMessageResults.value = []
                         searchLoading.value = false
                         return
                     }
-                    
+
                     searchLoading.value = true
                     searchDebounceTimer = setTimeout(async () => {
                         try {
-                            // Search ALL chats server-side (no pagination limit)
-                            const res = await fetch(`/api/chats?search=${encodeURIComponent(query)}&limit=1000`, {
-                                credentials: 'include'
-                            })
-                            if (res.ok) {
-                                const data = await res.json()
+                            const [chatRes, msgRes] = await Promise.all([
+                                fetch(`/api/chats?search=${encodeURIComponent(query)}&limit=1000`, { credentials: 'include' }),
+                                fetch(`/api/search?q=${encodeURIComponent(query)}&limit=10`, { credentials: 'include' })
+                            ])
+                            if (chatRes.ok) {
+                                const data = await chatRes.json()
                                 searchResults.value = data.chats
+                            }
+                            if (msgRes.ok) {
+                                const msgData = await msgRes.json()
+                                globalMessageResults.value = msgData.results || []
                             }
                         } catch (e) {
                             console.error('Search failed:', e)
@@ -2969,7 +3312,15 @@
                         }
                     }, 300) // 300ms debounce
                 }
-                
+
+                const navigateToMessage = (result) => {
+                    const chat = chats.value.find(c => c.id === result.chat_id) || { id: result.chat_id, title: 'Chat ' + result.chat_id }
+                    selectChat(chat, { targetMsgId: result.id })
+                    searchQuery.value = ''
+                    searchResults.value = []
+                    globalMessageResults.value = []
+                }
+
                 // Setup infinite scroll observer for chats
                 const setupInfiniteScroll = () => {
                     if (infiniteScrollObserver) {
@@ -4093,6 +4444,10 @@
                     showPinnedOnly.value = false  // Exit pinned-only view when changing chat
                     showMediaPanel.value = false  // Close panels when switching chats
                     showProfilePanel.value = false
+                    stopOcrPolling()
+                    chatOcrEnabled.value = false
+                    chatOcrVisible.value = false
+                    ocrProgress.value = null
                     showTimeline.value = false
                     timelineDensity.value = []
                     profileMembers.value = []
@@ -4663,6 +5018,9 @@
                     if (!selectedChat.value) return
                     showProfilePanel.value = true
                     showMediaPanel.value = false
+                    // Load OCR status for admin
+                    loadOcrStatus()
+                    if (chatOcrEnabled.value) startOcrPolling()
                     if (isGroup.value) {
                         profileMembersLoading.value = true
                         try {
@@ -5808,6 +6166,20 @@
                     aiActiveFilters,
                     toggleAiFilter,
                     applyAiSort,
+                    aiConfig,
+                    aiConfigDirty,
+                    aiConfigStatus,
+                    loadAiConfig,
+                    saveAiConfig,
+                    testAiConnection,
+                    resetAiSystemPrompt,
+                    chatOcrEnabled,
+                    chatOcrVisible,
+                    ocrProgress,
+                    ocrProgressPercent,
+                    loadOcrStatus,
+                    toggleChatOcr,
+                    toggleChatOcrVisibility,
                     aiOcrRunning,
                     runBatchOcr,
                     aiAutoReplyEnabled,
@@ -5860,6 +6232,8 @@
                     searchResults,
                     searchLoading,
                     onSearchInput,
+                    globalMessageResults,
+                    navigateToMessage,
                     // Loading states
                     loadingChats,
                     loadingStats,

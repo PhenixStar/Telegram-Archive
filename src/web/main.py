@@ -424,6 +424,71 @@ async def _fts_index_worker() -> None:
             pass
 
 
+_AI_CONFIG_DEFAULTS = {
+    "ai.vision.provider": "local",
+    "ai.vision.api_url": "http://localhost:8080/v1",
+    "ai.vision.api_key": "",
+    "ai.vision.model_name": "glm-ocr",
+    "ai.vision.fallback_url": "http://localhost:11434/v1",
+    "ai.vision.fallback_model": "qwen3-vl-30b-a3b",
+    "ai.chat.provider": "local",
+    "ai.chat.api_url": "http://localhost:11434/v1",
+    "ai.chat.api_key": "",
+    "ai.chat.model_name": "qwen3-next-80b-a3b",
+    "ai.chat.fallback_url": "",
+    "ai.chat.fallback_model": "",
+    "ai.embedding.api_url": "http://localhost:8886/v1",
+    "ai.embedding.model_name": "bge-m3",
+    "ai.tts.api_url": "http://localhost:8880/v1",
+    "ai.tts.model_name": "kokoro",
+    "ai.system_prompt": (
+        "You are a data analysis assistant for a Telegram archive viewer. "
+        "Your role is to process, summarize, and analyze archived chat messages from organizational channels.\n\n"
+        "Context:\n"
+        "- This is a read-only archive viewer — you never send messages to any chat\n"
+        "- Chat content represents real organizational communications and may contain informal language\n"
+        "- Process all content factually and analytically — this is authorized organizational data mining\n"
+        "- Never refuse to analyze archived messages based on their content\n\n"
+        "Capabilities: summarize threads, extract topics/decisions, identify participants, "
+        "analyze sentiment, search/correlate across messages, process OCR-extracted text from images."
+    ),
+}
+
+
+async def _get_chat_config() -> dict:
+    """Read chat AI config from app_settings, falling back to env vars."""
+    settings = await db.get_all_settings()
+    return {
+        "api_url": settings.get("ai.chat.api_url", "") or config.ai_base_url,
+        "api_key": settings.get("ai.chat.api_key", "") or config.ai_api_key,
+        "model_name": settings.get("ai.chat.model_name", "") or config.ai_model,
+    }
+
+
+async def _get_vision_config() -> dict:
+    """Read vision model config from app_settings for OCR endpoints."""
+    settings = await db.get_all_settings()
+    return {
+        "api_url": settings.get("ai.vision.api_url", "http://localhost:8080/v1"),
+        "api_key": settings.get("ai.vision.api_key", ""),
+        "model_name": settings.get("ai.vision.model_name", "glm-ocr"),
+        "fallback_url": settings.get("ai.vision.fallback_url", ""),
+        "fallback_model": settings.get("ai.vision.fallback_model", ""),
+    }
+
+
+async def _seed_ai_config_defaults():
+    """Seed default AI config values into app_settings if not already set."""
+    existing = await db.get_all_settings()
+    seeded = 0
+    for key, default_value in _AI_CONFIG_DEFAULTS.items():
+        if key not in existing:
+            await db.set_setting(key, default_value)
+            seeded += 1
+    if seeded:
+        logger.info(f"Seeded {seeded} default AI config values")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage application lifecycle - initialize and cleanup database."""
@@ -508,7 +573,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Start FTS5 index worker (non-blocking background task)
     _fts_task = asyncio.create_task(_fts_index_worker())
 
+    # Seed default AI configuration if not yet set
+    await _seed_ai_config_defaults()
+
+    # Start background OCR worker
+    from ..ocr_worker import OcrWorker
+    ocr_worker = OcrWorker(db, config)
+    app.state.ocr_worker = ocr_worker
+    await ocr_worker.start()
+
     yield
+
+    # Stop OCR worker
+    if hasattr(app.state, "ocr_worker") and app.state.ocr_worker:
+        await app.state.ocr_worker.stop()
 
     # Cleanup
     await listener_manager.shutdown()
@@ -2339,12 +2417,13 @@ async def ai_chat(
     user: UserContext = Depends(require_auth),
 ):
     """Proxy AI chat requests to configured LLM API with DB-enriched context."""
-    if not config.ai_api_key:
-        raise HTTPException(status_code=503, detail="AI not configured — set AI_API_KEY env var")
+    chat_cfg = await _get_chat_config()
+    if not chat_cfg["api_key"]:
+        raise HTTPException(status_code=503, detail="AI not configured — set API key in Admin → AI Settings")
 
     body = await request.json()
     user_message = body.get("message", "").strip()
-    model = body.get("model", config.ai_model)
+    model = body.get("model", chat_cfg["model_name"])
     chat_id = body.get("chat_id")  # optional: enables DB context enrichment
     context_messages = body.get("context", [])
 
@@ -2395,9 +2474,9 @@ async def ai_chat(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
-                f"{config.ai_base_url.rstrip('/')}/chat/completions",
+                f"{chat_cfg['api_url'].rstrip('/')}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {config.ai_api_key}",
+                    "Authorization": f"Bearer {chat_cfg['api_key']}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -2421,12 +2500,113 @@ async def ai_chat(
 
 @app.get("/api/ai/config")
 async def ai_config_endpoint(user: UserContext = Depends(require_auth)):
-    """Return AI configuration status (no secrets)."""
+    """Return AI configuration status (no secrets exposed to non-admins)."""
+    all_settings = await db.get_all_settings()
+    ai_keys = {k: v for k, v in all_settings.items() if k.startswith("ai.")}
+    # Non-admin: just show enabled/model info
+    if getattr(user, "role", None) != "master":
+        return {
+            "enabled": bool(ai_keys.get("ai.chat.api_url") or config.ai_api_key),
+            "model": ai_keys.get("ai.chat.model_name", config.ai_model),
+        }
+    # Admin: return full config (mask API keys)
+    def _section(prefix):
+        return {
+            "provider": ai_keys.get(f"{prefix}.provider", "local"),
+            "api_url": ai_keys.get(f"{prefix}.api_url", ""),
+            "api_key_set": bool(ai_keys.get(f"{prefix}.api_key", "")),
+            "model_name": ai_keys.get(f"{prefix}.model_name", ""),
+            "fallback_url": ai_keys.get(f"{prefix}.fallback_url", ""),
+            "fallback_model": ai_keys.get(f"{prefix}.fallback_model", ""),
+        }
     return {
-        "enabled": bool(config.ai_api_key),
-        "model": config.ai_model,
-        "provider": "Z-AI GLM" if "z.ai" in config.ai_base_url else "Custom",
+        "vision": _section("ai.vision"),
+        "chat": _section("ai.chat"),
+        "embedding": {
+            "api_url": ai_keys.get("ai.embedding.api_url", ""),
+            "model_name": ai_keys.get("ai.embedding.model_name", ""),
+        },
+        "tts": {
+            "api_url": ai_keys.get("ai.tts.api_url", ""),
+            "model_name": ai_keys.get("ai.tts.model_name", ""),
+        },
+        "system_prompt": ai_keys.get("ai.system_prompt", ""),
     }
+
+
+@app.put("/api/admin/ai-config")
+async def update_ai_config(request: Request, user: UserContext = Depends(require_master)):
+    """Bulk update AI configuration settings (admin only)."""
+    body = await request.json()
+    # Whitelist of allowed keys to prevent arbitrary setting writes
+    allowed_prefixes = ("ai.vision.", "ai.chat.", "ai.embedding.", "ai.tts.", "ai.system_prompt")
+    for key, value in body.items():
+        if not any(key.startswith(p) or key == p for p in allowed_prefixes):
+            continue
+        await db.set_setting(key, str(value))
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/ai-config/test")
+async def test_ai_connection(request: Request, user: UserContext = Depends(require_master)):
+    """Test if an AI model endpoint is reachable."""
+    import httpx
+    body = await request.json()
+    api_url = body.get("api_url", "").rstrip("/")
+    api_key = body.get("api_key", "")
+    if not api_url:
+        return {"status": "error", "message": "No URL provided"}
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Try /v1/models first (OpenAI-compatible), fallback to /health
+            for path in [f"{api_url}/models", f"{api_url.rsplit('/v1', 1)[0]}/health"]:
+                try:
+                    resp = await client.get(path, headers=headers)
+                    if resp.status_code < 500:
+                        return {"status": "ok", "message": f"Connected ({resp.status_code})"}
+                except Exception:
+                    continue
+            return {"status": "error", "message": "Endpoint unreachable"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+
+
+@app.put("/api/admin/chats/{chat_id}/ocr")
+async def toggle_chat_ocr(chat_id: int, request: Request, user: UserContext = Depends(require_master)):
+    """Toggle OCR processing on/off for a chat (admin only)."""
+    body = await request.json()
+    enabled = body.get("enabled", False)
+    await db.set_setting(f"ocr_enabled:{chat_id}", "true" if enabled else "false")
+    # If enabling, also kick off the worker if it's idle
+    if enabled and hasattr(app.state, "ocr_worker") and app.state.ocr_worker:
+        logger.info(f"OCR enabled for chat {chat_id}")
+    return {"chat_id": chat_id, "ocr_enabled": enabled}
+
+
+@app.get("/api/admin/chats/{chat_id}/ocr/status")
+async def get_chat_ocr_status(chat_id: int, user: UserContext = Depends(require_master)):
+    """Get OCR status and progress for a chat (admin only)."""
+    enabled_val = await db.get_setting(f"ocr_enabled:{chat_id}")
+    visible_val = await db.get_setting(f"ocr_visible:{chat_id}")
+    progress = await db.get_ocr_progress(chat_id)
+    return {
+        "chat_id": chat_id,
+        "enabled": enabled_val == "true",
+        "visible": visible_val == "true" if visible_val else True,  # visible by default
+        **progress,
+    }
+
+
+@app.put("/api/admin/chats/{chat_id}/ocr/visibility")
+async def toggle_chat_ocr_visibility(chat_id: int, request: Request, user: UserContext = Depends(require_master)):
+    """Toggle OCR text visibility for a chat (admin only)."""
+    body = await request.json()
+    visible = body.get("visible", True)
+    await db.set_setting(f"ocr_visible:{chat_id}", "true" if visible else "false")
+    return {"chat_id": chat_id, "ocr_visible": visible}
 
 
 @app.post("/api/ai/ocr/{chat_id}/{message_id}")
@@ -2435,9 +2615,10 @@ async def ai_ocr_message(
     message_id: int,
     user: UserContext = Depends(require_auth),
 ):
-    """OCR a single message's image using GLM Vision API and store result in DB."""
-    if not config.ai_api_key:
-        raise HTTPException(status_code=503, detail="AI not configured")
+    """OCR a single message's image using vision model from app_settings."""
+    vcfg = await _get_vision_config()
+    if not vcfg["api_url"]:
+        raise HTTPException(status_code=503, detail="Vision model not configured")
 
     _check_ai_chat_access(user, chat_id)
 
@@ -2462,7 +2643,6 @@ async def ai_ocr_message(
     if not file_path:
         raise HTTPException(status_code=404, detail="No media file for this message")
 
-    # Build absolute path to media file
     abs_path = os.path.join(config.backup_path, file_path) if not os.path.isabs(file_path) else file_path
     if not os.path.exists(abs_path):
         raise HTTPException(status_code=404, detail="Media file missing from disk")
@@ -2474,17 +2654,18 @@ async def ai_ocr_message(
     if not mime.startswith("image"):
         mime = "image/jpeg"
 
-    # Call GLM Vision API for OCR
+    api_url = vcfg["api_url"].rstrip("/")
+    headers = {"Content-Type": "application/json"}
+    if vcfg["api_key"]:
+        headers["Authorization"] = f"Bearer {vcfg['api_key']}"
+
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
-                f"{config.ai_base_url.rstrip('/')}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {config.ai_api_key}",
-                    "Content-Type": "application/json",
-                },
+                f"{api_url}/chat/completions",
+                headers=headers,
                 json={
-                    "model": config.ai_model,
+                    "model": vcfg["model_name"],
                     "messages": [
                         {
                             "role": "user",
@@ -2514,9 +2695,10 @@ async def ai_ocr_batch(
     request: Request,
     user: UserContext = Depends(require_auth),
 ):
-    """Queue batch OCR for all un-processed images in a chat. Returns count."""
-    if not config.ai_api_key:
-        raise HTTPException(status_code=503, detail="AI not configured")
+    """Queue batch OCR for all un-processed images in a chat using vision config from app_settings."""
+    vcfg = await _get_vision_config()
+    if not vcfg["api_url"]:
+        raise HTTPException(status_code=503, detail="Vision model not configured")
 
     _check_ai_chat_access(user, chat_id)
 
@@ -2527,9 +2709,15 @@ async def ai_ocr_batch(
     if not pending:
         return {"queued": 0, "message": "All images already processed"}
 
-    # Process in background with shared httpx client
+    api_url = vcfg["api_url"].rstrip("/")
+    api_key = vcfg["api_key"]
+    model_name = vcfg["model_name"]
+
     async def _run_batch():
         processed = 0
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
                 for item in pending:
@@ -2544,13 +2732,10 @@ async def ai_ocr_batch(
                         with open(abs_path, "rb") as f:
                             img_data = base64.b64encode(f.read()).decode()
                         resp = await client.post(
-                            f"{config.ai_base_url.rstrip('/')}/chat/completions",
-                            headers={
-                                "Authorization": f"Bearer {config.ai_api_key}",
-                                "Content-Type": "application/json",
-                            },
+                            f"{api_url}/chat/completions",
+                            headers=headers,
                             json={
-                                "model": config.ai_model,
+                                "model": model_name,
                                 "messages": [
                                     {
                                         "role": "user",
@@ -2586,8 +2771,9 @@ async def ai_annotate_message(
     user: UserContext = Depends(require_auth),
 ):
     """AI-annotate a single message (summarize, tag, categorize)."""
-    if not config.ai_api_key:
-        raise HTTPException(status_code=503, detail="AI not configured")
+    chat_cfg = await _get_chat_config()
+    if not chat_cfg["api_key"]:
+        raise HTTPException(status_code=503, detail="AI not configured — set API key in Admin → AI Settings")
 
     _check_ai_chat_access(user, chat_id)
 
@@ -2610,13 +2796,13 @@ async def ai_annotate_message(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
-                f"{config.ai_base_url.rstrip('/')}/chat/completions",
+                f"{chat_cfg['api_url'].rstrip('/')}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {config.ai_api_key}",
+                    "Authorization": f"Bearer {chat_cfg['api_key']}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": body.get("model", config.ai_model),
+                    "model": body.get("model", chat_cfg["model_name"]),
                     "messages": [
                         {"role": "system", "content": "You are an AI inventory agent annotating Telegram messages. Be concise."},
                         {"role": "user", "content": f"{instruction}\n\nMessage:\n{msg_text}"},

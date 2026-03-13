@@ -255,6 +255,18 @@ class Config:
         self.ai_base_url = os.getenv("AI_BASE_URL", "https://api.z.ai/api/coding/paas/v4")
         self.ai_model = os.getenv("AI_MODEL", "GLM-5")
 
+        # =====================================================================
+        # OCR CONFIGURATION
+        # =====================================================================
+        # Global kill switch — overrides per-chat toggles
+        self.ocr_enabled = os.getenv("OCR_ENABLED", "true").lower() == "true"
+        # Rate limit: max images processed per second (0.5 = 1 every 2s)
+        self.ocr_rate_limit = float(os.getenv("OCR_RATE_LIMIT", "0.5"))
+        # Batch size per worker cycle
+        self.ocr_batch_size = int(os.getenv("OCR_BATCH_SIZE", "20"))
+        # Worker poll interval in seconds (how often to check for pending work)
+        self.ocr_poll_interval = int(os.getenv("OCR_POLL_INTERVAL", "60"))
+
         # Stats calculation schedule
         # Daily calculation of statistics (chat counts, message counts, etc.)
         # Default: 03:00 (3am) in the configured viewer timezone
