@@ -265,3 +265,48 @@ async def generate_lqip_base64(
     loop = asyncio.get_running_loop()
     async with _THUMB_SEMAPHORE:
         return await loop.run_in_executor(None, _generate_lqip_sync, source, cache_file)
+
+
+# ---------------------------------------------------------------------------
+# Batch pre-generation (called after backup completes)
+# ---------------------------------------------------------------------------
+
+async def pregenerate_video_thumbnails(
+    media_root: Path, size: int = 400, max_items: int = 200,
+) -> int:
+    """Scan media directories for videos without cached thumbnails and generate them.
+
+    Returns count of newly generated thumbnails.
+    Intended to be called post-backup so the viewer has poster images ready.
+    """
+    if not shutil.which("ffmpeg"):
+        logger.warning("ffmpeg not found — skipping video thumbnail pre-generation")
+        return 0
+
+    generated = 0
+    media_root_resolved = media_root.resolve()
+    for ext in _VIDEO_EXTENSIONS:
+        for video_file in media_root_resolved.rglob(f"*{ext}"):
+            if generated >= max_items:
+                break
+            # Skip files inside .thumbs directory
+            if ".thumbs" in video_file.parts:
+                continue
+            try:
+                rel = video_file.relative_to(media_root_resolved)
+                folder = str(rel.parent)
+                filename = rel.name
+            except ValueError:
+                continue
+
+            dest = _thumb_path(media_root, size, folder, filename)
+            if dest.exists():
+                continue  # already cached
+
+            thumb = await ensure_video_thumbnail(media_root, size, folder, filename)
+            if thumb:
+                generated += 1
+
+    if generated:
+        logger.info(f"Pre-generated {generated} video thumbnails")
+    return generated

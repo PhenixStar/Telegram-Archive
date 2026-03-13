@@ -426,22 +426,25 @@ async def _fts_index_worker() -> None:
             pass
 
 
+_OLLAMA_BASE = config.ollama_url.rstrip("/")  # host.docker.internal:11434 in Docker
+_OLLAMA_V1 = f"{_OLLAMA_BASE}/v1" if not _OLLAMA_BASE.endswith("/v1") else _OLLAMA_BASE
+
 _AI_CONFIG_DEFAULTS = {
     "ai.vision.provider": "local",
-    "ai.vision.api_url": "http://localhost:8080/v1",
+    "ai.vision.api_url": "http://host.docker.internal:8080/v1",
     "ai.vision.api_key": "",
     "ai.vision.model_name": "glm-ocr",
-    "ai.vision.fallback_url": "http://localhost:11434/v1",
+    "ai.vision.fallback_url": _OLLAMA_V1,
     "ai.vision.fallback_model": "qwen3-vl-30b-a3b",
     "ai.chat.provider": "local",
-    "ai.chat.api_url": "http://localhost:11434/v1",
+    "ai.chat.api_url": _OLLAMA_V1,
     "ai.chat.api_key": "",
     "ai.chat.model_name": "qwen3-next-80b-a3b",
     "ai.chat.fallback_url": "",
     "ai.chat.fallback_model": "",
-    "ai.embedding.api_url": "http://localhost:11434/v1",
-    "ai.embedding.model_name": "qwen3-embedding:8b",
-    "ai.tts.api_url": "http://localhost:8880/v1",
+    "ai.embedding.api_url": _OLLAMA_V1,
+    "ai.embedding.model_name": config.ollama_embed_model,
+    "ai.tts.api_url": "http://host.docker.internal:8880/v1",
     "ai.tts.model_name": "kokoro",
     "ai.system_prompt": (
         "You are a data analysis assistant for a Telegram archive viewer. "
@@ -480,29 +483,90 @@ async def _get_vision_config() -> dict:
 
 
 async def _get_embedding_config() -> dict:
-    """Read embedding model config from app_settings, falling back to env vars."""
+    """Read embedding model config from app_settings, falling back to env vars.
+
+    Auto-detects API format: Ollama (/api/embed) vs OpenAI-compatible (/v1/embeddings).
+    Returns base_url (no trailing slash), model_name, and api_format ('ollama' or 'openai').
+    """
     settings = await db.get_all_settings()
-    api_url = settings.get("ai.embedding.api_url", "") or config.ollama_url
-    # Strip /v1 suffix to get raw Ollama base URL (we need /api/embed, not OpenAI compat)
-    base_url = api_url.rstrip("/")
-    if base_url.endswith("/v1"):
-        base_url = base_url[:-3]
-    return {
-        "base_url": base_url,
-        "model_name": settings.get("ai.embedding.model_name", "") or config.ollama_embed_model,
-    }
+    api_url = (settings.get("ai.embedding.api_url", "") or config.ollama_url).rstrip("/")
+    model = settings.get("ai.embedding.model_name", "") or config.ollama_embed_model
+
+    # Detect API format from URL pattern:
+    #   - Contains ":11434" → Ollama (uses /api/embed)
+    #   - Otherwise → OpenAI-compatible (uses /embeddings or /v1/embeddings)
+    # Always strip trailing /v1 to get the true base URL
+    clean_url = api_url[:-3] if api_url.endswith("/v1") else api_url
+    if ":11434" in api_url:
+        return {"base_url": clean_url, "model_name": model, "api_format": "ollama"}
+    else:
+        return {"base_url": clean_url, "model_name": model, "api_format": "openai"}
+
+
+async def _call_embedding_api(emb_cfg: dict, texts: list[str] | str) -> list[list[float]]:
+    """Call embedding API in either Ollama or OpenAI-compatible format.
+
+    Args:
+        emb_cfg: Config from _get_embedding_config()
+        texts: Single string or list of strings to embed
+
+    Returns:
+        List of embedding vectors (list of floats)
+    """
+    base_url = emb_cfg["base_url"]
+    model = emb_cfg["model_name"]
+    fmt = emb_cfg["api_format"]
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        if fmt == "ollama":
+            # Ollama native: POST /api/embed {"model": ..., "input": [...]}
+            resp = await client.post(
+                f"{base_url}/api/embed",
+                json={"model": model, "input": texts},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("embeddings", [])
+        else:
+            # OpenAI-compatible: POST /embeddings or /v1/embeddings
+            # Try with /v1 prefix first, then without
+            payload = {"model": model, "input": texts if isinstance(texts, list) else [texts]}
+            for endpoint in [f"{base_url}/embeddings", f"{base_url}/v1/embeddings"]:
+                resp = await client.post(endpoint, json=payload)
+                if resp.status_code == 404:
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                # OpenAI format: {"data": [{"embedding": [...], "index": 0}, ...]}
+                items = sorted(data.get("data", []), key=lambda x: x.get("index", 0))
+                return [item["embedding"] for item in items]
+            raise ValueError(f"No working embedding endpoint found at {base_url}")
 
 
 async def _seed_ai_config_defaults():
-    """Seed default AI config values into app_settings if not already set."""
+    """Seed default AI config values into app_settings if not already set.
+
+    Also migrates existing 'localhost' URLs to 'host.docker.internal' to fix
+    Docker networking (container can't reach host services via localhost).
+    """
     existing = await db.get_all_settings()
     seeded = 0
+    migrated = 0
     for key, default_value in _AI_CONFIG_DEFAULTS.items():
         if key not in existing:
             await db.set_setting(key, default_value)
             seeded += 1
+        elif key.endswith(".api_url") or key.endswith(".fallback_url"):
+            # Migrate stale localhost URLs from earlier seeds
+            current = existing[key]
+            if current and "localhost:11434" in current:
+                fixed = current.replace("localhost:11434", "host.docker.internal:11434")
+                await db.set_setting(key, fixed)
+                migrated += 1
     if seeded:
         logger.info(f"Seeded {seeded} default AI config values")
+    if migrated:
+        logger.info(f"Migrated {migrated} AI config URLs from localhost to host.docker.internal")
 
 
 @asynccontextmanager
@@ -597,6 +661,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     ocr_worker = OcrWorker(db, config)
     app.state.ocr_worker = ocr_worker
     await ocr_worker.start()
+
+    # Pre-generate video thumbnails in background (non-blocking)
+    if _media_root:
+        async def _pregen_thumbs():
+            try:
+                from .thumbnails import pregenerate_video_thumbnails
+                await pregenerate_video_thumbnails(_media_root, size=400, max_items=200)
+            except Exception as e:
+                logger.warning(f"Video thumbnail pre-generation failed: {e}")
+        asyncio.create_task(_pregen_thumbs())
 
     yield
 
@@ -1667,7 +1741,6 @@ async def trigger_embedding(
         raise HTTPException(status_code=403, detail="Access denied")
 
     emb_cfg = await _get_embedding_config()
-    ollama_url = emb_cfg["base_url"]
     model = emb_cfg["model_name"]
 
     messages = await db.get_unembedded_messages(chat_id, limit=limit)
@@ -1678,17 +1751,10 @@ async def trigger_embedding(
     texts = [m["text"][:2000] for m in messages]  # Truncate long messages
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{ollama_url}/api/embed",
-                json={"model": model, "input": texts},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        vectors = await _call_embedding_api(emb_cfg, texts)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Ollama embedding failed: {e!s}")
+        raise HTTPException(status_code=502, detail=f"Embedding failed: {e!s}")
 
-    vectors = data.get("embeddings", [])
     if len(vectors) != len(messages):
         raise HTTPException(status_code=502, detail="Embedding count mismatch")
 
@@ -1713,21 +1779,13 @@ async def semantic_search_endpoint(
         raise HTTPException(status_code=403, detail="Access denied")
 
     emb_cfg = await _get_embedding_config()
-    ollama_url = emb_cfg["base_url"]
-    model = emb_cfg["model_name"]
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{ollama_url}/api/embed",
-                json={"model": model, "input": q},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        vectors = await _call_embedding_api(emb_cfg, q)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Embedding query failed: {e!s}")
 
-    query_embedding = data.get("embeddings", [[]])[0]
+    query_embedding = vectors[0] if vectors else []
     if not query_embedding:
         raise HTTPException(status_code=502, detail="Empty embedding returned")
 

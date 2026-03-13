@@ -1893,9 +1893,10 @@
                                                             loading="lazy"
                                                             class="w-full h-full object-cover"
                                                             @error="handleImageError($event, albumMsg)">
-                                                        <video v-else-if="albumMsg.media?.type === 'video'" 
+                                                        <video v-else-if="albumMsg.media?.type === 'video'"
                                                             class="w-full h-full object-cover"
-                                                            preload="metadata">
+                                                            :poster="getVideoThumbUrl(albumMsg)"
+                                                            preload="none">
                                                             <source :src="getMediaUrl(albumMsg)" type="video/mp4">
                                                         </video>
                                                         <!-- Video indicator overlay -->
@@ -1990,7 +1991,8 @@
                                         <div v-else-if="msg.media?.type === 'video'" 
                                             class="relative cursor-pointer group"
                                             @click="openMedia(msg)">
-                                            <video preload="metadata"
+                                            <video preload="none"
+                                                :poster="getVideoThumbUrl(msg)"
                                                 class="rounded-lg max-h-64 w-full pointer-events-none"
                                                 @error="handleMediaError($event, msg)">
                                                 <source :src="getMediaUrl(msg)" type="video/mp4">
@@ -3033,7 +3035,7 @@
                 const mediaGridLarge = ref(false)
                 // Sidebar resize state
                 const sidebarRef = ref(null)
-                const sidebarWidth = ref(parseInt(localStorage.getItem('tg_sidebar_width')) || 320)
+                const sidebarWidth = ref(parseInt(localStorage.getItem('tg_sidebar_width')) || 260)
                 const sidebarResizing = ref(false)
                 // PWA install
                 const pwaInstallPrompt = ref(null)
@@ -5889,6 +5891,15 @@
                     return `/media/${folder}/${filename}`
                 }
 
+                // Generate video thumbnail URL via the thumb endpoint (uses ffmpeg first-frame)
+                const getVideoThumbUrl = (msg, size = 400) => {
+                    if (!msg.media?.file_path) return ''
+                    const parts = msg.media.file_path.split(/[/\\]/)
+                    const filename = parts.pop()
+                    const folder = parts.pop()
+                    return `/media/thumb/${size}/${folder}/${filename}`
+                }
+
                 // Image load handler for blur-up effect
                 const onImageLoad = (event) => {
                     event.target.setAttribute('data-loaded', '')
@@ -6724,6 +6735,7 @@
                     formatLastBackupTime,
                     formatReactionEmoji,
                     getMediaUrl,
+                    getVideoThumbUrl,
                     getDocumentDisplayName,
                     isImageDocument,
                     handleImageError,

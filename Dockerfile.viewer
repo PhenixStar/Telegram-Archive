@@ -6,9 +6,9 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements-viewer.txt .
 
-# Install system libraries for Pillow (thumbnail generation)
+# Install system libraries for Pillow (thumbnail generation) + ffmpeg (video thumbnails)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libjpeg62-turbo libwebp7 libwebpmux3 zlib1g \
+    libjpeg62-turbo libwebp7 libwebpmux3 zlib1g ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

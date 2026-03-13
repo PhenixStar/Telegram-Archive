@@ -77,6 +77,9 @@ services:
       # MASS_OPERATION_WINDOW_SECONDS: ${MASS_OPERATION_WINDOW_SECONDS:-30}
       # MASS_OPERATION_BUFFER_DELAY: ${MASS_OPERATION_BUFFER_DELAY:-2.0}
 
+      # Gap-fill: detect and recover skipped messages after each backup
+      FILL_GAPS: ${FILL_GAPS:-true}
+
       # Batch sync alternative (expensive — prefer ENABLE_LISTENER instead)
       SYNC_DELETIONS_EDITS: ${SYNC_DELETIONS_EDITS:-false}
       VERIFY_MEDIA: ${VERIFY_MEDIA:-false}
