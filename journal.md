@@ -122,6 +122,26 @@ GPU layout: 4x V100-DGXS-32GB (128GB total). gemma3 on GPU0, GLM-OCR on GPU0 (3.
 
 ## Current Sprint
 
+### Telegram Native UI Redesign (2026-03-14)
+Full visual overhaul to match Telegram Web K/A aesthetics.
+
+| # | Phase | Status |
+|---|-------|--------|
+| 1 | Color System — 9 themes, new CSS vars (--tg-primary, --tg-green, --tg-link, --tg-chat-hover, --tg-chat-active, --tg-msg-service) | Done |
+| 2 | Chat List — peer-colored avatars, theme-aware borders, accent-colored unread dots | Done |
+| 3 | Message Bubbles — purple own-msg (#8774e1), 12px radius, Telegram-style corner grouping, inline timestamps | Done |
+| 4 | Header/Toolbar — flat header (no shadow), theme borders, peer-colored header avatar | Done |
+| 5 | Typography — system font stack (-apple-system, BlinkMacSystemFont, ...), date separator pill badges | Done |
+| 6 | Peer Colors — 21-color Telegram palette, replaces HSL hash; used in avatars, sender names, mini-avatars | Done |
+
+Key decisions:
+- Default theme "Telegram Dark": bg #181818, sidebar #0f0f0f, accent #8774e1
+- Old blue accent preserved as "Classic Blue" theme
+- Added "Light Blue" theme for classic blue in light mode
+- Inline timestamps float inside bubble text (Telegram-native style)
+- All `border-gray-700` replaced with `border-[color:var(--tg-border)]`
+- Login page updated to purple gradient (#8774e1)
+
 ### UX Fixes Batch (2026-03-14)
 All 5 fixes from plan `steady-inventing-orbit` verified as implemented:
 
@@ -136,6 +156,5 @@ All 5 fixes from plan `steady-inventing-orbit` verified as implemented:
 ## Backlog
 
 - PostgreSQL tsvector FTS
-- Additional light themes (warm, cool, high contrast)
 - Full AI assistant panel
-- Mega Improvements v3 phases 5-7 (PG FTS, themes, AI panel)
+- Mega Improvements v3 phases 5-7 (PG FTS, AI panel)

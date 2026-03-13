@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#212121">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
@@ -41,12 +41,57 @@
     </script>
     <style>
         /* ===== Theme System — CSS Custom Properties ===== */
+        /* Telegram-native color system: --tg-primary is the main accent,
+           --tg-green for online/success, --tg-link for hyperlinks,
+           --tg-chat-hover/active for sidebar selection states */
         :root,
         [data-theme="midnight"] {
             --sat: env(safe-area-inset-top, 0px);
             --sar: env(safe-area-inset-right, 0px);
             --sab: env(safe-area-inset-bottom, 0px);
             --sal: env(safe-area-inset-left, 0px);
+            --tg-bg: #181818;
+            --tg-sidebar: #0f0f0f;
+            --tg-hover: #2c2c2c;
+            --tg-active: #7668c8;
+            --tg-text: #ffffff;
+            --tg-muted: #aaaaaa;
+            --tg-own-msg: #8774e1;
+            --tg-other-msg: #212121;
+            --tg-border: #303030;
+            --tg-accent: #8774e1;
+            --tg-primary: #8774e1;
+            --tg-green: #4dcd5e;
+            --tg-link: #8774e1;
+            --tg-chat-hover: #2c2c2c;
+            --tg-chat-active: #7668c8;
+            --tg-msg-service: rgba(0,0,0,0.35);
+            --login-gradient-from: #6c5ce7;
+            --login-gradient-via: #8774e1;
+            --login-gradient-to: #a78bfa;
+        }
+        [data-theme="telegram-classic"] {
+            --tg-bg: #17212b;
+            --tg-sidebar: #0e1621;
+            --tg-hover: #202b36;
+            --tg-active: #2b5278;
+            --tg-text: #e2e8f0;
+            --tg-muted: #8696a7;
+            --tg-own-msg: #2b5278;
+            --tg-other-msg: #182533;
+            --tg-border: #1c2836;
+            --tg-accent: #5eaddb;
+            --tg-primary: #5eaddb;
+            --tg-green: #4dcd5e;
+            --tg-link: #6ab3f3;
+            --tg-chat-hover: #202b36;
+            --tg-chat-active: #2b5278;
+            --tg-msg-service: rgba(0,0,0,0.3);
+            --login-gradient-from: #1e3a5f;
+            --login-gradient-via: #17212b;
+            --login-gradient-to: #0e1621;
+        }
+        [data-theme="classic-blue"] {
             --tg-bg: #0f172a;
             --tg-sidebar: #1e293b;
             --tg-hover: #334155;
@@ -57,38 +102,35 @@
             --tg-other-msg: hsla(220, 20%, 25%, 0.80);
             --tg-border: #334155;
             --tg-accent: #3b82f6;
+            --tg-primary: #3b82f6;
+            --tg-green: #22c55e;
+            --tg-link: #60a5fa;
+            --tg-chat-hover: #334155;
+            --tg-chat-active: #2b5278;
+            --tg-msg-service: rgba(0,0,0,0.3);
             --login-gradient-from: #2563eb;
             --login-gradient-via: #1d4ed8;
             --login-gradient-to: #1e40af;
         }
-        [data-theme="telegram-classic"] {
-            --tg-bg: #17212b;
-            --tg-sidebar: #0e1621;
-            --tg-hover: #202b36;
-            --tg-active: #2b5278;
-            --tg-text: #e2e8f0;
-            --tg-muted: #8696a7;
-            --tg-own-msg: hsla(210, 50%, 30%, 0.95);
-            --tg-other-msg: hsla(215, 30%, 18%, 0.90);
-            --tg-border: #1c2836;
-            --tg-accent: #5eaddb;
-            --login-gradient-from: #1e3a5f;
-            --login-gradient-via: #17212b;
-            --login-gradient-to: #0e1621;
-        }
         [data-theme="amoled-black"] {
             --tg-bg: #000000;
-            --tg-sidebar: #0a0a0a;
-            --tg-hover: #1a1a1a;
-            --tg-active: #1a3a5c;
+            --tg-sidebar: #000000;
+            --tg-hover: #111111;
+            --tg-active: #7668c8;
             --tg-text: #e0e0e0;
             --tg-muted: #777777;
-            --tg-own-msg: hsla(210, 55%, 22%, 0.95);
-            --tg-other-msg: hsla(0, 0%, 7%, 0.95);
+            --tg-own-msg: #8774e1;
+            --tg-other-msg: #0d0d0d;
             --tg-border: #1a1a1a;
-            --tg-accent: #2196f3;
-            --login-gradient-from: #0a0a0a;
-            --login-gradient-via: #050505;
+            --tg-accent: #8774e1;
+            --tg-primary: #8774e1;
+            --tg-green: #4dcd5e;
+            --tg-link: #8774e1;
+            --tg-chat-hover: #111111;
+            --tg-chat-active: #7668c8;
+            --tg-msg-service: rgba(0,0,0,0.5);
+            --login-gradient-from: #1a1a1a;
+            --login-gradient-via: #0d0d0d;
             --login-gradient-to: #000000;
         }
         [data-theme="nord"] {
@@ -98,10 +140,16 @@
             --tg-active: #5e81ac;
             --tg-text: #eceff4;
             --tg-muted: #a3b1c5;
-            --tg-own-msg: hsla(213, 32%, 52%, 0.85);
-            --tg-other-msg: hsla(222, 16%, 32%, 0.85);
+            --tg-own-msg: #5e81ac;
+            --tg-other-msg: #3b4252;
             --tg-border: #434c5e;
             --tg-accent: #88c0d0;
+            --tg-primary: #88c0d0;
+            --tg-green: #a3be8c;
+            --tg-link: #88c0d0;
+            --tg-chat-hover: #434c5e;
+            --tg-chat-active: #5e81ac;
+            --tg-msg-service: rgba(0,0,0,0.3);
             --login-gradient-from: #4c566a;
             --login-gradient-via: #3b4252;
             --login-gradient-to: #2e3440;
@@ -113,10 +161,16 @@
             --tg-active: #49483e;
             --tg-text: #f8f8f2;
             --tg-muted: #a6a68a;
-            --tg-own-msg: hsla(55, 8%, 30%, 0.90);
-            --tg-other-msg: hsla(60, 10%, 22%, 0.85);
+            --tg-own-msg: #49483e;
+            --tg-other-msg: #2c2d27;
             --tg-border: #3e3d32;
             --tg-accent: #a6e22e;
+            --tg-primary: #a6e22e;
+            --tg-green: #a6e22e;
+            --tg-link: #66d9ef;
+            --tg-chat-hover: #3e3d32;
+            --tg-chat-active: #49483e;
+            --tg-msg-service: rgba(0,0,0,0.3);
             --login-gradient-from: #3e3d32;
             --login-gradient-via: #272822;
             --login-gradient-to: #1e1f1a;
@@ -128,10 +182,16 @@
             --tg-active: #2aa198;
             --tg-text: #fdf6e3;
             --tg-muted: #839496;
-            --tg-own-msg: hsla(175, 59%, 35%, 0.80);
-            --tg-other-msg: hsla(193, 100%, 14%, 0.90);
+            --tg-own-msg: #2aa198;
+            --tg-other-msg: #073642;
             --tg-border: #0a4050;
             --tg-accent: #2aa198;
+            --tg-primary: #2aa198;
+            --tg-green: #859900;
+            --tg-link: #268bd2;
+            --tg-chat-hover: #0a4050;
+            --tg-chat-active: #2aa198;
+            --tg-msg-service: rgba(0,0,0,0.3);
             --login-gradient-from: #073642;
             --login-gradient-via: #002b36;
             --login-gradient-to: #001e26;
@@ -141,13 +201,40 @@
             --tg-bg: #ffffff;
             --tg-sidebar: #f0f2f5;
             --tg-hover: #e4e6eb;
+            --tg-active: #e3d6ff;
+            --tg-text: #1a1a1a;
+            --tg-muted: #65676b;
+            --tg-own-msg: #effdde;
+            --tg-other-msg: #ffffff;
+            --tg-border: #dddfe2;
+            --tg-accent: #8774e1;
+            --tg-primary: #8774e1;
+            --tg-green: #4dcd5e;
+            --tg-link: #3390ec;
+            --tg-chat-hover: #e4e6eb;
+            --tg-chat-active: #e3d6ff;
+            --tg-msg-service: rgba(0,0,0,0.08);
+            --login-gradient-from: #8774e1;
+            --login-gradient-via: #a78bfa;
+            --login-gradient-to: #c4b5fd;
+        }
+        [data-theme="light-blue"] {
+            --tg-bg: #ffffff;
+            --tg-sidebar: #f0f2f5;
+            --tg-hover: #e4e6eb;
             --tg-active: #d1e3ff;
             --tg-text: #1a1a1a;
             --tg-muted: #65676b;
-            --tg-own-msg: hsla(210, 80%, 92%, 0.95);
-            --tg-other-msg: hsla(0, 0%, 96%, 0.95);
+            --tg-own-msg: #effdde;
+            --tg-other-msg: #ffffff;
             --tg-border: #dddfe2;
-            --tg-accent: #2563eb;
+            --tg-accent: #3390ec;
+            --tg-primary: #3390ec;
+            --tg-green: #4dcd5e;
+            --tg-link: #3390ec;
+            --tg-chat-hover: #e4e6eb;
+            --tg-chat-active: #d1e3ff;
+            --tg-msg-service: rgba(0,0,0,0.08);
             --login-gradient-from: #2563eb;
             --login-gradient-via: #3b82f6;
             --login-gradient-to: #60a5fa;
@@ -158,7 +245,7 @@
         }
 
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
             padding-top: var(--sat);
             padding-bottom: var(--sab);
             padding-left: var(--sal);
@@ -182,8 +269,8 @@
             100% { background-position: 0% 50%; }
         }
         @keyframes login-glow-pulse {
-            0%, 100% { box-shadow: 0 0 30px rgba(59,130,246,0.15), 0 20px 60px rgba(0,0,0,0.3); }
-            50% { box-shadow: 0 0 50px rgba(59,130,246,0.25), 0 20px 60px rgba(0,0,0,0.3); }
+            0%, 100% { box-shadow: 0 0 30px rgba(135,116,225,0.15), 0 20px 60px rgba(0,0,0,0.3); }
+            50% { box-shadow: 0 0 50px rgba(135,116,225,0.25), 0 20px 60px rgba(0,0,0,0.3); }
         }
         @keyframes login-orb-float {
             0% { transform: translate(0, 0) scale(1); }
@@ -248,7 +335,7 @@
         .login-input:focus {
             background: rgba(255,255,255,0.12) !important;
             border-color: rgba(255,255,255,0.35) !important;
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.15) !important;
+            box-shadow: 0 0 0 3px rgba(135,116,225,0.15) !important;
         }
         .login-btn {
             position: relative;
@@ -319,8 +406,19 @@
             width: auto;
             word-wrap: break-word;
             overflow-wrap: anywhere;
-            overflow: visible; /* v8.1: allow tail pseudo-element to show */
+            overflow: visible; /* allow tail pseudo-element to show */
             position: relative;
+            border-radius: 12px;
+        }
+        /* Inline timestamp: reserve space so text doesn't overlap the float */
+        .message-bubble .message-text::after {
+            content: '';
+            display: inline-block;
+            width: 56px; /* space for "12:00 AM" */
+            height: 1em;
+        }
+        .message-bubble .message-text:empty + .message-time-inline {
+            float: none;
         }
 
         /* v8.1: Bubble tails — smooth rounded tails matching Telegram style */
@@ -387,16 +485,16 @@
         }
 
 
-        /* Date Separator */
+        /* Date Separator — Telegram pill badge style */
         .date-separator {
             text-align: center;
-            margin: 20px 0 10px 0;
+            margin: 16px 0 8px 0;
         }
 
         .date-separator span {
-            background-color: #334155;
-            padding: 6px 16px;
-            border-radius: 16px;
+            background-color: var(--tg-msg-service, rgba(0,0,0,0.35));
+            padding: 4px 12px;
+            border-radius: 12px;
             font-size: 0.75rem;
             color: #94a3b8;
             cursor: pointer;
@@ -405,9 +503,28 @@
         }
 
         .date-separator span:hover {
-            background-color: #475569;
-            color: #cbd5e1;
+            background-color: var(--tg-hover);
+            color: var(--tg-text);
         }
+
+        /* Theme-aware overrides for remaining Tailwind blue utility classes */
+        .text-blue-400 { color: var(--tg-accent) !important; }
+        .text-blue-300 { color: var(--tg-accent) !important; opacity: 0.85; }
+        .text-blue-200 { color: var(--tg-accent) !important; opacity: 0.7; }
+        .hover\:text-blue-400:hover { color: var(--tg-accent) !important; }
+        .hover\:text-blue-300:hover { color: var(--tg-accent) !important; opacity: 0.85; }
+        .bg-gray-700\/50 { background: var(--tg-hover) !important; }
+        .bg-gray-700 { background: var(--tg-hover) !important; }
+        .bg-gray-800 { background: var(--tg-bg) !important; }
+        .bg-gray-800\/50 { background: color-mix(in srgb, var(--tg-bg) 50%, transparent) !important; }
+        .bg-gray-900 { background: var(--tg-sidebar) !important; }
+        .bg-gray-600 { background: var(--tg-border) !important; }
+        .hover\:bg-gray-700:hover { background: var(--tg-active) !important; }
+        .hover\:bg-gray-600:hover { background: var(--tg-hover) !important; }
+        .border-gray-600 { border-color: var(--tg-border) !important; }
+        .text-gray-400 { color: var(--tg-muted) !important; }
+        .focus\:ring-blue-500:focus { --tw-ring-color: var(--tg-accent) !important; }
+        .focus\:border-blue-500:focus { border-color: var(--tg-accent) !important; }
 
         /* Flatpickr dark theme customization */
         .flatpickr-calendar {
@@ -704,8 +821,11 @@
                             active: 'var(--tg-active)',
                             text: 'var(--tg-text)',
                             muted: 'var(--tg-muted)',
-                            own: 'var(--tg-active)',
-                            other: 'var(--tg-sidebar)',
+                            own: 'var(--tg-own-msg)',
+                            other: 'var(--tg-other-msg)',
+                            primary: 'var(--tg-primary)',
+                            green: 'var(--tg-green)',
+                            link: 'var(--tg-link)',
                         }
                     }
                 }
@@ -729,7 +849,7 @@
                 <!-- Telegram Logo -->
                 <div class="flex justify-center mb-6">
                     <div class="login-logo-float relative" style="width:5rem;height:5rem;">
-                        <div class="absolute inset-0 rounded-full" style="background: radial-gradient(circle, rgba(59,130,246,0.3) 0%, transparent 70%); filter: blur(12px);"></div>
+                        <div class="absolute inset-0 rounded-full" style="background: radial-gradient(circle, rgba(135,116,225,0.3) 0%, transparent 70%); filter: blur(12px);"></div>
                         <div class="relative w-full h-full bg-white rounded-full flex items-center justify-center shadow-lg">
                             <svg viewBox="0 0 240 240" width="50" height="50" xmlns="http://www.w3.org/2000/svg">
                                 <defs><linearGradient id="tg-grad" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#37AEE2"/><stop offset="100%" stop-color="#1E96C8"/></linearGradient></defs>
@@ -802,7 +922,7 @@
 
                     <button type="submit" :disabled="loadingAuth"
                         class="login-btn w-full text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none rounded-xl py-3.5 font-semibold text-sm tracking-wide shadow-lg"
-                        style="background: linear-gradient(135deg, #3b82f6, #2563eb, #1d4ed8); margin-top: 1.5rem !important;">
+                        style="background: linear-gradient(135deg, #8774e1, #6c5ce7, #5b4cdb); margin-top: 1.5rem !important;">
                         <span v-if="loadingAuth" class="flex items-center justify-center gap-2">
                             <span class="login-spinner"></span>
                             Signing in...
@@ -821,11 +941,11 @@
         <!-- Main App -->
         <div v-else class="flex w-full h-full bg-tg-bg">
             <!-- Sidebar - hidden on mobile when chat is selected -->
-            <div class="bg-tg-sidebar flex flex-col border-r border-gray-700 sidebar-panel"
+            <div class="bg-tg-sidebar flex flex-col border-r sidebar-panel" style="border-color: var(--tg-border);"
                 :class="{'hidden md:flex': selectedChat, 'w-full md:w-auto': true}"
                 ref="sidebarRef">
                 <!-- User bar -->
-                <div class="flex items-center gap-2 px-3 py-1 border-b border-gray-700">
+                <div class="flex items-center gap-2 px-3 py-1 border-b border-[color:var(--tg-border)]">
                     <span v-if="authRequired && isAuthenticated" class="text-xs text-gray-400 truncate flex-1">{{ currentUsername }}</span>
                     <span v-else class="flex-1"></span>
                     <!-- Settings (all users) -->
@@ -837,7 +957,7 @@
                     </button>
                 </div>
                 <!-- Header with Stats Dropdown -->
-                <div class="p-4 border-b border-gray-700">
+                <div class="p-4 border-b border-[color:var(--tg-border)]">
                     <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-3">
                             <h1 class="text-xl font-bold">Telegram Archive</h1>
@@ -856,16 +976,16 @@
                                 <div v-if="statsPopupOpen" 
                                     class="absolute left-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-4 min-w-[220px]">
                                     <div class="text-xs text-tg-muted space-y-2">
-                                        <div class="font-semibold text-white mb-3 pb-2 border-b border-gray-700">Backup Statistics</div>
+                                        <div class="font-semibold text-white mb-3 pb-2 border-b border-[color:var(--tg-border)]">Backup Statistics</div>
                                         <div class="flex justify-between"><span>💬 Chats:</span><span class="text-white">{{ formatNumber(statsData.chats) }}</span></div>
                                         <div class="flex justify-between"><span>📬 Messages:</span><span class="text-white">{{ formatNumber(statsData.messages) }}</span></div>
                                         <div class="flex justify-between"><span>🖼️ Media files:</span><span class="text-white">{{ formatNumber(statsData.media_files) }}</span></div>
                                         <div class="flex justify-between"><span>💾 Storage:</span><span class="text-white">{{ formatSize(statsData.total_size_mb) }}</span></div>
-                                        <div class="pt-2 mt-2 border-t border-gray-700 text-[10px] opacity-70">
+                                        <div class="pt-2 mt-2 border-t border-[color:var(--tg-border)] text-[10px] opacity-70">
                                             {{ formatStatsTime(statsData.stats_calculated_at) }}
                                         </div>
                                         <!-- Footer -->
-                                        <div class="pt-3 mt-3 border-t border-gray-700 text-center">
+                                        <div class="pt-3 mt-3 border-t border-[color:var(--tg-border)] text-center">
                                             <div class="text-[10px] opacity-70">
                                                 Made with ❤️ by <a href="https://geiser.cloud" target="_blank" class="text-blue-400 hover:text-blue-300">Sergio Fernández</a>
                                             </div>
@@ -903,13 +1023,15 @@
                     <!-- v6.2.0: Folder Tabs -->
                     <div v-if="folders.length > 0" class="flex gap-1 mb-3 overflow-x-auto pb-1 scrollbar-thin">
                         <button @click="showAllChats()" 
-                            :class="activeTab === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-700/50 text-tg-muted hover:bg-gray-700'"
+                            :class="activeTab === 'all' ? 'text-white' : 'text-tg-muted hover:opacity-80'"
+                            :style="activeTab === 'all' ? { background: 'var(--tg-accent)' } : { background: 'var(--tg-hover)' }"
                             class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition-colors shrink-0">
                             All Chats
                         </button>
                         <button v-for="folder in folders" :key="folder.id"
                             @click="selectFolder(folder.id)"
-                            :class="activeTab === 'folder_' + folder.id ? 'bg-blue-600 text-white' : 'bg-gray-700/50 text-tg-muted hover:bg-gray-700'"
+                            :class="activeTab === 'folder_' + folder.id ? 'text-white' : 'text-tg-muted hover:opacity-80'"
+                            :style="activeTab === 'folder_' + folder.id ? { background: 'var(--tg-accent)' } : { background: 'var(--tg-hover)' }"
                             class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition-colors shrink-0">
                             {{ folder.emoticon || '📁' }} {{ folder.title }}
                             <span class="opacity-70 ml-0.5">({{ folder.chat_count }})</span>
@@ -956,15 +1078,15 @@
 
                 <!-- Notification Permission Banner (shows when permission is 'default' AND notifications are enabled) -->
                 <div v-if="(notificationsEnabled || pushEnabled) && notificationsSupported && notificationPermission === 'default'" 
-                    class="px-3 py-2 bg-blue-900/80 border-b border-blue-700">
-                    <div class="flex items-center gap-2 text-blue-200 text-sm">
+                    class="px-3 py-2 border-b" style="background: color-mix(in srgb, var(--tg-accent) 15%, var(--tg-bg)); border-color: var(--tg-border);">
+                    <div class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
                         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
                         </svg>
                         <span>Enable notifications for new messages</span>
                         <button @click="requestNotificationPermission()" 
-                            class="ml-auto px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors">
+                            class="ml-auto px-2 py-1 text-white text-xs rounded transition-colors" style="background: var(--tg-accent);">
                             Enable
                         </button>
                     </div>
@@ -991,7 +1113,7 @@
                     <!-- v6.2.0: Topics View (when navigated into a forum chat) -->
                     <template v-if="topicsNavEntry">
                         <!-- Back button + chat name header -->
-                        <div class="p-3 border-b border-gray-700/50 flex items-center gap-2 sticky top-0 bg-tg-sidebar z-10">
+                        <div class="p-3 border-b border-[color:var(--tg-border)]/50 flex items-center gap-2 sticky top-0 bg-tg-sidebar z-10">
                             <button @click="navigateBackToChats()" class="p-1.5 hover:bg-gray-700 rounded-full transition" aria-label="Go back">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
@@ -1018,7 +1140,7 @@
                         </div>
                         <div v-else v-for="topic in topics" :key="topic.id"
                             @click="selectTopic(topicsNavEntry.chat || { id: topicsNavEntry.chatId, is_forum: true }, topic)"
-                            class="p-3 cursor-pointer hover:bg-tg-hover transition-colors flex items-center gap-3 border-b border-gray-700/30"
+                            class="p-3 cursor-pointer hover:bg-tg-hover transition-colors flex items-center gap-3 border-b border-[color:var(--tg-border)]/30"
                             :class="{'bg-tg-active': currentNav.topicId === topic.id}"
                             <!-- Topic icon -->
                             <div class="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0"
@@ -1048,7 +1170,7 @@
                     <template v-else>
                         <!-- v6.2.0: Back button for archived/folder views -->
                         <div v-if="canGoBack && currentNav.type === 'chatList'" 
-                            class="p-3 border-b border-gray-700/50 flex items-center gap-2 sticky top-0 bg-tg-sidebar z-10">
+                            class="p-3 border-b border-[color:var(--tg-border)]/50 flex items-center gap-2 sticky top-0 bg-tg-sidebar z-10">
                             <button @click="navigateBack()" class="p-1.5 hover:bg-gray-700 rounded-full transition" aria-label="Go back">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
@@ -1079,8 +1201,8 @@
                             <!-- v6.2.0: Archived Chats Row (only in "All Chats" view) -->
                             <div v-if="archivedCount > 0 && currentNav.filter === 'all' && !searchQuery"
                                 @click="showArchived()"
-                                class="p-3 cursor-pointer hover:bg-tg-hover transition-colors flex items-center gap-3 border-b border-gray-700/50">
-                                <div class="w-12 h-12 rounded-full bg-blue-600/30 flex items-center justify-center shrink-0">
+                                class="p-3 cursor-pointer hover:bg-tg-hover transition-colors flex items-center gap-3 border-b border-[color:var(--tg-border)]/50">
+                                <div class="w-12 h-12 rounded-full flex items-center justify-center shrink-0" style="background: color-mix(in srgb, var(--tg-accent) 30%, transparent);">
                                     <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
                                     </svg>
@@ -1101,7 +1223,8 @@
                                 :class="{'bg-tg-active sidebar-chat-active': selectedChat?.id === chat.id, 'chat-focused': chatListFocusIndex === chatIdx}">
                                 <!-- Avatar -->
                                 <div
-                                    class="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-lg font-bold text-white shrink-0 overflow-hidden relative">
+                                    class="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-white shrink-0 overflow-hidden relative"
+                                    :style="{ background: chat.avatar_url ? '' : PEER_COLORS[Math.abs(chat.id) % PEER_COLORS.length] }">
                                     <img v-if="chat.avatar_url" :src="chat.avatar_url" class="w-full h-full object-cover"
                                         @error="chat.avatar_url = null" :alt="getChatName(chat)">
                                     <template v-else-if="isDeletedChat(chat)">
@@ -1126,7 +1249,7 @@
                                         </h3>
                                         <div class="flex items-center gap-1.5">
                                             <!-- v8.1: Unread indicator dot -->
-                                            <span v-if="hasUnread(chat)" class="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+                                            <span v-if="hasUnread(chat)" class="w-2 h-2 rounded-full shrink-0" style="background: var(--tg-accent);"></span>
                                             <span class="text-xs text-tg-muted" :class="{'text-blue-400 font-medium': hasUnread(chat)}">{{ formatDate(chat.last_message_date) }}</span>
                                         </div>
                                     </div>
@@ -1184,7 +1307,7 @@
                             </template>
                         </div>
                         <!-- Search results info -->
-                        <div v-if="searchQuery && !loadingChats" class="p-3 text-center text-xs text-tg-muted border-t border-gray-700/50">
+                        <div v-if="searchQuery && !loadingChats" class="p-3 text-center text-xs text-tg-muted border-t border-[color:var(--tg-border)]/50">
                             <span v-if="searchResults.length > 0 || globalMessageResults.length > 0">Found {{ searchResults.length }} chats<span v-if="globalMessageResults.length > 0">, {{ globalSearchTotal || globalMessageResults.length }} messages</span> matching "{{ searchQuery }}"</span>
                             <span v-else>No results found</span>
                         </div>
@@ -1221,7 +1344,8 @@
                 <template v-else>
                     <!-- Chat Header -->
                     <div
-                        class="px-2 sm:px-4 py-2 sm:py-3 bg-tg-sidebar border-b border-gray-700 flex items-center justify-between shadow-md z-10 overflow-hidden max-w-full">
+                        class="px-2 sm:px-4 py-2 sm:py-3 bg-tg-sidebar border-b flex items-center justify-between z-10 overflow-hidden max-w-full"
+                        style="border-color: var(--tg-border);">
                         <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                             <!-- Back Button (mobile only) -->
                             <button @click="currentNav.type === 'chat' && currentNav.topicId ? navigateBack() : selectedChat = null"
@@ -1232,7 +1356,8 @@
                                 </svg>
                             </button>
                             <div @click="openProfile"
-                                class="w-10 h-10 min-w-[2.5rem] aspect-square rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-white overflow-hidden shrink-0 cursor-pointer">
+                                class="w-10 h-10 min-w-[2.5rem] aspect-square rounded-full flex items-center justify-center font-bold text-white overflow-hidden shrink-0 cursor-pointer"
+                                :style="{ background: selectedChat?.avatar_url ? '' : PEER_COLORS[Math.abs(selectedChat?.id || 0) % PEER_COLORS.length] }">
                                 <img v-if="selectedChat?.avatar_url" :src="selectedChat.avatar_url"
                                     class="w-full h-full object-cover rounded-full" @error="selectedChat.avatar_url = null"
                                     :alt="getChatName(selectedChat)">
@@ -1311,7 +1436,7 @@
                                 </div>
                                 <!-- Advanced search toggle (stays anchored) -->
                                 <button @click="showAdvancedSearch = !showAdvancedSearch"
-                                    :class="showAdvancedSearch ? 'text-blue-400' : 'text-gray-400'"
+                                        :style="showAdvancedSearch ? { color: 'var(--tg-accent)' } : { color: 'var(--tg-muted)' }"
                                     class="p-1.5 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
                                     title="Advanced search">
                                     <i class="fas fa-sliders-h text-xs"></i>
@@ -1320,14 +1445,14 @@
 
                             <!-- Timeline Toggle (Phase 7) -->
                             <button @click="showTimeline = !showTimeline; if(showTimeline && !timelineDensity.length) loadTimeline()"
-                                :class="showTimeline ? 'text-blue-400' : 'text-gray-400'"
+                                :style="showTimeline ? { color: 'var(--tg-accent)' } : { color: 'var(--tg-muted)' }"
                                 class="p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
                                 title="Activity Timeline">
                                 <i class="fas fa-chart-bar text-xs sm:text-sm"></i>
                             </button>
                             <!-- Media Panel Toggle (Phase 5) -->
                             <button @click="showMediaPanel ? showMediaPanel = false : openMediaPanel()"
-                                :class="showMediaPanel ? 'text-blue-400' : 'text-gray-400'"
+                                :style="showMediaPanel ? { color: 'var(--tg-accent)' } : { color: 'var(--tg-muted)' }"
                                 class="p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
                                 title="Shared Media">
                                 <i class="fas fa-photo-video text-xs sm:text-sm"></i>
@@ -1369,7 +1494,7 @@
                     <!-- Click on message content → scroll to message + cycle to next -->
                     <!-- Click on pin icon (right side) → open pinned messages view -->
                     <div v-if="pinnedMessage && !showPinnedOnly"
-                        class="px-4 py-2 bg-tg-sidebar/80 backdrop-blur-sm border-b border-gray-700 flex items-center gap-3"
+                        class="px-4 py-2 bg-tg-sidebar/80 backdrop-blur-sm border-b border-[color:var(--tg-border)] flex items-center gap-3"
                         @contextmenu.prevent="openContextMenu($event, 'pinned-message', pinnedMessage)">
                         <!-- Pin icon on left -->
                         <div class="text-blue-400">
@@ -1397,7 +1522,8 @@
                             </div>
                             <!-- Open pinned messages view button -->
                             <button @click.stop="openPinnedView"
-                                class="w-6 h-6 flex items-center justify-center rounded-full bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 transition-colors"
+                                class="w-6 h-6 flex items-center justify-center rounded-full transition-colors"
+                                style="background: color-mix(in srgb, var(--tg-accent) 20%, transparent); color: var(--tg-accent);"
                                 :title="`View all ${pinnedMessages.length} pinned messages`">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
@@ -1408,7 +1534,7 @@
                     
                     <!-- Pinned Messages View Header (shown when in pinned-only mode) -->
                     <div v-if="showPinnedOnly" 
-                        class="px-4 py-3 bg-tg-sidebar border-b border-gray-700 flex items-center gap-3">
+                        class="px-4 py-3 bg-tg-sidebar border-b border-[color:var(--tg-border)] flex items-center gap-3">
                         <!-- Back button -->
                         <button @click="closePinnedView"
                             class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-gray-300 transition" aria-label="Go back">
@@ -1427,7 +1553,8 @@
                     <div v-if="showTimeline && timelineDensity.length > 0" class="px-4 py-2 border-b overflow-x-auto" style="border-color: var(--tg-border); background: var(--tg-sidebar);">
                         <div class="flex items-center gap-1 mb-1">
                             <button v-for="g in ['day','week','month']" :key="g" @click="timelineGranularity = g; loadTimeline()"
-                                :class="timelineGranularity === g ? 'text-blue-400 bg-blue-400/10' : 'text-tg-muted'"
+                                :style="timelineGranularity === g ? { color: 'var(--tg-accent)', background: 'color-mix(in srgb, var(--tg-accent) 10%, transparent)' } : {}"
+                                :class="timelineGranularity !== g ? 'text-tg-muted' : ''"
                                 class="px-2 py-0.5 rounded text-[10px] font-medium">{{ g }}</button>
                         </div>
                         <div class="flex items-end gap-px min-w-max" style="height: 32px;">
@@ -1459,7 +1586,8 @@
                         </div>
                         <div class="flex border-b" style="border-color: var(--tg-border);">
                             <button v-for="tab in mediaPanelTabs" :key="tab.key" @click="mediaPanelTab = tab.key; loadMediaPanel(true)"
-                                :class="mediaPanelTab === tab.key ? 'text-blue-400 border-blue-400' : 'text-tg-muted border-transparent'"
+                                :class="mediaPanelTab !== tab.key ? 'text-tg-muted border-transparent' : 'border-transparent'"
+                                :style="mediaPanelTab === tab.key ? { color: 'var(--tg-accent)', borderColor: 'var(--tg-accent)' } : {}"
                                 class="flex-1 py-2 text-xs font-medium border-b-2 transition-colors">
                                 <i class="fas" :class="tab.icon"></i>
                             </button>
@@ -1479,7 +1607,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <button v-if="mediaPanelHasMore && !mediaPanelLoading" @click="loadMediaPanel()" class="w-full py-2 text-xs text-blue-400 hover:text-blue-300">Load more</button>
+                            <button v-if="mediaPanelHasMore && !mediaPanelLoading" @click="loadMediaPanel()" class="w-full py-2 text-xs" style="color: var(--tg-accent);">Load more</button>
                             <div v-if="mediaPanelLoading" class="flex justify-center py-4"><div class="loading-spinner"></div></div>
                             <div v-if="!mediaPanelLoading && mediaPanelItems.length === 0" class="text-center py-8 text-tg-muted text-xs">No media found</div>
                         </div>
@@ -1493,7 +1621,7 @@
                         </div>
                         <div class="flex flex-col items-center py-6 px-4">
                             <div class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white"
-                                :style="{ background: `hsl(${getSenderColor({sender_id: selectedChat.id})}, 50%, 40%)` }">
+                                :style="{ background: PEER_COLORS[getSenderColor({sender_id: selectedChat.id})] }">
                                 {{ getInitials(selectedChat) }}
                             </div>
                             <div class="mt-3 text-lg font-semibold text-white">{{ getChatName(selectedChat) }}</div>
@@ -1533,7 +1661,7 @@
                                 </div>
                                 <label class="relative inline-flex items-center cursor-pointer">
                                     <input type="checkbox" :checked="chatOcrEnabled" @change="toggleChatOcr" class="sr-only peer">
-                                    <div class="w-9 h-5 bg-gray-600 peer-checked:bg-blue-500 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+                                    <div class="w-9 h-5 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" :style="{ background: chatOcrEnabled ? 'var(--tg-accent)' : 'var(--tg-border)' }"></div>
                                 </label>
                             </div>
                             <div v-if="chatOcrEnabled" class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
@@ -1552,7 +1680,7 @@
                                     <span>{{ ocrProgress.processed }}/{{ ocrProgress.total }}</span>
                                 </div>
                                 <div class="w-full bg-gray-700 rounded-full h-1.5">
-                                    <div class="bg-blue-500 h-1.5 rounded-full transition-all" :style="{ width: ocrProgressPercent + '%' }"></div>
+                                    <div class="h-1.5 rounded-full transition-all" :style="{ width: ocrProgressPercent + '%', background: 'var(--tg-accent)' }"></div>
                                 </div>
                             </div>
                         </div>
@@ -1583,7 +1711,7 @@
                             <div class="space-y-1 max-h-64 overflow-y-auto">
                                 <div v-for="member in profileMembers" :key="member.sender_id" class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 text-sm">
                                     <div class="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                                        :style="{ background: `hsl(${getSenderColor({sender_id: member.sender_id})}, 50%, 40%)` }">
+                                        :style="{ background: PEER_COLORS[getSenderColor({sender_id: member.sender_id})] }">
                                         {{ (member.name || '?')[0] }}
                                     </div>
                                     <div class="flex-1 min-w-0"><div class="text-white truncate">{{ member.name }}</div></div>
@@ -1648,7 +1776,7 @@
                             <!-- v6.0.0: Service type moved to raw_data.service_type -->
                             <div v-if="msg.raw_data?.service_type === 'service'" class="flex justify-center my-2">
                                 <div class="service-message px-4 py-1.5 rounded-full text-xs text-center max-w-[80%]"
-                                    style="background: rgba(0,0,0,0.3); color: rgba(255,255,255,0.8);">
+                                    style="background: var(--tg-msg-service); color: rgba(255,255,255,0.8);">
                                     {{ msg.text }}
                                 </div>
                             </div>
@@ -1657,12 +1785,13 @@
                                 <!-- v8.1: Sender mini-avatar for incoming group messages -->
                                 <div v-if="!isOwnMessage(msg) && isGroup && isLastInGroup(index)"
                                     class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mb-0.5 cursor-pointer"
-                                    :style="{ background: `hsl(${getSenderColor(msg)}, 50%, 40%)` }"
+                                    :style="{ background: getSenderNameColor(msg) }"
                                     @contextmenu.prevent="openContextMenu($event, 'sender', msg)">
                                     {{ getSenderInitial(msg) }}
                                 </div>
                                 <div v-else-if="!isOwnMessage(msg) && isGroup" class="w-7 shrink-0"></div>
-                                <div class="message-bubble group relative p-3 text-sm shadow-sm text-gray-100"
+                                <div class="message-bubble group relative px-3 py-2 text-sm"
+                                    style="color: var(--tg-text);"
                                     :data-msg-id="msg.id"
                                     :class="[getBubbleGroupClass(msg, index), initialLoadDone ? 'msg-appear' : '']"
                                     :style="[getSenderStyle(msg), {'--bubble-bg': getMessageBackground(msg)}]"
@@ -1684,8 +1813,9 @@
 
                                     <!-- Reply Context -->
                                     <div v-if="msg.reply_to_msg_id" @click="scrollToMessage(msg.reply_to_msg_id)"
-                                        class="border-l-2 border-blue-400/50 pl-2 mb-2 text-xs bg-black/20 rounded p-2 cursor-pointer hover:bg-black/30 transition-colors">
-                                        <div class="font-semibold text-blue-400 mb-0.5">Reply to</div>
+                                        class="border-l-2 pl-2 mb-2 text-xs bg-black/20 rounded p-2 cursor-pointer hover:bg-black/30 transition-colors"
+                                        style="border-color: var(--tg-accent);">
+                                        <div class="font-semibold mb-0.5" style="color: var(--tg-accent);">Reply to</div>
                                         <div class="truncate opacity-70">{{ msg.reply_to_text || 'Message' }}</div>
                                     </div>
 
@@ -1709,7 +1839,8 @@
                                                     class="relative w-full border border-white/10 rounded-md overflow-hidden bg-white/5">
                                                     <!-- Progress Bar -->
                                                     <div v-if="getPollPercentage(msg, answer) > 0"
-                                                        class="absolute left-0 top-0 bottom-0 bg-blue-500/30 transition-all duration-500"
+                                                        class="absolute left-0 top-0 bottom-0 transition-all duration-500"
+                                                        style="background: color-mix(in srgb, var(--tg-accent) 30%, transparent);"
                                                         :style="{ width: getPollPercentage(msg, answer) + '%' }">
                                                     </div>
 
@@ -1804,7 +1935,9 @@
                                             class="w-full min-w-[250px] max-w-sm p-3 rounded-xl">
                                             <div class="flex items-center gap-3">
                                                 <button @click="toggleVoicePlay($event, msg)"
-                                                    class="w-10 h-10 rounded-full bg-blue-500 hover:bg-blue-400 flex items-center justify-center shrink-0 transition-colors">
+                                                    class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors"
+                                                    style="background: var(--tg-accent);"
+                                                    onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">
                                                     <svg v-if="!voicePlaying[msg.id]" class="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
                                                         <path d="M8 5v14l11-7z"/>
                                                     </svg>
@@ -1960,19 +2093,19 @@
                                     <div v-if="msg.reactions && msg.reactions.length > 0" class="mt-2 flex flex-wrap gap-1.5">
                                         <div v-for="reaction in msg.reactions" :key="reaction.emoji"
                                             class="inline-flex items-center gap-1 px-2 py-1 rounded-full transition"
-                                            :class="isOwnMessage(msg) ? 'bg-blue-500/20 hover:bg-blue-500/30' : 'bg-black/20 hover:bg-black/30'"
+                                            :style="isOwnMessage(msg) ? { background: 'rgba(255,255,255,0.12)' } : { background: 'rgba(0,0,0,0.2)' }"
                                             :title="reaction.count > 1 ? `${reaction.count} reactions` : '1 reaction'">
                                             <span class="text-sm">{{ formatReactionEmoji(reaction.emoji) }}</span>
                                             <span v-if="reaction.count > 1" class="text-[11px] font-medium opacity-80">{{ reaction.count }}</span>
                                         </div>
                                     </div>
 
-                                    <!-- Metadata -->
-                                    <div
-                                        class="text-[10px] opacity-60 text-right mt-1 flex justify-end items-center gap-1">
-                                        <span v-if="msg.edit_date">edited</span>
+                                    <!-- Inline timestamp (Telegram-style: floats inside bubble) -->
+                                    <span class="message-time-inline text-[10px] float-right relative ml-2"
+                                        :style="{ color: isOwnMessage(msg) ? 'rgba(255,255,255,0.6)' : 'var(--tg-muted)', marginTop: '4px', marginBottom: '-4px' }">
+                                        <span v-if="msg.edit_date" class="mr-0.5">edited</span>
                                         {{ formatTime(msg.date) }}
-                                    </div>
+                                    </span>
                                 </div>
                             </div>
                             
@@ -2110,7 +2243,7 @@
         <div v-if="showDatePickerModal" 
             class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             @click.self="closeDatePicker">
-            <div class="bg-tg-sidebar rounded-2xl shadow-2xl p-6 w-full max-w-md border border-gray-700">
+            <div class="bg-tg-sidebar rounded-2xl shadow-2xl p-6 w-full max-w-md border border-[color:var(--tg-border)]">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-xl font-bold text-white">Jump to Date</h3>
                     <button @click="closeDatePicker" 
@@ -2131,7 +2264,7 @@
                         Cancel
                     </button>
                     <button @click="jumpToDate"
-                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                        class="px-4 py-2 text-white rounded-lg transition-colors" style="background: var(--tg-accent);">
                         Jump
                     </button>
                 </div>
@@ -2237,26 +2370,26 @@
                 <!-- Tab bar -->
                 <div class="flex px-6" style="border-bottom: 1px solid var(--tg-border);">
                     <button @click="settingsActiveTab = 'appearance'"
-                        :class="settingsActiveTab === 'appearance' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :class="settingsActiveTab === 'appearance' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'appearance' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-palette mr-1.5 text-xs"></i>Appearance
                     </button>
                     <button @click="settingsActiveTab = 'general'"
-                        :class="settingsActiveTab === 'general' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :class="settingsActiveTab === 'general' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'general' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-sliders-h mr-1.5 text-xs"></i>General
                     </button>
                     <button @click="settingsActiveTab = 'ai'; loadAiConfig()"
-                        :class="settingsActiveTab === 'ai' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :class="settingsActiveTab === 'ai' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'ai' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-robot mr-1.5 text-xs"></i>AI
                     </button>
                     <button v-if="authRequired && isAuthenticated && userRole === 'master'"
                         @click="settingsActiveTab = 'admin'; Promise.all([loadAdminViewers(), loadAdminChats(), loadAdminAudit(), loadAdminTokens()])"
-                        :class="settingsActiveTab === 'admin' ? 'border-blue-500 text-blue-400' : 'border-transparent'"
+                        :class="settingsActiveTab === 'admin' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'admin' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-shield-alt mr-1.5 text-xs"></i>Admin
@@ -2556,19 +2689,19 @@
                     <div v-if="settingsActiveTab === 'admin' && authRequired && isAuthenticated && userRole === 'master'">
                         <!-- Admin sub-tabs -->
                         <div class="flex mb-4 -mt-2" style="border-bottom: 1px solid var(--tg-border);">
-                            <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Viewer Accounts
                             </button>
-                            <button @click="adminActiveTab = 'tokens'; loadAdminTokens(); loadAdminChats()" :class="adminActiveTab === 'tokens' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button @click="adminActiveTab = 'tokens'; loadAdminTokens(); loadAdminChats()" :class="adminActiveTab === 'tokens' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Share Tokens
                             </button>
-                            <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Audit Log
                             </button>
-                            <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Listener
                             </button>
-                            <button @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-blue-500 text-blue-400' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Backup
                             </button>
                         </div>
@@ -2609,7 +2742,7 @@
                                     </label>
                                     <div class="flex-1"></div>
                                     <button v-if="adminEditingId" @click="cancelEdit" class="px-3 py-1.5 text-sm" style="color: var(--tg-muted);">Cancel</button>
-                                    <button @click="saveViewer" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">
+                                    <button @click="saveViewer" class="px-4 py-1.5 text-white text-sm rounded" style="background: var(--tg-accent);">
                                         {{ adminEditingId ? 'Update' : 'Create' }}
                                     </button>
                                 </div>
@@ -2658,7 +2791,7 @@
                                         <input type="checkbox" v-model="adminTokenForm.no_download" class="rounded" /> No Downloads
                                     </label>
                                     <div class="flex-1"></div>
-                                    <button @click="createToken" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">
+                                    <button @click="createToken" class="px-4 py-1.5 text-white text-sm rounded" style="background: var(--tg-accent);">
                                         Create Token
                                     </button>
                                 </div>
@@ -2678,7 +2811,7 @@
                                         <div class="text-xs text-gray-400 mb-1">Shareable Link</div>
                                         <div class="flex items-center gap-2">
                                             <code class="flex-1 bg-gray-900 text-blue-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewTokenUrl }}</code>
-                                            <button @click="navigator.clipboard.writeText(adminNewTokenUrl)" class="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded shrink-0">Copy Link</button>
+                                            <button @click="navigator.clipboard.writeText(adminNewTokenUrl)" class="px-3 py-2 text-white text-xs rounded shrink-0" style="background: var(--tg-accent);">Copy Link</button>
                                         </div>
                                     </div>
                                 </div>
@@ -2727,7 +2860,7 @@
                                                 </label>
                                                 <div class="flex-1"></div>
                                                 <button @click="editingTokenId = null" class="px-3 py-1 text-sm rounded" style="color: var(--tg-muted);">Cancel</button>
-                                                <button @click="saveEditToken(token.id)" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded">Save</button>
+                                                <button @click="saveEditToken(token.id)" class="px-3 py-1 text-white text-sm rounded" style="background: var(--tg-accent);">Save</button>
                                             </div>
                                         </div>
                                     </div>
@@ -2815,7 +2948,7 @@
                                             <label class="text-xs block mb-1" style="color: var(--tg-muted);">Cron Expression</label>
                                             <div class="flex items-center gap-2">
                                                 <input v-model="backupConfig.schedule" placeholder="0 */6 * * *" class="flex-1 rounded px-3 py-2 text-sm font-mono" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                                <button @click="saveBackupConfig" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded shrink-0">Save</button>
+                                                <button @click="saveBackupConfig" class="px-3 py-2 text-white text-xs rounded shrink-0" style="background: var(--tg-accent);">Save</button>
                                             </div>
                                             <div class="text-[10px] mt-1" style="color: var(--tg-muted);">Default: {{ backupConfig.default_schedule || '0 */6 * * *' }}</div>
                                         </div>
@@ -2830,7 +2963,7 @@
                                                 { label: 'Daily', cron: '0 0 * * *' },
                                             ]" :key="preset.cron" @click="backupConfig.schedule = preset.cron; saveBackupConfig()"
                                                 class="px-2 py-1 text-[10px] rounded transition-colors"
-                                                :style="backupConfig.schedule === preset.cron ? 'background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3)' : 'color: var(--tg-muted); border: 1px solid var(--tg-border)'">
+                                                :style="backupConfig.schedule === preset.cron ? 'background: rgba(135,116,225,0.2); color: #a78bfa; border: 1px solid rgba(135,116,225,0.3)' : 'color: var(--tg-muted); border: 1px solid var(--tg-border)'">
                                                 {{ preset.label }}
                                             </button>
                                         </div>
@@ -2842,7 +2975,7 @@
                                         <h3 class="text-sm font-medium" style="color: var(--tg-text);">Active Viewer Boost</h3>
                                         <label class="relative inline-flex items-center cursor-pointer">
                                             <input type="checkbox" v-model="backupConfig.active_boost" @change="saveBackupConfig" class="sr-only peer">
-                                            <div class="w-9 h-5 rounded-full peer peer-checked:bg-blue-600 transition-colors" style="background: var(--tg-border);"></div>
+                                            <div class="w-9 h-5 rounded-full peer transition-colors" :style="{ background: backupConfig.active_boost ? 'var(--tg-accent)' : 'var(--tg-border)' }"></div>
                                             <div class="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform peer-checked:translate-x-4"></div>
                                         </label>
                                     </div>
@@ -2947,13 +3080,15 @@
 
                 // Theme system
                 const themePresets = [
-                    { id: 'midnight', label: 'Midnight', preview: '#0f172a', type: 'dark' },
+                    { id: 'midnight', label: 'Telegram Dark', preview: '#212121', type: 'dark' },
                     { id: 'telegram-classic', label: 'Telegram Classic', preview: '#17212b', type: 'dark' },
+                    { id: 'classic-blue', label: 'Classic Blue', preview: '#0f172a', type: 'dark' },
                     { id: 'amoled-black', label: 'AMOLED Black', preview: '#000000', type: 'dark' },
                     { id: 'nord', label: 'Nord', preview: '#2e3440', type: 'dark' },
                     { id: 'monokai', label: 'Monokai', preview: '#272822', type: 'dark' },
                     { id: 'solarized-dark', label: 'Solarized Dark', preview: '#002b36', type: 'dark' },
                     { id: 'light-default', label: 'Light', preview: '#ffffff', type: 'light' },
+                    { id: 'light-blue', label: 'Light Blue', preview: '#f0f2f5', type: 'light' },
                 ]
                 const currentTheme = ref(localStorage.getItem('tg-theme') || 'midnight')
                 const themeAutoDetect = ref(localStorage.getItem('tg-theme-auto') === 'true')
@@ -5585,16 +5720,17 @@
                     const own = isOwnMessage(msg)
                     const first = isFirstInGroup(index)
                     const last = isLastInGroup(index)
+                    // Telegram-style: 12px radius, tail on last bubble only
                     if (own) {
-                        if (first && last) return 'rounded-2xl rounded-br-md bubble-tail-out'
-                        if (first) return 'rounded-2xl rounded-br-lg'
-                        if (last) return 'rounded-2xl rounded-tr-lg rounded-br-md bubble-tail-out'
-                        return 'rounded-lg'
+                        if (first && last) return 'rounded-xl rounded-br-[4px] bubble-tail-out'
+                        if (first) return 'rounded-xl rounded-br-[4px]'
+                        if (last) return 'rounded-xl rounded-tr-[4px] rounded-br-[4px] bubble-tail-out'
+                        return 'rounded-xl rounded-r-[4px]'
                     } else {
-                        if (first && last) return 'rounded-2xl rounded-bl-md bubble-tail-in'
-                        if (first) return 'rounded-2xl rounded-bl-lg'
-                        if (last) return 'rounded-2xl rounded-tl-lg rounded-bl-md bubble-tail-in'
-                        return 'rounded-lg'
+                        if (first && last) return 'rounded-xl rounded-bl-[4px] bubble-tail-in'
+                        if (first) return 'rounded-xl rounded-bl-[4px]'
+                        if (last) return 'rounded-xl rounded-tl-[4px] rounded-bl-[4px] bubble-tail-in'
+                        return 'rounded-xl rounded-l-[4px]'
                     }
                 }
 
@@ -5611,21 +5747,20 @@
                     return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
                 }
 
+                // Telegram 21-color peer palette (from Telegram Web K/A)
+                const PEER_COLORS = [
+                    '#e17076', '#eda86c', '#a695e7', '#7bc862',
+                    '#6ec9cb', '#65aadd', '#ee7aae', '#e66767',
+                    '#daa569', '#b48bf2', '#85c46c', '#6bc0c1',
+                    '#5facdb', '#f283a1', '#df8152', '#c69f40',
+                    '#9b86e7', '#5fc283', '#54b3bf', '#489ce1',
+                    '#c973b1',
+                ]
+
                 const getSenderColor = (msg) => {
-                    // Use sender_id when available, otherwise fall back to chat_id
                     const id = msg.sender_id ?? msg.chat_id ?? 0
-
-                    // Simple hash function for better color distribution
-                    let hash = 0
-                    const idStr = String(id)
-                    for (let i = 0; i < idStr.length; i++) {
-                        hash = ((hash << 5) - hash) + idStr.charCodeAt(i)
-                        hash = hash & hash // Convert to 32-bit integer
-                    }
-
-                    // Generate hue from hash for diverse name colors
-                    const hue = Math.abs(hash) % 360
-                    return hue
+                    // Stable index into 21-color palette
+                    return Math.abs(id) % PEER_COLORS.length
                 }
 
                 // Get background color for message bubble (uses CSS custom properties for theming)
@@ -5634,11 +5769,10 @@
                     return isOwn ? 'var(--tg-own-msg)' : 'var(--tg-other-msg)'
                 }
 
-                // Get color for sender name (unique per person)
+                // Get color for sender name (unique per person via peer palette)
                 const getSenderNameColor = (msg) => {
-                    const hue = getSenderColor(msg)
-                    // Bright, vibrant color for name
-                    return `hsl(${hue}, 70%, 65%)`
+                    const idx = getSenderColor(msg)
+                    return PEER_COLORS[idx]
                 }
 
                 const getPollPercentage = (msg, answer) => {
@@ -6793,6 +6927,7 @@
                     themeAutoDetect,
                     toggleThemeAutoDetect,
                     // Colors / avatars
+                    PEER_COLORS,
                     getSenderStyle,
                     getMessageBackground,
                     getSenderColor,
