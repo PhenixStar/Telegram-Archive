@@ -794,10 +794,24 @@ async def add_security_headers(request: Request, call_next):
 # Multi-User Authentication (v7.0.0)
 # ============================================================================
 
+# Super admin credentials — falls back to VIEWER_USERNAME/VIEWER_PASSWORD
+SUPER_ADMIN_USERNAME = os.getenv("SUPER_ADMIN_USERNAME", "").strip()
+SUPER_ADMIN_PASSWORD = os.getenv("SUPER_ADMIN_PASSWORD", "").strip()
 VIEWER_USERNAME = os.getenv("VIEWER_USERNAME", "").strip()
 VIEWER_PASSWORD = os.getenv("VIEWER_PASSWORD", "").strip()
-AUTH_ENABLED = bool(VIEWER_USERNAME and VIEWER_PASSWORD)
+# Effective super admin creds: explicit env var takes priority, then viewer creds
+_SA_USERNAME = SUPER_ADMIN_USERNAME or VIEWER_USERNAME
+_SA_PASSWORD = SUPER_ADMIN_PASSWORD or VIEWER_PASSWORD
+AUTH_ENABLED = bool(_SA_USERNAME and _SA_PASSWORD)
 AUTH_COOKIE_NAME = "viewer_auth"
+
+# Role hierarchy — higher number = more power. Super absorbs all master powers.
+ROLE_HIERARCHY = {"super_admin": 4, "master": 3, "admin": 2, "viewer": 1, "token": 0}
+
+
+def _has_role(user_role: str, required_role: str) -> bool:
+    """Check if user_role meets or exceeds required_role in the hierarchy."""
+    return ROLE_HIERARCHY.get(user_role, 0) >= ROLE_HIERARCHY.get(required_role, 0)
 
 AUTH_SESSION_DAYS = int(os.getenv("AUTH_SESSION_DAYS", "30"))
 AUTH_SESSION_SECONDS = AUTH_SESSION_DAYS * 24 * 60 * 60
@@ -807,17 +821,18 @@ _LOGIN_RATE_LIMIT = 15  # max attempts
 _LOGIN_RATE_WINDOW = 300  # per 5 minutes
 
 if AUTH_ENABLED:
-    logger.info(f"Viewer authentication is ENABLED (Master: {VIEWER_USERNAME}, Session: {AUTH_SESSION_DAYS} days)")
+    logger.info(f"Authentication ENABLED (Super Admin: {_SA_USERNAME}, Session: {AUTH_SESSION_DAYS} days)")
 else:
-    logger.info("Viewer authentication is DISABLED (no VIEWER_USERNAME / VIEWER_PASSWORD set)")
+    logger.info("Authentication DISABLED (no SUPER_ADMIN_USERNAME/VIEWER_USERNAME set)")
 
 
 @dataclass
 class UserContext:
     username: str
-    role: str  # "master", "viewer", or "token"
+    role: str  # "super_admin", "master", "admin", "viewer", or "token"
     allowed_chat_ids: set[int] | None = None  # None = all chats
     no_download: bool = False  # v7.2.0: restrict file downloads
+    allowed_profile_ids: list[str] | None = None  # v11.0.0: admin profile scope
 
 
 @dataclass
@@ -825,6 +840,7 @@ class SessionData:
     username: str
     role: str
     allowed_chat_ids: set[int] | None = None
+    allowed_profile_ids: list[str] | None = None  # v11.0.0: admin profile scope
     no_download: bool = False
     source_token_id: int | None = None  # v7.2.0: tracks originating share token for revocation
     created_at: float = field(default_factory=time.time)
@@ -862,6 +878,7 @@ async def _create_session(
     allowed_chat_ids: set[int] | None = None,
     no_download: bool = False,
     source_token_id: int | None = None,
+    allowed_profile_ids: list[str] | None = None,
 ) -> str:
     """Create a new session, evicting oldest if user exceeds max sessions."""
     user_sessions = [(k, v) for k, v in _sessions.items() if v.username == username]
@@ -881,6 +898,7 @@ async def _create_session(
         username=username,
         role=role,
         allowed_chat_ids=allowed_chat_ids,
+        allowed_profile_ids=allowed_profile_ids,
         no_download=no_download,
         source_token_id=source_token_id,
         created_at=now,
@@ -1000,16 +1018,24 @@ async def require_auth(auth_cookie: str | None = Cookie(default=None, alias=AUTH
         username=session.username,
         role=session.role,
         allowed_chat_ids=session.allowed_chat_ids,
+        allowed_profile_ids=session.allowed_profile_ids,
         no_download=session.no_download,
     )
 
 
 def require_master(request: Request, user: UserContext = Depends(require_auth)) -> UserContext:
-    """Dependency that requires master role. Blocked when X-Viewer-Only header is set."""
-    if user.role != "master":
+    """Dependency that requires master-level role (admin, master, or super_admin)."""
+    if not _has_role(user.role, "admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
     if request.headers.get("x-viewer-only", "").lower() == "true":
         raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def require_super_admin(user: UserContext = Depends(require_auth)) -> UserContext:
+    """Dependency that requires super_admin role exclusively."""
+    if not _has_role(user.role, "super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin access required")
     return user
 
 
@@ -1228,6 +1254,55 @@ async def permalink_page(
     )
 
 
+@app.get("/api/profiles")
+async def get_profiles():
+    """Return backup profiles for the login page multi-instance selector.
+
+    Priority: DB backup_profiles → BACKUP_PROFILES env → profiles.json → auto-generated default.
+    Always returns at least one profile so the selector is always visible.
+    """
+    # 1. DB-backed profiles (v11.0.0)
+    if db:
+        try:
+            profiles = await db.list_backup_profiles(active_only=True)
+            if profiles:
+                return {"profiles": profiles, "show_selector": True}
+        except Exception:
+            pass  # table may not exist yet on first run
+
+    # 2. Env var profiles
+    raw = os.getenv("BACKUP_PROFILES", "")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list) and parsed:
+                return {"profiles": parsed, "show_selector": True}
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # 3. File-based profiles
+    profiles_file = Path(config.backup_path) / "profiles.json"
+    if profiles_file.exists():
+        try:
+            data = json.loads(profiles_file.read_text())
+            profiles = data if isinstance(data, list) else data.get("profiles", [])
+            if profiles:
+                return {"profiles": profiles, "show_selector": True}
+        except Exception:
+            pass
+
+    # 4. Auto-generate default profile from current instance
+    default_profile = {
+        "id": "default",
+        "name": os.getenv("PROFILE_NAME", "Telegram Archive"),
+        "description": os.getenv("PROFILE_DESC", ""),
+        "icon": "database",
+        "color": "#8774e1",
+        "url": "/",
+    }
+    return {"profiles": [default_profile], "show_selector": True}
+
+
 @app.get("/api/auth/check")
 async def check_auth(auth_cookie: str | None = Cookie(default=None, alias=AUTH_COOKIE_NAME)):
     """Check current authentication status. Returns role and username if authenticated."""
@@ -1250,6 +1325,8 @@ async def check_auth(auth_cookie: str | None = Cookie(default=None, alias=AUTH_C
         "role": session.role,
         "username": session.username,
         "no_download": session.no_download,
+        "is_super_admin": _has_role(session.role, "super_admin"),
+        "is_admin": _has_role(session.role, "admin"),
     }
 
 
@@ -1286,7 +1363,41 @@ async def login(request: Request):
     _record_login_attempt(client_ip)
     user_agent = request.headers.get("user-agent", "")[:500]
 
-    # 1. Check DB viewer accounts first
+    # 1. Check DB user accounts (super_admin / admin) first
+    if db:
+        user_acct = await db.get_user_by_username(username)
+        if user_acct and user_acct["is_active"]:
+            if _verify_password(password, user_acct["salt"], user_acct["password_hash"]):
+                acct_role = user_acct["role"]  # "super_admin" or "admin"
+                raw_pids = user_acct.get("allowed_profile_ids")
+                profile_ids = None
+                if raw_pids:
+                    try:
+                        profile_ids = json.loads(raw_pids) if isinstance(raw_pids, str) else raw_pids
+                    except (json.JSONDecodeError, TypeError):
+                        profile_ids = None
+                token = await _create_session(username, acct_role, None, allowed_profile_ids=profile_ids)
+                response = JSONResponse({"success": True, "role": acct_role, "username": username})
+                response.set_cookie(
+                    key=AUTH_COOKIE_NAME,
+                    value=token,
+                    httponly=True,
+                    secure=_get_secure_cookies(request),
+                    samesite="lax",
+                    max_age=AUTH_SESSION_SECONDS,
+                )
+                if db:
+                    await db.create_audit_log(
+                        username=username,
+                        role=acct_role,
+                        action="login_success",
+                        endpoint="/api/login",
+                        ip_address=client_ip,
+                        user_agent=user_agent,
+                    )
+                return response
+
+    # 2. Check DB viewer accounts
     if db:
         viewer = await db.get_viewer_by_username(username)
         if viewer and viewer["is_active"]:
@@ -1321,13 +1432,13 @@ async def login(request: Request):
                     )
                 return response
 
-    # 2. Fall back to master env var credentials
+    # 3. Fall back to env var credentials → super_admin role
     viewer_only = request.headers.get("x-viewer-only", "").lower() == "true"
-    if secrets.compare_digest(username, VIEWER_USERNAME) and secrets.compare_digest(password, VIEWER_PASSWORD):
+    if _SA_USERNAME and _SA_PASSWORD and secrets.compare_digest(username, _SA_USERNAME) and secrets.compare_digest(password, _SA_PASSWORD):
         if viewer_only:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        token = await _create_session(username, "master", None)
-        response = JSONResponse({"success": True, "role": "master", "username": username})
+        token = await _create_session(username, "super_admin", None)
+        response = JSONResponse({"success": True, "role": "super_admin", "username": username})
         response.set_cookie(
             key=AUTH_COOKIE_NAME,
             value=token,
@@ -1340,7 +1451,7 @@ async def login(request: Request):
         if db:
             await db.create_audit_log(
                 username=username,
-                role="master",
+                role="super_admin",
                 action="login_success",
                 endpoint="/api/login",
                 ip_address=client_ip,
@@ -2648,6 +2759,173 @@ async def delete_token(token_id: int, request: Request, user: UserContext = Depe
         ip_address=request.client.host if request.client else None,
     )
 
+    return {"success": True}
+
+
+# ============================================================================
+# Super Admin Endpoints (v11.0.0) — Profile + Admin Account CRUD
+# ============================================================================
+
+
+@app.get("/api/admin/profiles")
+async def admin_list_profiles(user: UserContext = Depends(require_master)):
+    """List backup profiles. Super admin sees all; admin sees assigned only."""
+    profiles = await db.list_backup_profiles() if db else []
+    if user.role == "admin" and user.allowed_profile_ids is not None:
+        profiles = [p for p in profiles if p["id"] in user.allowed_profile_ids]
+    return {"profiles": profiles}
+
+
+@app.post("/api/admin/profiles")
+async def admin_create_profile(request: Request, user: UserContext = Depends(require_super_admin)):
+    """Create a backup profile. Super admin only."""
+    data = await request.json()
+    profile_id = data.get("id") or data.get("name", "").lower().replace(" ", "-")[:64]
+    if not profile_id:
+        raise HTTPException(400, "Profile ID or name required")
+    profile = await db.create_backup_profile(
+        id=profile_id,
+        name=data.get("name", profile_id),
+        description=data.get("description"),
+        icon=data.get("icon", "database"),
+        color=data.get("color", "#8774e1"),
+        url=data.get("url"),
+        created_by=user.username,
+    )
+    return {"success": True, "profile": profile}
+
+
+@app.put("/api/admin/profiles/{profile_id}")
+async def admin_update_profile(profile_id: str, request: Request, user: UserContext = Depends(require_master)):
+    """Update a backup profile. Admin can only change name/description of assigned profiles."""
+    data = await request.json()
+    if user.role == "admin":
+        if user.allowed_profile_ids is not None and profile_id not in user.allowed_profile_ids:
+            raise HTTPException(403, "Not assigned to this profile")
+        # Admin can only rename
+        data = {k: v for k, v in data.items() if k in ("name", "description")}
+    updated = await db.update_backup_profile(profile_id, **data)
+    if not updated:
+        raise HTTPException(404, "Profile not found")
+    return {"success": True, "profile": updated}
+
+
+@app.delete("/api/admin/profiles/{profile_id}")
+async def admin_delete_profile(profile_id: str, user: UserContext = Depends(require_super_admin)):
+    """Delete a backup profile. Super admin only."""
+    deleted = await db.delete_backup_profile(profile_id)
+    if not deleted:
+        raise HTTPException(404, "Profile not found")
+    return {"success": True}
+
+
+@app.get("/api/admin/admins")
+async def admin_list_admins(user: UserContext = Depends(require_super_admin)):
+    """List all admin/super_admin user accounts. Super admin only."""
+    accounts = await db.list_user_accounts() if db else []
+    # Enrich with profile names; strip sensitive fields
+    profiles = await db.list_backup_profiles() if db else []
+    profile_map = {p["id"]: p["name"] for p in profiles}
+    safe_accounts = []
+    for acct in accounts:
+        # Parse allowed_profile_ids from raw JSON string
+        raw_pids = acct.get("allowed_profile_ids")
+        pids = None
+        if raw_pids and isinstance(raw_pids, str):
+            try:
+                pids = json.loads(raw_pids)
+            except (json.JSONDecodeError, TypeError):
+                pids = None
+        elif isinstance(raw_pids, list):
+            pids = raw_pids
+        safe = {k: v for k, v in acct.items() if k not in ("password_hash", "salt")}
+        safe["allowed_profile_ids"] = pids
+        safe["profile_names"] = ", ".join(profile_map.get(pid, pid) for pid in pids) if pids else "All"
+        safe_accounts.append(safe)
+    return {"admins": safe_accounts}
+
+
+@app.post("/api/admin/admins")
+async def admin_create_admin(request: Request, user: UserContext = Depends(require_super_admin)):
+    """Create an admin or super_admin user account. Super admin only."""
+    data = await request.json()
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+    if not username or not password:
+        raise HTTPException(400, "Username and password required")
+    if len(password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+
+    # Check uniqueness across all account types
+    existing = await db.get_user_by_username(username) if db else None
+    if existing:
+        raise HTTPException(409, "Username already exists")
+    existing_viewer = await db.get_viewer_by_username(username) if db else None
+    if existing_viewer:
+        raise HTTPException(409, "Username already exists as viewer")
+
+    salt = secrets.token_hex(32)
+    password_hash = _hash_password(password, salt)
+    role = data.get("role", "admin")
+    if role not in ("admin", "super_admin"):
+        raise HTTPException(400, "Role must be 'admin' or 'super_admin'")
+
+    profile_ids = data.get("allowed_profile_ids")
+    account = await db.create_user_account(
+        username=username,
+        password_hash=password_hash,
+        salt=salt,
+        role=role,
+        email=data.get("email"),
+        display_name=data.get("display_name"),
+        allowed_profile_ids=json.dumps(profile_ids) if profile_ids else None,
+        created_by=user.username,
+    )
+    safe = {k: v for k, v in account.items() if k not in ("password_hash", "salt")}
+    # Parse allowed_profile_ids for response
+    raw = safe.get("allowed_profile_ids")
+    if raw and isinstance(raw, str):
+        try:
+            safe["allowed_profile_ids"] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {"success": True, "admin": safe}
+
+
+@app.put("/api/admin/admins/{account_id}")
+async def admin_update_admin(account_id: int, request: Request, user: UserContext = Depends(require_super_admin)):
+    """Update an admin account. Super admin only."""
+    data = await request.json()
+    update_kwargs = {}
+    for field in ("display_name", "email", "role", "is_active"):
+        if field in data:
+            update_kwargs[field] = data[field]
+    if "allowed_profile_ids" in data:
+        pids = data["allowed_profile_ids"]
+        update_kwargs["allowed_profile_ids"] = json.dumps(pids) if pids else None
+    if "password" in data and data["password"]:
+        salt = secrets.token_hex(32)
+        update_kwargs["salt"] = salt
+        update_kwargs["password_hash"] = _hash_password(data["password"], salt)
+    updated = await db.update_user_account(account_id, **update_kwargs)
+    if not updated:
+        raise HTTPException(404, "Account not found")
+    safe = {k: v for k, v in updated.items() if k not in ("password_hash", "salt")}
+    raw = safe.get("allowed_profile_ids")
+    if raw and isinstance(raw, str):
+        try:
+            safe["allowed_profile_ids"] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {"success": True, "admin": safe}
+
+
+@app.delete("/api/admin/admins/{account_id}")
+async def admin_delete_admin(account_id: int, user: UserContext = Depends(require_super_admin)):
+    """Delete an admin account. Super admin only."""
+    deleted = await db.delete_user_account(account_id)
+    if not deleted:
+        raise HTTPException(404, "Account not found")
     return {"success": True}
 
 

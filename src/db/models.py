@@ -426,6 +426,62 @@ class ViewerToken(Base):
     )
 
 
+class BackupProfile(Base):
+    """Backup profiles for multi-instance login page selector.
+
+    v11.0.0: Super admin creates profiles; admins are assigned to them.
+    Each profile represents a backup instance (local or external URL).
+    """
+
+    __tablename__ = "backup_profiles"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # slug: "main", "team-a"
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    icon: Mapped[str] = mapped_column(String(50), default="database", server_default="database")
+    color: Mapped[str] = mapped_column(String(20), default="#8774e1", server_default="#8774e1")
+    url: Mapped[str | None] = mapped_column(Text)  # external viewer URL, NULL = current instance
+    is_active: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_by: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=func.now()
+    )
+
+
+class UserAccount(Base):
+    """Unified user accounts for super_admin and admin roles.
+
+    v11.0.0: Replaces env-var-only auth for elevated roles.
+    - super_admin: full system access (env var fallback preserved)
+    - admin: master-level powers scoped to assigned profiles
+    Viewers remain in viewer_accounts for backward compatibility.
+    """
+
+    __tablename__ = "user_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # "super_admin" or "admin"
+    email: Mapped[str | None] = mapped_column(String(255))  # for future recovery
+    display_name: Mapped[str | None] = mapped_column(String(255))
+    allowed_profile_ids: Mapped[str | None] = mapped_column(Text)  # JSON array of profile IDs, NULL = all
+    is_active: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    created_by: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_user_accounts_role", "role"),
+        Index("idx_user_accounts_username", "username"),
+    )
+
+
 class MessageEmbedding(Base):
     """Vector embeddings for semantic search.
 

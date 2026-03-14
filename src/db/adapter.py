@@ -8,9 +8,11 @@ This is a drop-in replacement for the old Database class.
 import asyncio
 import glob
 import hashlib
+import html as html_mod
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 from datetime import datetime
@@ -25,6 +27,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from .base import DatabaseManager
 from .models import (
     AppSettings,
+    BackupProfile,
     Chat,
     ChatFolder,
     ChatFolderMember,
@@ -36,6 +39,7 @@ from .models import (
     Reaction,
     SyncStatus,
     User,
+    UserAccount,
     ViewerAccount,
     ViewerAuditLog,
     ViewerSession,
@@ -1175,7 +1179,6 @@ class DatabaseAdapter:
                 stmt = stmt.where(Message.reply_to_top_id == topic_id)
 
             if search:
-                import re
                 digits_only = re.sub(r'[^\d]', '', search)
                 is_numeric = bool(digits_only) and len(digits_only) >= 3 and bool(re.match(r'^[\d,.\s]+$', search.strip()))
                 if is_numeric:
@@ -1749,7 +1752,7 @@ class DatabaseAdapter:
             async for row in result:
                 msg = {
                     "id": row.id,
-                    "date": row.date.isoformat() if row.date else None,
+                    "date": row.date.isoformat() if hasattr(row.date, 'isoformat') else row.date,
                     "sender": {
                         "name": f"{row.first_name or ''} {row.last_name or ''}".strip() or row.username or "Unknown",
                         "username": row.username,
@@ -2052,6 +2055,140 @@ class DatabaseAdapter:
             "allowed_chat_ids": account.allowed_chat_ids,
             "is_active": account.is_active,
             "no_download": account.no_download,
+            "created_by": account.created_by,
+            "created_at": account.created_at.isoformat() if account.created_at else None,
+            "updated_at": account.updated_at.isoformat() if account.updated_at else None,
+        }
+
+    # ========================================================================
+    # Backup Profile Management (v11.0.0)
+    # ========================================================================
+
+    @retry_on_locked()
+    async def create_backup_profile(self, **kwargs) -> dict[str, Any]:
+        """Create a new backup profile. Returns the created profile dict."""
+        async with self.db_manager.async_session_factory() as session:
+            profile = BackupProfile(**kwargs)
+            session.add(profile)
+            await session.commit()
+            await session.refresh(profile)
+            return self._backup_profile_to_dict(profile)
+
+    async def list_backup_profiles(self, active_only: bool = False) -> list[dict[str, Any]]:
+        """List all backup profiles, optionally filtered to active only."""
+        async with self.db_manager.async_session_factory() as session:
+            stmt = select(BackupProfile).order_by(BackupProfile.sort_order, BackupProfile.created_at)
+            if active_only:
+                stmt = stmt.where(BackupProfile.is_active == 1)
+            result = await session.execute(stmt)
+            return [self._backup_profile_to_dict(p) for p in result.scalars().all()]
+
+    async def get_backup_profile(self, profile_id: str) -> dict[str, Any] | None:
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(select(BackupProfile).where(BackupProfile.id == profile_id))
+            profile = result.scalar_one_or_none()
+            return self._backup_profile_to_dict(profile) if profile else None
+
+    @retry_on_locked()
+    async def update_backup_profile(self, profile_id: str, **kwargs) -> dict[str, Any] | None:
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(select(BackupProfile).where(BackupProfile.id == profile_id))
+            profile = result.scalar_one_or_none()
+            if not profile:
+                return None
+            for key, value in kwargs.items():
+                if hasattr(profile, key):
+                    setattr(profile, key, value)
+            await session.commit()
+            await session.refresh(profile)
+            return self._backup_profile_to_dict(profile)
+
+    @retry_on_locked()
+    async def delete_backup_profile(self, profile_id: str) -> bool:
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(delete(BackupProfile).where(BackupProfile.id == profile_id))
+            await session.commit()
+            return result.rowcount > 0
+
+    @staticmethod
+    def _backup_profile_to_dict(profile: BackupProfile) -> dict[str, Any]:
+        return {
+            "id": profile.id,
+            "name": profile.name,
+            "description": profile.description,
+            "icon": profile.icon or "database",
+            "color": profile.color or "#8774e1",
+            "url": profile.url,
+            "is_active": bool(profile.is_active),
+            "sort_order": profile.sort_order or 0,
+            "created_by": profile.created_by,
+            "created_at": profile.created_at.isoformat() if profile.created_at else None,
+            "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
+        }
+
+    # ========================================================================
+    # User Account Management (v11.0.0) — super_admin + admin roles
+    # ========================================================================
+
+    @retry_on_locked()
+    async def create_user_account(self, **kwargs) -> dict[str, Any]:
+        """Create a super_admin or admin user account."""
+        async with self.db_manager.async_session_factory() as session:
+            account = UserAccount(**kwargs)
+            session.add(account)
+            await session.commit()
+            await session.refresh(account)
+            return self._user_account_to_dict(account)
+
+    async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        """Look up a user account (super_admin/admin) by username."""
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(select(UserAccount).where(UserAccount.username == username))
+            account = result.scalar_one_or_none()
+            return self._user_account_to_dict(account) if account else None
+
+    async def list_user_accounts(self, role: str | None = None) -> list[dict[str, Any]]:
+        """List user accounts, optionally filtered by role."""
+        async with self.db_manager.async_session_factory() as session:
+            stmt = select(UserAccount).order_by(UserAccount.created_at.desc())
+            if role:
+                stmt = stmt.where(UserAccount.role == role)
+            result = await session.execute(stmt)
+            return [self._user_account_to_dict(a) for a in result.scalars().all()]
+
+    @retry_on_locked()
+    async def update_user_account(self, account_id: int, **kwargs) -> dict[str, Any] | None:
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(select(UserAccount).where(UserAccount.id == account_id))
+            account = result.scalar_one_or_none()
+            if not account:
+                return None
+            for key, value in kwargs.items():
+                if hasattr(account, key):
+                    setattr(account, key, value)
+            await session.commit()
+            await session.refresh(account)
+            return self._user_account_to_dict(account)
+
+    @retry_on_locked()
+    async def delete_user_account(self, account_id: int) -> bool:
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(delete(UserAccount).where(UserAccount.id == account_id))
+            await session.commit()
+            return result.rowcount > 0
+
+    @staticmethod
+    def _user_account_to_dict(account: UserAccount) -> dict[str, Any]:
+        return {
+            "id": account.id,
+            "username": account.username,
+            "password_hash": account.password_hash,
+            "salt": account.salt,
+            "role": account.role,
+            "email": account.email,
+            "display_name": account.display_name,
+            "allowed_profile_ids": account.allowed_profile_ids,  # raw JSON string; callers parse as needed
+            "is_active": bool(account.is_active),
             "created_by": account.created_by,
             "created_at": account.created_at.isoformat() if account.created_at else None,
             "updated_at": account.updated_at.isoformat() if account.updated_at else None,
@@ -2454,15 +2591,25 @@ class DatabaseAdapter:
                     "id": row.id,
                     "chat_id": row.chat_id,
                     "text": row.text,
-                    "date": row.date.isoformat() if row.date else None,
+                    "date": row.date.isoformat() if hasattr(row.date, 'isoformat') else row.date,
                     "sender_id": row.sender_id,
                     "first_name": row.first_name,
                     "last_name": row.last_name,
                     "username": row.username,
-                    "snippet": row.snippet,
+                    "snippet": self._sanitize_fts_snippet(row.snippet),
                 }
                 for row in rows
             ]
+
+    @staticmethod
+    def _sanitize_fts_snippet(snippet: str | None) -> str | None:
+        """Escape HTML in FTS snippet while preserving <b> highlight markers."""
+        if not snippet:
+            return snippet
+        # Replace FTS markers with placeholders, escape, then restore
+        s = snippet.replace("<b>", "\x00B\x00").replace("</b>", "\x00/B\x00")
+        s = html_mod.escape(s)
+        return s.replace("\x00B\x00", "<b>").replace("\x00/B\x00", "</b>")
 
     async def count_fts_matches(
         self,

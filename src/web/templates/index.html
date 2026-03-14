@@ -25,7 +25,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
-        /* Apply saved theme before paint to prevent flash */
+        /* Apply saved theme before paint to prevent flash + set mobile viewport height */
         (function() {
             var auto = localStorage.getItem('tg-theme-auto') === 'true';
             var t;
@@ -37,6 +37,10 @@
             }
             document.documentElement.setAttribute('data-theme', t);
             document.documentElement.style.colorScheme = t.startsWith('light') ? 'light' : 'dark';
+            /* Mobile viewport height fix (iOS Safari address bar) */
+            function setVh() { document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px'); }
+            setVh();
+            window.addEventListener('resize', setVh);
         })();
     </script>
     <style>
@@ -311,31 +315,31 @@
         }
         .login-orb-1 {
             width: 300px; height: 300px;
-            background: #3b82f6;
+            background: var(--login-gradient-via, #8b5cf6);
             top: -80px; right: -60px;
             animation: login-orb-float 8s ease-in-out infinite;
         }
         .login-orb-2 {
             width: 250px; height: 250px;
-            background: #8b5cf6;
+            background: var(--login-gradient-from, #6c5ce7);
             bottom: -60px; left: -50px;
             animation: login-orb-float-alt 10s ease-in-out infinite;
         }
         .login-orb-3 {
             width: 200px; height: 200px;
-            background: #06b6d4;
+            background: var(--login-gradient-to, #a78bfa);
             top: 40%; left: 60%;
             animation: login-orb-float 12s ease-in-out infinite reverse;
         }
         .login-input {
             background: rgba(255,255,255,0.08) !important;
-            border: 1px solid rgba(255,255,255,0.15) !important;
-            transition: all 0.3s ease !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
+            transition: all 0.2s ease !important;
         }
         .login-input:focus {
             background: rgba(255,255,255,0.12) !important;
-            border-color: rgba(255,255,255,0.35) !important;
-            box-shadow: 0 0 0 3px rgba(135,116,225,0.15) !important;
+            border-color: var(--tg-primary, #8774e1) !important;
+            box-shadow: 0 0 0 3px rgba(135,116,225,0.2) !important;
         }
         .login-btn {
             position: relative;
@@ -809,6 +813,33 @@
             opacity: 0;
             pointer-events: none;
         }
+
+        /* Mobile viewport height (iOS Safari address bar fix) */
+        .h-full-vh { height: 100vh; height: calc(var(--vh, 1vh) * 100); }
+
+        /* Mobile responsive overrides */
+        @media (max-width: 768px) {
+            /* Settings modal: full-screen on mobile */
+            .settings-modal-overlay > div {
+                width: 100% !important;
+                height: 100% !important;
+                max-width: 100% !important;
+                max-height: 100% !important;
+                border-radius: 0 !important;
+                margin: 0 !important;
+            }
+            /* Profile sidebar: full-screen overlay on mobile */
+            .profile-sidebar-mobile {
+                position: fixed !important;
+                inset: 0 !important;
+                width: 100% !important;
+                z-index: 50;
+            }
+            /* Ensure touch targets are at least 44px */
+            .touch-target-mobile { min-width: 44px; min-height: 44px; }
+            /* Message composer: safe area padding */
+            .composer-mobile { padding-bottom: var(--sab, 0px); }
+        }
     </style>
     <script>
         tailwind.config = {
@@ -836,24 +867,25 @@
     </script>
 </head>
 
-<body class="text-white h-screen overflow-hidden login-bg-animated" style="background-image: linear-gradient(135deg, var(--login-gradient-from), var(--login-gradient-via), var(--login-gradient-to))">
-    <div id="app" class="w-full h-full">
+<body class="text-white h-screen h-full-vh overflow-hidden login-bg-animated" style="background-image: linear-gradient(135deg, var(--login-gradient-from), var(--login-gradient-via), var(--login-gradient-to))">
+    <div id="app" class="w-full h-full h-full-vh">
         <!-- Login Page -->
-        <div v-if="!isAuthenticated" class="w-full h-full flex items-center justify-center relative overflow-hidden">
-            <!-- Floating background orbs -->
+        <div v-if="!isAuthenticated" class="w-full h-full flex items-center justify-center relative overflow-hidden"
+            style="background: var(--tg-bg, #181818);">
+            <!-- Floating background orbs (theme-aware) -->
             <div class="login-orb login-orb-1"></div>
             <div class="login-orb login-orb-2"></div>
             <div class="login-orb login-orb-3"></div>
 
-            <div class="login-card-enter backdrop-blur-xl rounded-3xl shadow-2xl p-10 sm:p-12 w-full max-w-[420px] mx-4 relative z-10"
-                style="background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);">
+            <div class="login-card-enter backdrop-blur-xl rounded-2xl shadow-2xl p-6 sm:p-10 w-full max-w-[400px] mx-4 relative z-10"
+                style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);">
 
                 <!-- Telegram Logo -->
-                <div class="flex justify-center mb-6">
-                    <div class="login-logo-float relative" style="width:5rem;height:5rem;">
-                        <div class="absolute inset-0 rounded-full" style="background: radial-gradient(circle, rgba(135,116,225,0.3) 0%, transparent 70%); filter: blur(12px);"></div>
+                <div class="flex justify-center mb-5">
+                    <div class="login-logo-float relative" style="width:4.5rem;height:4.5rem;">
+                        <div class="absolute inset-[-6px] rounded-full" style="background: radial-gradient(circle, var(--tg-primary, #8774e1) 0%, transparent 70%); filter: blur(14px); opacity: 0.35;"></div>
                         <div class="relative w-full h-full bg-white rounded-full flex items-center justify-center shadow-lg">
-                            <svg viewBox="0 0 240 240" width="50" height="50" xmlns="http://www.w3.org/2000/svg">
+                            <svg viewBox="0 0 240 240" width="44" height="44" xmlns="http://www.w3.org/2000/svg">
                                 <defs><linearGradient id="tg-grad" x1="50%" y1="0%" x2="50%" y2="100%"><stop offset="0%" stop-color="#37AEE2"/><stop offset="100%" stop-color="#1E96C8"/></linearGradient></defs>
                                 <circle cx="120" cy="120" r="120" fill="url(#tg-grad)"/>
                                 <path d="M98 175c-3.9 0-3.2-1.5-4.6-5.2L82 132.2 176 80" fill="#C8DAEA"/>
@@ -864,67 +896,114 @@
                     </div>
                 </div>
 
-                <h1 class="text-2xl sm:text-3xl font-bold mb-1 text-center text-white tracking-tight">Telegram Archive</h1>
-                <p class="text-sm mb-8 text-center" v-if="authRequired" style="color: rgba(255,255,255,0.55);">
+                <h1 class="text-2xl font-semibold mb-1 text-center text-white tracking-tight" style="font-family: Inter, system-ui, sans-serif;">Telegram Archive</h1>
+                <p class="text-xs mb-6 text-center" v-if="authRequired" style="color: rgba(255,255,255,0.45);">
                     Sign in to access your backup
                 </p>
-                <p class="text-sm text-amber-200/80 mb-8 text-center" v-else-if="authCheckFailed">
+                <p class="text-xs text-amber-200/80 mb-6 text-center" v-else-if="authCheckFailed">
                     Could not verify authentication. Try opening in your browser.
                 </p>
-                <p class="text-sm mb-8 text-center" v-else style="color: rgba(255,255,255,0.55);">
+                <p class="text-xs mb-6 text-center" v-else style="color: rgba(255,255,255,0.45);">
                     Authentication is disabled
                 </p>
 
-                <form @submit.prevent="performLogin" class="space-y-4" v-if="authRequired || authCheckFailed">
+                <!-- Backup Profile Selector (v11.1 — compact dropdown, always visible) -->
+                <div v-if="backupProfiles.length > 0" class="mb-5 relative">
+                    <!-- Dropdown trigger button -->
+                    <button type="button" @click="profileDropdownOpen = !profileDropdownOpen"
+                        class="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all duration-200"
+                        :style="{
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '1.5px solid ' + (profileDropdownOpen ? (selectedProfile?.color || 'var(--tg-primary)') : 'rgba(255,255,255,0.08)')
+                        }">
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                            :style="{ background: selectedProfile?.color || 'var(--tg-primary, #8774e1)' }">
+                            <i :class="'fas fa-' + (selectedProfile?.icon || 'database')" class="text-white text-[10px]"></i>
+                        </div>
+                        <div class="min-w-0 flex-1 text-left">
+                            <div class="text-sm font-medium text-white truncate">{{ selectedProfile?.name || 'Select Profile' }}</div>
+                        </div>
+                        <i class="fas fa-chevron-down text-[10px] transition-transform duration-200"
+                            :style="{ color: 'rgba(255,255,255,0.35)', transform: profileDropdownOpen ? 'rotate(180deg)' : '' }"></i>
+                    </button>
+                    <!-- Dropdown list -->
+                    <div v-if="profileDropdownOpen && backupProfiles.length > 1"
+                        class="absolute left-0 right-0 mt-1.5 rounded-xl overflow-hidden z-50 shadow-lg max-h-48 overflow-y-auto custom-scroll"
+                        style="background: var(--tg-bg, #181818); border: 1.5px solid rgba(255,255,255,0.1);">
+                        <div v-for="profile in backupProfiles" :key="profile.id"
+                            @click="selectProfile(profile); profileDropdownOpen = false"
+                            class="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer transition-all duration-150"
+                            :style="{
+                                background: selectedProfile?.id === profile.id ? 'rgba(255,255,255,0.08)' : 'transparent'
+                            }"
+                            @mouseenter="$event.target.style.background = 'rgba(255,255,255,0.06)'"
+                            @mouseleave="$event.target.style.background = selectedProfile?.id === profile.id ? 'rgba(255,255,255,0.08)' : 'transparent'">
+                            <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                                :style="{ background: profile.color || 'var(--tg-primary, #8774e1)' }">
+                                <i :class="'fas fa-' + (profile.icon || 'database')" class="text-white text-[10px]"></i>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm font-medium text-white truncate">{{ profile.name }}</div>
+                                <div v-if="profile.description" class="text-[11px] truncate" style="color: rgba(255,255,255,0.35);">{{ profile.description }}</div>
+                            </div>
+                            <i v-if="selectedProfile?.id === profile.id" class="fas fa-check text-[10px]"
+                                :style="{ color: profile.color || 'var(--tg-primary)' }"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <form @submit.prevent="performLogin" @click="profileDropdownOpen = false" class="space-y-3.5" v-if="authRequired || authCheckFailed">
                     <!-- Login mode toggle -->
-                    <div class="flex rounded-xl overflow-hidden p-0.5" style="background: rgba(255,255,255,0.06);">
+                    <div class="flex rounded-xl overflow-hidden p-0.5" style="background: rgba(255,255,255,0.05);">
                         <button type="button" @click="loginMode = 'password'"
                             :class="loginMode === 'password' ? 'bg-white/15 shadow-sm' : 'hover:bg-white/5'"
-                            class="flex-1 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg"
-                            :style="{ color: loginMode === 'password' ? '#fff' : 'rgba(255,255,255,0.5)' }">
-                            <i class="fas fa-lock text-xs mr-1.5"></i>Password
+                            class="flex-1 py-2 text-[13px] font-medium transition-all duration-200 rounded-lg"
+                            :style="{ color: loginMode === 'password' ? '#fff' : 'rgba(255,255,255,0.4)' }"
+                            aria-label="Login with password">
+                            <i class="fas fa-lock text-[10px] mr-1.5"></i>Password
                         </button>
                         <button type="button" @click="loginMode = 'token'"
                             :class="loginMode === 'token' ? 'bg-white/15 shadow-sm' : 'hover:bg-white/5'"
-                            class="flex-1 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg"
-                            :style="{ color: loginMode === 'token' ? '#fff' : 'rgba(255,255,255,0.5)' }">
-                            <i class="fas fa-key text-xs mr-1.5"></i>Share Token
+                            class="flex-1 py-2 text-[13px] font-medium transition-all duration-200 rounded-lg"
+                            :style="{ color: loginMode === 'token' ? '#fff' : 'rgba(255,255,255,0.4)' }"
+                            aria-label="Login with share token">
+                            <i class="fas fa-key text-[10px] mr-1.5"></i>Token
                         </button>
                     </div>
 
                     <!-- Password login -->
                     <template v-if="loginMode === 'password'">
                         <div>
-                            <label class="block text-xs font-medium mb-1.5" style="color: rgba(255,255,255,0.5);">Username</label>
-                            <input v-model="loginForm.username" type="text" autocomplete="username"
+                            <label class="block text-[11px] font-medium mb-1" style="color: rgba(255,255,255,0.4);">Username</label>
+                            <input v-model="loginForm.username" type="text" autocomplete="username" inputmode="text"
                                 placeholder="Enter your username"
-                                class="login-input w-full text-white placeholder-white/25 rounded-xl px-4 py-3 text-sm focus:outline-none backdrop-blur-sm">
+                                class="login-input w-full text-white placeholder-white/20 rounded-xl px-4 py-2.5 text-sm focus:outline-none">
                         </div>
                         <div>
-                            <label class="block text-xs font-medium mb-1.5" style="color: rgba(255,255,255,0.5);">Password</label>
+                            <label class="block text-[11px] font-medium mb-1" style="color: rgba(255,255,255,0.4);">Password</label>
                             <input v-model="loginForm.password" type="password" autocomplete="current-password"
                                 placeholder="Enter your password"
-                                class="login-input w-full text-white placeholder-white/25 rounded-xl px-4 py-3 text-sm focus:outline-none backdrop-blur-sm">
+                                class="login-input w-full text-white placeholder-white/20 rounded-xl px-4 py-2.5 text-sm focus:outline-none">
                         </div>
                     </template>
 
                     <!-- Token login -->
                     <template v-else>
                         <div>
-                            <label class="block text-xs font-medium mb-1.5" style="color: rgba(255,255,255,0.5);">Share Token</label>
+                            <label class="block text-[11px] font-medium mb-1" style="color: rgba(255,255,255,0.4);">Share Token</label>
                             <input v-model="tokenInput" type="text" autocomplete="off"
                                 placeholder="Paste your share token"
-                                class="login-input w-full text-white placeholder-white/25 rounded-xl px-4 py-3 text-sm focus:outline-none backdrop-blur-sm font-mono">
+                                class="login-input w-full text-white placeholder-white/20 rounded-xl px-4 py-2.5 text-sm focus:outline-none font-mono">
                         </div>
                     </template>
 
-                    <p v-if="loginError" class="text-sm text-red-200 rounded-xl p-2.5 text-center" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.2);" aria-live="polite">
+                    <p v-if="loginError" class="text-xs text-red-200 rounded-lg p-2.5 text-center" style="background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.15);" aria-live="polite">
                         {{ loginError }}
                     </p>
 
                     <button type="submit" :disabled="loadingAuth"
-                        class="login-btn w-full text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none rounded-xl py-3.5 font-semibold text-sm tracking-wide shadow-lg"
-                        style="background: linear-gradient(135deg, #8774e1, #6c5ce7, #5b4cdb); margin-top: 1.5rem !important;">
+                        class="login-btn w-full text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none rounded-xl py-3 font-semibold text-sm tracking-wide shadow-lg"
+                        :style="{ background: 'linear-gradient(135deg, var(--login-gradient-from, #8774e1), var(--login-gradient-via, #6c5ce7), var(--login-gradient-to, #5b4cdb))', marginTop: '1rem' }">
                         <span v-if="loadingAuth" class="flex items-center justify-center gap-2">
                             <span class="login-spinner"></span>
                             Signing in...
@@ -934,8 +1013,8 @@
                 </form>
 
                 <!-- Footer -->
-                <div class="mt-8 text-center">
-                    <p class="text-[10px] tracking-widest uppercase" style="color: rgba(255,255,255,0.2);">Encrypted & Private</p>
+                <div class="mt-6 text-center">
+                    <p class="text-[10px] tracking-widest uppercase" style="color: rgba(255,255,255,0.15);">Encrypted & Private</p>
                 </div>
             </div>
         </div>
@@ -1304,7 +1383,8 @@
                                         <span class="text-xs truncate" style="color: var(--tg-muted);">in {{ chats.find(c => c.id === result.chat_id)?.title || 'Chat ' + result.chat_id }}</span>
                                         <span class="text-xs ml-auto shrink-0" style="color: var(--tg-muted);">{{ result.date ? new Date(result.date).toLocaleDateString() : '' }}</span>
                                     </div>
-                                    <div class="text-xs truncate" style="color: var(--tg-muted);" v-html="result.snippet || (result.text || '').substring(0, 100)"></div>
+                                    <div v-if="result.snippet" class="text-xs truncate" style="color: var(--tg-muted);" v-html="result.snippet"></div>
+                                    <div v-else class="text-xs truncate" style="color: var(--tg-muted);">{{ (result.text || '').substring(0, 100) }}</div>
                                 </div>
                             </template>
                         </div>
@@ -1350,7 +1430,7 @@
                         <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                             <!-- Back Button (mobile only) -->
                             <button @click="currentNav.type === 'chat' && currentNav.topicId ? navigateBack() : selectedChat = null"
-                                class="md:hidden p-2 -ml-2 text-gray-400 hover:text-white" aria-label="Go back">
+                                class="md:hidden p-2 -ml-2 text-gray-400 hover:text-white touch-target-mobile" aria-label="Go back">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M15 19l-7-7 7-7"></path>
@@ -1615,7 +1695,7 @@
                     </div>
 
                     <!-- Profile Sidebar (Phase 6) -->
-                    <div v-if="showProfilePanel" class="absolute inset-y-0 right-0 w-80 z-30 flex flex-col border-l overflow-y-auto" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                    <div v-if="showProfilePanel" class="absolute inset-y-0 right-0 w-80 md:w-80 z-30 flex flex-col border-l overflow-y-auto profile-sidebar-mobile" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
                         <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
                             <button @click="showProfilePanel = false" class="text-tg-muted hover:text-white"><i class="fas fa-times"></i></button>
                             <span class="font-semibold text-white text-sm">Profile</span>
@@ -1652,8 +1732,8 @@
                                 <i class="fab fa-telegram w-5 text-center text-tg-muted"></i> Open in Telegram
                             </button>
                         </div>
-                        <!-- OCR Controls (admin only) -->
-                        <div v-if="userRole === 'master' && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                        <!-- OCR Controls (admin or above) -->
+                        <div v-if="isMasterOrAbove && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
                             <div class="text-xs text-tg-muted mb-1">AI Features</div>
                             <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
                                 <div class="flex items-center gap-2 text-sm text-gray-300">
@@ -1685,8 +1765,8 @@
                                 </div>
                             </div>
                         </div>
-                        <!-- Semantic Search Embeddings (admin only) -->
-                        <div v-if="userRole === 'master' && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                        <!-- Semantic Search Embeddings (admin or above) -->
+                        <div v-if="isMasterOrAbove && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
                             <div class="text-xs text-tg-muted mb-1">Semantic Search</div>
                             <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
                                 <div class="flex items-center gap-2 text-sm text-gray-300">
@@ -2392,12 +2472,19 @@
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-robot mr-1.5 text-xs"></i>AI
                     </button>
-                    <button v-if="authRequired && isAuthenticated && userRole === 'master'"
-                        @click="settingsActiveTab = 'admin'; adminActiveTab = 'ai-models'; loadAiConfig()"
+                    <button v-if="authRequired && isAuthenticated && isAdminOrAbove"
+                        @click="settingsActiveTab = 'admin'; if (isMasterOrAbove) { adminActiveTab = 'ai-models'; loadAiConfig() } else { adminActiveTab = 'viewers'; loadAdminViewers(); loadAdminChats() }"
                         :class="settingsActiveTab === 'admin' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'admin' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-shield-alt mr-1.5 text-xs"></i>Admin
+                    </button>
+                    <button v-if="authRequired && isAuthenticated && isSuperAdmin"
+                        @click="settingsActiveTab = 'super-admin'; superAdminTab = 'profiles'; loadManagedProfiles()"
+                        :class="settingsActiveTab === 'super-admin' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
+                        :style="{color: settingsActiveTab === 'super-admin' ? '' : 'var(--tg-muted)'}"
+                        class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                        <i class="fas fa-crown mr-1.5 text-xs"></i>Super Admin
                     </button>
                 </div>
                 <!-- Content -->
@@ -2555,17 +2642,17 @@
                         </div>
                     </div>
 
-                    <!-- Admin Tab (master only) -->
-                    <div v-if="settingsActiveTab === 'admin' && authRequired && isAuthenticated && userRole === 'master'">
-                        <!-- Admin sub-tabs -->
+                    <!-- Admin Tab (admin or above) -->
+                    <div v-if="settingsActiveTab === 'admin' && authRequired && isAuthenticated && isAdminOrAbove">
+                        <!-- Admin sub-tabs (role-aware: admin sees Viewers/Tokens/Audit only) -->
                         <div class="flex flex-wrap mb-4 -mt-2" style="border-bottom: 1px solid var(--tg-border);">
-                            <button @click="adminActiveTab = 'ai-models'; loadAiConfig()" :class="adminActiveTab === 'ai-models' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'ai-models' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'ai-models'; loadAiConfig()" :class="adminActiveTab === 'ai-models' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'ai-models' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 AI Models
                             </button>
-                            <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Listener
                             </button>
-                            <button @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Backup
                             </button>
                             <button @click="adminActiveTab = 'viewers'; loadAdminViewers(); loadAdminChats()" :class="adminActiveTab === 'viewers' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
@@ -2891,7 +2978,7 @@
                             <div class="space-y-1">
                                 <div v-for="log in adminAuditLogs" :key="log.id" class="flex items-center gap-3 text-xs rounded px-3 py-2" style="background: var(--tg-bg);">
                                     <span class="w-36 shrink-0" style="color: var(--tg-muted);">{{ new Date(log.created_at).toLocaleString() }}</span>
-                                    <span :class="{'text-yellow-400': log.role === 'master', 'text-blue-400': log.role === 'viewer', 'text-purple-400': log.role === 'token'}" class="w-16 shrink-0">{{ log.role }}</span>
+                                    <span :class="{'text-amber-400': log.role === 'super_admin', 'text-yellow-400': log.role === 'master' || log.role === 'admin', 'text-blue-400': log.role === 'viewer', 'text-purple-400': log.role === 'token'}" class="w-20 shrink-0">{{ log.role }}</span>
                                     <span class="w-24 shrink-0 truncate" style="color: var(--tg-text);">{{ log.username }}</span>
                                     <span class="flex-1 truncate" style="color: var(--tg-muted);">{{ log.action }}</span>
                                     <span class="truncate w-28" style="color: var(--tg-muted); opacity: 0.6;">{{ log.ip_address }}</span>
@@ -3004,6 +3091,136 @@
                         </div>
                     </div>
 
+                    <!-- Super Admin Tab (super_admin only) -->
+                    <div v-if="settingsActiveTab === 'super-admin' && authRequired && isAuthenticated && isSuperAdmin">
+                        <!-- Sub-tabs -->
+                        <div class="flex flex-wrap mb-4 -mt-2" style="border-bottom: 1px solid var(--tg-border);">
+                            <button @click="superAdminTab = 'profiles'; loadManagedProfiles()" :class="superAdminTab === 'profiles' ? 'border-current text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: superAdminTab === 'profiles' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                <i class="fas fa-database mr-1 text-xs"></i>Profiles
+                            </button>
+                            <button @click="superAdminTab = 'admins'; loadManagedAdmins()" :class="superAdminTab === 'admins' ? 'border-current text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: superAdminTab === 'admins' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                <i class="fas fa-users-cog mr-1 text-xs"></i>Admins
+                            </button>
+                        </div>
+
+                        <!-- Profiles Management -->
+                        <div v-if="superAdminTab === 'profiles'" class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Backup Profiles</div>
+                            </div>
+                            <div v-if="saError" class="text-xs text-red-400 px-3 py-2 rounded-lg" style="background: rgba(239,68,68,0.1);">{{ saError }}</div>
+
+                            <!-- Profile form -->
+                            <div class="rounded-xl p-4 space-y-3" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="text-xs font-medium" style="color: var(--tg-muted);">{{ saEditingProfileId ? 'Edit Profile' : 'New Profile' }}</div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <input v-model="saProfileForm.id" :disabled="!!saEditingProfileId" placeholder="ID (slug)" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="saProfileForm.name" placeholder="Display Name" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                </div>
+                                <input v-model="saProfileForm.description" placeholder="Description (optional)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                <div class="grid grid-cols-3 gap-2">
+                                    <input v-model="saProfileForm.icon" placeholder="Icon (FA name)" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <div class="flex items-center gap-2">
+                                        <input type="color" v-model="saProfileForm.color" class="w-8 h-8 rounded cursor-pointer border-0">
+                                        <span class="text-xs" style="color: var(--tg-muted);">{{ saProfileForm.color }}</span>
+                                    </div>
+                                    <input v-model="saProfileForm.url" placeholder="URL (optional)" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                </div>
+                                <div class="flex gap-2">
+                                    <button @click="saveProfile" class="px-4 py-2 rounded-lg text-sm font-medium text-white" style="background: var(--tg-accent);">
+                                        <i :class="saEditingProfileId ? 'fas fa-save' : 'fas fa-plus'" class="mr-1 text-xs"></i>{{ saEditingProfileId ? 'Update' : 'Create' }}
+                                    </button>
+                                    <button v-if="saEditingProfileId" @click="cancelProfileEdit" class="px-4 py-2 rounded-lg text-sm" style="color: var(--tg-muted); background: var(--tg-hover);">Cancel</button>
+                                </div>
+                            </div>
+
+                            <!-- Profile list -->
+                            <div v-for="p in managedProfiles" :key="p.id" class="flex items-center gap-3 rounded-xl p-3" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" :style="{ background: p.color || '#8774e1' }">
+                                    <i :class="'fas fa-' + (p.icon || 'database')" class="text-white text-xs"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-sm font-medium truncate" style="color: var(--tg-text);">{{ p.name }}</div>
+                                    <div class="text-[11px] truncate" style="color: var(--tg-muted);">{{ p.id }} {{ p.description ? '— ' + p.description : '' }}</div>
+                                </div>
+                                <button @click="editProfile(p)" class="p-1.5 rounded hover:bg-white/10" style="color: var(--tg-muted);" title="Edit">
+                                    <i class="fas fa-pen text-xs"></i>
+                                </button>
+                                <button @click="deleteProfile(p.id)" class="p-1.5 rounded hover:bg-red-500/20 text-red-400" title="Delete">
+                                    <i class="fas fa-trash text-xs"></i>
+                                </button>
+                            </div>
+                            <div v-if="!managedProfiles.length" class="text-center py-6 text-sm" style="color: var(--tg-muted);">No profiles configured yet.</div>
+                        </div>
+
+                        <!-- Admins Management -->
+                        <div v-if="superAdminTab === 'admins'" class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Admin Accounts</div>
+                            </div>
+                            <div v-if="saError" class="text-xs text-red-400 px-3 py-2 rounded-lg" style="background: rgba(239,68,68,0.1);">{{ saError }}</div>
+
+                            <!-- Admin form -->
+                            <div class="rounded-xl p-4 space-y-3" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="text-xs font-medium" style="color: var(--tg-muted);">{{ saEditingAdminId ? 'Edit Admin' : 'New Admin' }}</div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <input v-model="saAdminForm.username" :disabled="!!saEditingAdminId" placeholder="Username" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="saAdminForm.password" type="password" :placeholder="saEditingAdminId ? 'New password (blank=keep)' : 'Password'" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <select v-model="saAdminForm.role" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="admin">Admin</option>
+                                        <option value="super_admin">Super Admin</option>
+                                    </select>
+                                    <input v-model="saAdminForm.display_name" placeholder="Display Name (optional)" class="rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                </div>
+                                <input v-model="saAdminForm.email" type="email" placeholder="Email (optional, for recovery)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                <!-- Profile assignment (for admin role) -->
+                                <div v-if="saAdminForm.role === 'admin' && managedProfiles.length" class="space-y-1">
+                                    <div class="text-xs font-medium" style="color: var(--tg-muted);">Assigned Profiles</div>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        <label v-for="p in managedProfiles" :key="p.id" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition-colors"
+                                            :style="{ background: saAdminForm.allowed_profile_ids.includes(p.id) ? (p.color || 'var(--tg-accent)') + '22' : 'var(--tg-hover)', border: '1px solid ' + (saAdminForm.allowed_profile_ids.includes(p.id) ? (p.color || 'var(--tg-accent)') : 'var(--tg-border)') }">
+                                            <input type="checkbox" :value="p.id" v-model="saAdminForm.allowed_profile_ids" class="sr-only">
+                                            <div class="w-4 h-4 rounded flex items-center justify-center" :style="{ background: p.color || '#8774e1' }">
+                                                <i :class="'fas fa-' + (p.icon || 'database')" class="text-white" style="font-size: 8px;"></i>
+                                            </div>
+                                            <span style="color: var(--tg-text);">{{ p.name }}</span>
+                                            <i v-if="saAdminForm.allowed_profile_ids.includes(p.id)" class="fas fa-check text-[10px]" style="color: var(--tg-accent);"></i>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="flex gap-2">
+                                    <button @click="saveAdmin" class="px-4 py-2 rounded-lg text-sm font-medium text-white" style="background: var(--tg-accent);">
+                                        <i :class="saEditingAdminId ? 'fas fa-save' : 'fas fa-plus'" class="mr-1 text-xs"></i>{{ saEditingAdminId ? 'Update' : 'Create' }}
+                                    </button>
+                                    <button v-if="saEditingAdminId" @click="cancelAdminEdit" class="px-4 py-2 rounded-lg text-sm" style="color: var(--tg-muted); background: var(--tg-hover);">Cancel</button>
+                                </div>
+                            </div>
+
+                            <!-- Admin list -->
+                            <div v-for="admin in managedAdmins" :key="admin.id" class="flex items-center gap-3 rounded-xl p-3" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0" :style="{ background: admin.role === 'super_admin' ? '#f59e0b' : 'var(--tg-accent)' }">
+                                    <i :class="admin.role === 'super_admin' ? 'fas fa-crown' : 'fas fa-user-shield'" class="text-white text-xs"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-sm font-medium truncate" style="color: var(--tg-text);">{{ admin.display_name || admin.username }}</div>
+                                    <div class="text-[11px]" style="color: var(--tg-muted);">
+                                        @{{ admin.username }} · {{ admin.role }}
+                                        <template v-if="admin.profile_names && admin.profile_names !== 'All'"> · {{ admin.profile_names }}</template>
+                                    </div>
+                                </div>
+                                <button @click="editAdmin(admin)" class="p-1.5 rounded hover:bg-white/10" style="color: var(--tg-muted);" title="Edit">
+                                    <i class="fas fa-pen text-xs"></i>
+                                </button>
+                                <button @click="deleteAdmin(admin.id)" class="p-1.5 rounded hover:bg-red-500/20 text-red-400" title="Delete">
+                                    <i class="fas fa-trash text-xs"></i>
+                                </button>
+                            </div>
+                            <div v-if="!managedAdmins.length" class="text-center py-6 text-sm" style="color: var(--tg-muted);">No admin accounts yet.</div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </div>
@@ -3089,6 +3306,28 @@
                 const loginMode = ref('password') // 'password' or 'token'
                 const tokenInput = ref('')
 
+                // v11.0: Role hierarchy helpers — super_admin absorbs all master powers
+                const ROLE_LEVELS = { token: 0, viewer: 1, admin: 2, master: 3, super_admin: 4 }
+                const isAdminOrAbove = Vue.computed(() => (ROLE_LEVELS[userRole.value] || 0) >= ROLE_LEVELS.admin)
+                const isSuperAdmin = Vue.computed(() => (ROLE_LEVELS[userRole.value] || 0) >= ROLE_LEVELS.super_admin)
+                const isMasterOrAbove = Vue.computed(() => (ROLE_LEVELS[userRole.value] || 0) >= ROLE_LEVELS.master)
+
+                // Backup profile selector (v10.0)
+                const backupProfiles = ref([])
+                const selectedProfile = ref(null)
+                const profileDropdownOpen = ref(false)
+                const showProfileSelector = ref(false)
+
+                // v11.0: Super Admin panel state
+                const superAdminTab = ref('profiles') // 'profiles' | 'admins' | 'login-design'
+                const managedProfiles = ref([])
+                const managedAdmins = ref([])
+                const saProfileForm = ref({ id: '', name: '', description: '', icon: 'database', color: '#8774e1', url: '' })
+                const saAdminForm = ref({ username: '', password: '', role: 'admin', display_name: '', email: '', allowed_profile_ids: [] })
+                const saEditingProfileId = ref(null)
+                const saEditingAdminId = ref(null)
+                const saError = ref('')
+
                 // Theme system
                 const themePresets = [
                     { id: 'midnight', label: 'Telegram Dark', preview: '#212121', type: 'dark' },
@@ -3151,9 +3390,12 @@
                 const openSettings = (tab) => {
                     settingsActiveTab.value = tab || 'appearance'
                     showSettingsModal.value = true
-                    if (settingsActiveTab.value === 'admin' && userRole.value === 'master') {
-                        adminActiveTab.value = 'ai-models'
-                        loadAiConfig()
+                    if (settingsActiveTab.value === 'admin' && isAdminOrAbove.value) {
+                        if (isMasterOrAbove.value) { adminActiveTab.value = 'ai-models'; loadAiConfig() }
+                        else { adminActiveTab.value = 'viewers'; loadAdminViewers(); loadAdminChats() }
+                    }
+                    if (settingsActiveTab.value === 'super-admin' && isSuperAdmin.value) {
+                        superAdminTab.value = 'profiles'; loadManagedProfiles()
                     }
                 }
                 // AI Assistant panel state
@@ -3345,7 +3587,7 @@
                 let _ocrPollTimer = null
 
                 const loadOcrStatus = async () => {
-                    if (!selectedChat.value || userRole.value !== 'master') return
+                    if (!selectedChat.value || !isMasterOrAbove.value) return
                     try {
                         const res = await fetch(`/api/admin/chats/${selectedChat.value.id}/ocr/status`, { credentials: 'include' })
                         if (res.ok) {
@@ -4220,6 +4462,11 @@
                                 }
                             }
 
+                            // Load profile selector if not yet authenticated
+                            if (!isAuthenticated.value) {
+                                loadProfiles()  // fire-and-forget, non-blocking
+                            }
+
                             if (isAuthenticated.value) {
                                 await loadChats()
                                 await loadStats()
@@ -4663,6 +4910,122 @@
                     }
                 })
 
+                // Load backup profiles for multi-instance selector (v10.0, v11.0: always visible)
+                const loadProfiles = async () => {
+                    try {
+                        const res = await fetch('/api/profiles')
+                        if (res.ok) {
+                            const data = await res.json()
+                            backupProfiles.value = data.profiles || []
+                            showProfileSelector.value = backupProfiles.value.length > 0
+                            const lastId = localStorage.getItem('tg-last-profile')
+                            const last = backupProfiles.value.find(p => p.id === lastId)
+                            selectedProfile.value = last || backupProfiles.value[0] || null
+                        }
+                    } catch { /* profiles endpoint not available — single instance */ }
+                }
+                const selectProfile = (profile) => {
+                    selectedProfile.value = profile
+                    localStorage.setItem('tg-last-profile', profile.id)
+                    // External profile URL: redirect to that viewer instance
+                    if (profile.url && profile.url !== '/' && profile.url !== window.location.origin + '/') {
+                        window.location.href = profile.url
+                    }
+                }
+
+                // v11.0: Super Admin — Profile CRUD
+                const loadManagedProfiles = async () => {
+                    try {
+                        const res = await fetch('/api/admin/profiles', { credentials: 'include' })
+                        if (res.ok) { managedProfiles.value = (await res.json()).profiles || [] }
+                    } catch (e) { console.error('Failed to load profiles:', e) }
+                }
+                const saveProfile = async () => {
+                    saError.value = ''
+                    const form = saProfileForm.value
+                    if (!form.id || !form.name) { saError.value = 'ID and Name are required'; return }
+                    try {
+                        const isEdit = !!saEditingProfileId.value
+                        const url = isEdit ? `/api/admin/profiles/${saEditingProfileId.value}` : '/api/admin/profiles'
+                        const method = isEdit ? 'PUT' : 'POST'
+                        const res = await fetch(url, {
+                            method, credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(form)
+                        })
+                        if (!res.ok) { const d = await res.json().catch(() => ({})); saError.value = d.detail || 'Failed'; return }
+                        cancelProfileEdit()
+                        await loadManagedProfiles()
+                    } catch (e) { saError.value = e.message }
+                }
+                const editProfile = (p) => {
+                    saEditingProfileId.value = p.id
+                    saProfileForm.value = { id: p.id, name: p.name, description: p.description || '', icon: p.icon || 'database', color: p.color || '#8774e1', url: p.url || '' }
+                }
+                const cancelProfileEdit = () => {
+                    saEditingProfileId.value = null
+                    saProfileForm.value = { id: '', name: '', description: '', icon: 'database', color: '#8774e1', url: '' }
+                    saError.value = ''
+                }
+                const deleteProfile = async (id) => {
+                    if (!confirm('Delete this profile? This cannot be undone.')) return
+                    try {
+                        await fetch(`/api/admin/profiles/${id}`, { method: 'DELETE', credentials: 'include' })
+                        await loadManagedProfiles()
+                    } catch (e) { saError.value = e.message }
+                }
+
+                // v11.0: Super Admin — Admin Account CRUD
+                const loadManagedAdmins = async () => {
+                    try {
+                        const res = await fetch('/api/admin/admins', { credentials: 'include' })
+                        if (res.ok) { managedAdmins.value = (await res.json()).admins || [] }
+                    } catch (e) { console.error('Failed to load admins:', e) }
+                }
+                const saveAdmin = async () => {
+                    saError.value = ''
+                    const form = saAdminForm.value
+                    if (!form.username) { saError.value = 'Username is required'; return }
+                    if (!saEditingAdminId.value && !form.password) { saError.value = 'Password is required for new accounts'; return }
+                    try {
+                        const isEdit = !!saEditingAdminId.value
+                        const url = isEdit ? `/api/admin/admins/${saEditingAdminId.value}` : '/api/admin/admins'
+                        const method = isEdit ? 'PUT' : 'POST'
+                        const payload = { ...form }
+                        if (isEdit && !payload.password) delete payload.password
+                        const res = await fetch(url, {
+                            method, credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        })
+                        if (!res.ok) { const d = await res.json().catch(() => ({})); saError.value = d.detail || 'Failed'; return }
+                        cancelAdminEdit()
+                        await loadManagedAdmins()
+                    } catch (e) { saError.value = e.message }
+                }
+                const editAdmin = (admin) => {
+                    saEditingAdminId.value = admin.id
+                    let pids = admin.allowed_profile_ids || []
+                    if (typeof pids === 'string') { try { pids = JSON.parse(pids) } catch { pids = [] } }
+                    saAdminForm.value = {
+                        username: admin.username, password: '', role: admin.role,
+                        display_name: admin.display_name || '', email: admin.email || '',
+                        allowed_profile_ids: pids
+                    }
+                }
+                const cancelAdminEdit = () => {
+                    saEditingAdminId.value = null
+                    saAdminForm.value = { username: '', password: '', role: 'admin', display_name: '', email: '', allowed_profile_ids: [] }
+                    saError.value = ''
+                }
+                const deleteAdmin = async (id) => {
+                    if (!confirm('Delete this admin account? This cannot be undone.')) return
+                    try {
+                        await fetch(`/api/admin/admins/${id}`, { method: 'DELETE', credentials: 'include' })
+                        await loadManagedAdmins()
+                    } catch (e) { saError.value = e.message }
+                }
+
                 const performLogin = async () => {
                     loginError.value = ''
                     loadingAuth.value = true
@@ -4701,7 +5064,7 @@
                         const data = await res.json()
                         if (data.success) {
                             isAuthenticated.value = true
-                            userRole.value = data.role || 'master'
+                            userRole.value = data.role || 'super_admin'
                             currentUsername.value = data.username || ''
                             noDownload.value = !!data.no_download
                             await loadChats()
@@ -6818,14 +7181,41 @@
                     loginForm,
                     loginError,
                     performLogin,
-                    // Admin (v7.0.0)
+                    // Admin (v7.0.0) + Role hierarchy (v11.0)
                     userRole,
+                    isAdminOrAbove,
+                    isSuperAdmin,
+                    isMasterOrAbove,
                     currentUsername,
                     noDownload,
                     showAdminPanel,
                     performLogout,
                     loginMode,
                     tokenInput,
+                    backupProfiles,
+                    selectedProfile,
+                    profileDropdownOpen,
+                    showProfileSelector,
+                    selectProfile,
+                    // v11.0: Super Admin
+                    superAdminTab,
+                    managedProfiles,
+                    managedAdmins,
+                    saProfileForm,
+                    saAdminForm,
+                    saEditingProfileId,
+                    saEditingAdminId,
+                    saError,
+                    loadManagedProfiles,
+                    saveProfile,
+                    editProfile,
+                    cancelProfileEdit,
+                    deleteProfile,
+                    loadManagedAdmins,
+                    saveAdmin,
+                    editAdmin,
+                    cancelAdminEdit,
+                    deleteAdmin,
                     adminViewers,
                     adminChats,
                     adminAuditLogs,
