@@ -135,7 +135,11 @@ db: DatabaseAdapter | None = None
 
 
 class ListenerManager:
-    """Manages Telegram listener lifecycle based on viewer presence (LISTENER_MODE=auto)."""
+    """Manages Telegram listener lifecycle based on viewer presence (LISTENER_MODE=auto).
+
+    In viewer-only containers (no Telethon/listener module), reports config
+    status without attempting to start the listener.
+    """
 
     def __init__(self, cfg: Config):
         self._config = cfg
@@ -144,6 +148,12 @@ class ListenerManager:
         self._grace_task: asyncio.Task | None = None
         self._status = "stopped"  # stopped | starting | running | stopping | grace_period
         self._lock = asyncio.Lock()
+        # Detect if listener module is available (not present in viewer-only containers)
+        try:
+            from ..listener import TelegramListener  # noqa: F401
+            self._listener_available = True
+        except (ImportError, ModuleNotFoundError):
+            self._listener_available = False
 
     @property
     def status(self) -> str:
@@ -185,6 +195,9 @@ class ListenerManager:
 
     async def _start(self):
         """Start the Telegram listener."""
+        if not self._listener_available:
+            # Viewer-only container — listener module not present
+            return
         async with self._lock:
             if self._status != "stopped":
                 return
@@ -286,6 +299,7 @@ async def _normalize_display_chat_ids():
 stats_task: asyncio.Task | None = None
 _session_cleanup_task: asyncio.Task | None = None
 _fts_task: asyncio.Task | None = None
+_post_backup_task: asyncio.Task | None = None
 
 # Real-time listener (PostgreSQL LISTEN/NOTIFY)
 realtime_listener: RealtimeListener | None = None
@@ -405,17 +419,17 @@ async def stats_calculation_scheduler():
 
 
 async def _fts_index_worker() -> None:
-    """Background worker: build/rebuild FTS5 index on startup."""
+    """Background worker: build FTS5 index on startup only."""
     try:
         await db.init_fts()
         status = await db.get_fts_status()
-        if status == "ready":
-            logger.info("FTS index already built, skipping rebuild")
-            return
-        await db.set_fts_status("building")
-        total = await db.rebuild_fts_index()
-        await db.set_fts_status("ready")
-        logger.info("FTS index build complete: %d messages indexed", total)
+        if status != "ready":
+            await db.set_fts_status("building")
+            total = await db.rebuild_fts_index()
+            await db.set_fts_status("ready")
+            logger.info("FTS index build complete: %d messages indexed", total)
+        else:
+            logger.info("FTS index ready")
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -424,6 +438,56 @@ async def _fts_index_worker() -> None:
             await db.set_fts_status("error")
         except Exception:
             pass
+
+
+async def _post_backup_watcher() -> None:
+    """Watch for backup completion and periodically index new content.
+
+    Two triggers:
+    - Backup completion: polls last_backup_time every 60s, runs FTS + thumbs on change
+    - OCR catch-up: every 30 min, picks up OCR/AI data generated between backups
+    """
+    last_seen = await db.get_metadata("last_backup_time") or ""
+    logger.info("Post-backup watcher started (last_backup_time=%s)", last_seen[:19] if last_seen else "none")
+
+    ticks = 0  # each tick = 60s
+    OCR_CATCHUP_TICKS = 30  # 30 min
+
+    while True:
+        await asyncio.sleep(60)
+        ticks += 1
+        try:
+            current = await db.get_metadata("last_backup_time") or ""
+            backup_changed = current and current != last_seen
+            ocr_catchup = ticks % OCR_CATCHUP_TICKS == 0
+
+            if backup_changed:
+                last_seen = current
+                logger.info("Backup completed — running post-backup tasks")
+
+            if backup_changed or ocr_catchup:
+                # Incremental FTS index (new messages + OCR/AI data)
+                try:
+                    added = await db.incremental_fts_index()
+                    if added:
+                        reason = "post-backup" if backup_changed else "OCR catch-up"
+                        logger.info("FTS incremental (%s): %d new rows indexed", reason, added)
+                except Exception as e:
+                    logger.warning("FTS incremental failed: %s", e)
+
+            if backup_changed and _media_root:
+                # Video thumbnail pre-generation (only after backup)
+                try:
+                    from .thumbnails import pregenerate_video_thumbnails
+                    count = await pregenerate_video_thumbnails(_media_root, size=400, max_items=200)
+                    if count:
+                        logger.info("Post-backup thumbnails: %d generated", count)
+                except Exception as e:
+                    logger.warning("Post-backup thumbnails failed: %s", e)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("Post-backup watcher error: %s", e)
 
 
 _OLLAMA_BASE = config.ollama_url.rstrip("/")  # host.docker.internal:11434 in Docker
@@ -572,7 +636,7 @@ async def _seed_ai_config_defaults():
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage application lifecycle - initialize and cleanup database."""
-    global db, stats_task, _session_cleanup_task, _fts_task
+    global db, stats_task, _session_cleanup_task, _fts_task, _post_backup_task
     logger.info("Initializing database connection...")
     db_manager = await init_database()
     db = DatabaseAdapter(db_manager)
@@ -652,6 +716,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Start FTS5 index worker (non-blocking background task)
     _fts_task = asyncio.create_task(_fts_index_worker())
+    _post_backup_task = asyncio.create_task(_post_backup_watcher())
 
     # Seed default AI configuration if not yet set
     await _seed_ai_config_defaults()
@@ -662,15 +727,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.ocr_worker = ocr_worker
     await ocr_worker.start()
 
-    # Pre-generate video thumbnails in background (non-blocking)
-    if _media_root:
-        async def _pregen_thumbs():
-            try:
-                from .thumbnails import pregenerate_video_thumbnails
-                await pregenerate_video_thumbnails(_media_root, size=400, max_items=200)
-            except Exception as e:
-                logger.warning(f"Video thumbnail pre-generation failed: {e}")
-        asyncio.create_task(_pregen_thumbs())
 
     yield
 
@@ -684,7 +740,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if realtime_listener:
         await realtime_listener.stop()
 
-    for task in [stats_task, _session_cleanup_task, _fts_task]:
+    for task in [stats_task, _session_cleanup_task, _fts_task, _post_backup_task]:
         if task:
             task.cancel()
             try:
@@ -2217,11 +2273,16 @@ async def get_boundary_message(
 @app.get("/api/admin/listener-status")
 async def get_listener_status(user: UserContext = Depends(require_master)):
     """Return current Telegram listener mode, status, and viewer count."""
+    status = listener_manager.status
+    # If listener module not available (viewer-only container), report config accurately
+    if not listener_manager._listener_available:
+        status = "viewer-only"
     return {
         "mode": config.listener_mode,
-        "status": listener_manager.status,
+        "status": status,
         "grace_period": config.listener_grace_period,
         "viewer_count": len(ws_manager.active_connections),
+        "listener_available": listener_manager._listener_available,
     }
 
 

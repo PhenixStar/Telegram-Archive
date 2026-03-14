@@ -153,3 +153,83 @@ async def rebuild_sqlite_fts(session, batch_size: int = 1000) -> int:
             logger.info("FTS index progress: %d rows indexed", total)
 
     return total
+
+
+async def incremental_index_fts(session, batch_size: int = 500) -> int:
+    """Index only new messages added since the last checkpoint.
+
+    Reads fts_last_indexed_rowid from app_settings and indexes all messages
+    with rowid > that value. Also re-indexes messages where ocr_text or
+    ai_comment were added after the initial FTS insert (updated_at tracking).
+
+    Returns count of newly indexed rows.
+    """
+    # Get last indexed position
+    result = await session.execute(
+        text("SELECT value FROM app_settings WHERE key = 'fts_last_indexed_rowid'")
+    )
+    row = result.fetchone()
+    last_rowid = int(row[0]) if row and row[0] else 0
+
+    total = 0
+    cursor = last_rowid
+
+    while True:
+        rows = await session.execute(
+            text(
+                "SELECT rowid, id, chat_id, text, ocr_text, ai_comment "
+                "FROM messages "
+                "WHERE ((text IS NOT NULL AND text != '') "
+                "    OR (ocr_text IS NOT NULL AND ocr_text != '') "
+                "    OR (ai_comment IS NOT NULL AND ai_comment != '')) "
+                "  AND rowid > :last "
+                "ORDER BY rowid LIMIT :batch"
+            ),
+            {"last": cursor, "batch": batch_size},
+        )
+        batch = rows.fetchall()
+        if not batch:
+            break
+
+        for row in batch:
+            parts = []
+            if row.text:
+                parts.append(row.text)
+            if row.ocr_text:
+                parts.append(row.ocr_text)
+            if row.ai_comment:
+                parts.append(row.ai_comment)
+            combined_text = " ".join(parts)
+            if not combined_text.strip():
+                continue
+
+            await session.execute(
+                text(
+                    "INSERT INTO messages_fts(rowid, text, chat_id, msg_id) "
+                    "VALUES(:rowid, :text, :chat_id, :msg_id)"
+                ),
+                {
+                    "rowid": row.rowid,
+                    "text": combined_text,
+                    "chat_id": row.chat_id,
+                    "msg_id": row.id,
+                },
+            )
+
+        cursor = batch[-1].rowid
+        total += len(batch)
+        await session.commit()
+
+    # Update checkpoint
+    if total > 0:
+        await session.execute(
+            text(
+                "INSERT OR REPLACE INTO app_settings(key, value) "
+                "VALUES('fts_last_indexed_rowid', :rid)"
+            ),
+            {"rid": str(cursor)},
+        )
+        await session.commit()
+        logger.info("FTS incremental: %d new rows indexed", total)
+
+    return total

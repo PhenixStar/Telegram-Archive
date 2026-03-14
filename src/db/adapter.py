@@ -2368,6 +2368,15 @@ class DatabaseAdapter:
         async with self.db_manager.async_session_factory() as session:
             return await rebuild_sqlite_fts(session)
 
+    async def incremental_fts_index(self) -> int:
+        """Index new messages since last checkpoint. Returns rows indexed."""
+        if not self._is_sqlite:
+            return 0
+        from .fts import incremental_index_fts
+
+        async with self.db_manager.async_session_factory() as session:
+            return await incremental_index_fts(session)
+
     async def get_fts_status(self) -> str | None:
         """Get FTS index build status from app_settings."""
         return await self.get_setting("fts_index_status")

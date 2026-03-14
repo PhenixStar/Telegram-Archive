@@ -741,11 +741,13 @@
 
         /* Sidebar resize — width applied only on md+ */
         @media (min-width: 768px) {
-            .sidebar-panel { min-width: 220px; max-width: 600px; }
+            .sidebar-panel { min-width: 220px; max-width: 600px; flex-shrink: 0; position: relative; }
+            @media (min-width: 768px) { .sidebar-panel { width: 260px; } }
         }
         .sidebar-resize-handle {
-            width: 4px; cursor: col-resize; background: transparent;
-            transition: background 0.15s; flex-shrink: 0; z-index: 10;
+            position: absolute; right: -3px; top: 0; bottom: 0;
+            width: 6px; cursor: col-resize; background: transparent;
+            transition: background 0.15s; z-index: 20;
         }
         .sidebar-resize-handle:hover, .sidebar-resize-handle.active {
             background: var(--tg-accent, #3b82f6);
@@ -1313,12 +1315,11 @@
                         </div>
                     </template>
                 </div>
+                <!-- Sidebar Resize Handle (desktop only) — absolutely positioned at right edge -->
+                <div class="sidebar-resize-handle hidden md:block"
+                    :class="{ active: sidebarResizing }"
+                    @mousedown.prevent="startSidebarResize"></div>
             </div>
-
-            <!-- Sidebar Resize Handle (desktop only) -->
-            <div class="sidebar-resize-handle hidden md:block"
-                :class="{ active: sidebarResizing }"
-                @mousedown.prevent="startSidebarResize"></div>
 
             <!-- Main Chat Area - full width on mobile -->
             <div class="flex-1 flex flex-col bg-tg-bg relative min-w-0 overflow-hidden"
@@ -1701,10 +1702,12 @@
                                     <div class="h-1.5 rounded-full transition-all" style="background: var(--tg-accent);" :style="{ width: (embeddingStats.total > 0 ? Math.round(embeddingStats.embedded / embeddingStats.total * 100) : 0) + '%' }"></div>
                                 </div>
                             </div>
-                            <button @click="triggerEmbedding" :disabled="embeddingRunning" class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-white" :style="{ background: embeddingRunning ? 'var(--tg-muted)' : 'var(--tg-accent)' }">
-                                <i :class="embeddingRunning ? 'fas fa-spinner fa-spin' : 'fas fa-bolt'" class="text-xs"></i>
-                                {{ embeddingRunning ? 'Embedding...' : (embeddingStats.embedded >= embeddingStats.total && embeddingStats.total > 0 ? 'All embedded' : 'Embed messages') }}
-                            </button>
+                            <div class="flex gap-2">
+                                <button @click="embeddingRunning ? stopEmbedding() : triggerEmbedding()" class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-white" :style="{ background: embeddingRunning ? '#e53e3e' : 'var(--tg-accent)' }">
+                                    <i :class="embeddingRunning ? 'fas fa-stop' : 'fas fa-bolt'" class="text-xs"></i>
+                                    {{ embeddingRunning ? 'Stop' : (embeddingStats.embedded >= embeddingStats.total && embeddingStats.total > 0 ? 'All embedded' : 'Embed messages') }}
+                                </button>
+                            </div>
                         </div>
                         <div v-if="isGroup && profileMembers.length > 0" class="px-4 py-3 border-t" style="border-color: var(--tg-border);">
                             <div class="text-xs text-tg-muted mb-2">Members ({{ profileMembers.length }})</div>
@@ -2383,14 +2386,14 @@
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-sliders-h mr-1.5 text-xs"></i>General
                     </button>
-                    <button @click="settingsActiveTab = 'ai'; loadAiConfig()"
+                    <button @click="settingsActiveTab = 'ai'"
                         :class="settingsActiveTab === 'ai' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'ai' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                         <i class="fas fa-robot mr-1.5 text-xs"></i>AI
                     </button>
                     <button v-if="authRequired && isAuthenticated && userRole === 'master'"
-                        @click="settingsActiveTab = 'admin'; Promise.all([loadAdminViewers(), loadAdminChats(), loadAdminAudit(), loadAdminTokens()])"
+                        @click="settingsActiveTab = 'admin'; adminActiveTab = 'ai-models'; loadAiConfig()"
                         :class="settingsActiveTab === 'admin' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'admin' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
@@ -2467,8 +2470,116 @@
                     <!-- AI Tab -->
                     <div v-if="settingsActiveTab === 'ai'" class="space-y-6">
 
-                        <!-- Model Endpoints (admin only) -->
-                        <div v-if="userRole === 'master'" class="space-y-4">
+                        <!-- Sort & Filter (all users) -->
+                        <div>
+                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Sort Messages By</label>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                <button v-for="opt in aiSortOptions" :key="opt.id" @click="aiSortBy = opt.id"
+                                    class="text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition-colors"
+                                    :style="aiSortBy === opt.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <i :class="opt.icon" class="w-4 text-center"></i>
+                                    <span>{{ opt.label }}</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Filter</label>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                <button v-for="f in aiFilterOptions" :key="f.id" @click="toggleAiFilter(f.id)"
+                                    class="text-left px-3 py-2 rounded-lg text-xs flex items-center gap-2 transition-colors"
+                                    :style="aiActiveFilters.includes(f.id) ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                    <i :class="f.icon" class="w-4 text-center"></i>
+                                    <span>{{ f.label }}</span>
+                                </button>
+                            </div>
+                            <button @click="applyAiSort" class="mt-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors" style="background: var(--tg-accent); color: #fff;">
+                                <i class="fas fa-check mr-1.5"></i>Apply Sort & Filter
+                            </button>
+                        </div>
+
+                        <!-- Auto-Reply -->
+                        <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-sm font-medium" style="color: var(--tg-text);">Auto-Reply</span>
+                                <button @click="aiAutoReplyEnabled = !aiAutoReplyEnabled"
+                                    class="w-10 h-5 rounded-full transition-colors relative"
+                                    :style="aiAutoReplyEnabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
+                                    <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+                                        :class="aiAutoReplyEnabled ? 'translate-x-5' : 'translate-x-0.5'"></span>
+                                </button>
+                            </div>
+                            <p class="text-xs mb-3" style="color: var(--tg-muted);">When enabled, AI will draft or send replies automatically when you're away.</p>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Mode</label>
+                                    <select v-model="aiAutoReplyMode" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="draft">Draft only (review before sending)</option>
+                                        <option value="auto">Auto-send after delay</option>
+                                    </select>
+                                </div>
+                                <div v-if="aiAutoReplyMode === 'auto'">
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Delay before sending</label>
+                                    <select v-model="aiAutoReplyDelay" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="30">30 seconds</option>
+                                        <option value="60">1 minute</option>
+                                        <option value="300">5 minutes</option>
+                                        <option value="900">15 minutes</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Persona / Tone</label>
+                                    <select v-model="aiAutoReplyTone" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <option value="professional">Professional</option>
+                                        <option value="friendly">Friendly</option>
+                                        <option value="concise">Concise</option>
+                                        <option value="custom">Custom instructions...</option>
+                                    </select>
+                                </div>
+                                <div v-if="aiAutoReplyTone === 'custom'">
+                                    <textarea v-model="aiAutoReplyCustom" rows="3" placeholder="Describe how AI should reply on your behalf..."
+                                        class="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none"
+                                        style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Auto-Reply Status -->
+                        <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div class="text-sm font-medium mb-2" style="color: var(--tg-text);">Auto-Reply Status</div>
+                            <div class="flex items-center gap-2 text-xs" style="color: var(--tg-muted);">
+                                <span class="w-2 h-2 rounded-full" :style="aiAutoReplyEnabled ? 'background: #22c55e;' : 'background: var(--tg-border);'"></span>
+                                {{ aiAutoReplyEnabled ? 'Active — monitoring for new messages' : 'Disabled' }}
+                            </div>
+                            <div v-if="aiAutoReplyEnabled" class="mt-2 text-xs" style="color: var(--tg-muted);">
+                                Drafts pending: {{ aiDraftCount }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Admin Tab (master only) -->
+                    <div v-if="settingsActiveTab === 'admin' && authRequired && isAuthenticated && userRole === 'master'">
+                        <!-- Admin sub-tabs -->
+                        <div class="flex flex-wrap mb-4 -mt-2" style="border-bottom: 1px solid var(--tg-border);">
+                            <button @click="adminActiveTab = 'ai-models'; loadAiConfig()" :class="adminActiveTab === 'ai-models' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'ai-models' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                AI Models
+                            </button>
+                            <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Listener
+                            </button>
+                            <button @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Backup
+                            </button>
+                            <button @click="adminActiveTab = 'viewers'; loadAdminViewers(); loadAdminChats()" :class="adminActiveTab === 'viewers' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Viewers
+                            </button>
+                            <button @click="adminActiveTab = 'tokens'; loadAdminTokens(); loadAdminChats()" :class="adminActiveTab === 'tokens' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Tokens
+                            </button>
+                            <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Audit
+                            </button>
+                        </div>
+                        <!-- AI Models Tab (admin only) -->
+                        <div v-if="adminActiveTab === 'ai-models'" class="space-y-4">
                             <div class="flex items-center justify-between">
                                 <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Model Endpoints</div>
                                 <button @click="saveAiConfig" class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
@@ -2594,118 +2705,6 @@
                                     class="w-full rounded-lg px-3 py-2 text-sm outline-none resize-y"
                                     style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"></textarea>
                             </div>
-                        </div>
-
-                        <!-- Non-admin: simple model info -->
-                        <div v-else class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                            <div class="text-sm font-medium mb-2" style="color: var(--tg-text);">AI Configuration</div>
-                            <p class="text-xs" style="color: var(--tg-muted);">AI model endpoints are configured by the administrator.</p>
-                        </div>
-
-                        <!-- Sort & Filter (all users) -->
-                        <div>
-                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Sort Messages By</label>
-                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                                <button v-for="opt in aiSortOptions" :key="opt.id" @click="aiSortBy = opt.id"
-                                    class="text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition-colors"
-                                    :style="aiSortBy === opt.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
-                                    <i :class="opt.icon" class="w-4 text-center"></i>
-                                    <span>{{ opt.label }}</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="text-xs font-medium mb-2 block" style="color: var(--tg-muted);">Filter</label>
-                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                                <button v-for="f in aiFilterOptions" :key="f.id" @click="toggleAiFilter(f.id)"
-                                    class="text-left px-3 py-2 rounded-lg text-xs flex items-center gap-2 transition-colors"
-                                    :style="aiActiveFilters.includes(f.id) ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);'">
-                                    <i :class="f.icon" class="w-4 text-center"></i>
-                                    <span>{{ f.label }}</span>
-                                </button>
-                            </div>
-                            <button @click="applyAiSort" class="mt-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors" style="background: var(--tg-accent); color: #fff;">
-                                <i class="fas fa-check mr-1.5"></i>Apply Sort & Filter
-                            </button>
-                        </div>
-
-                        <!-- Auto-Reply -->
-                        <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                            <div class="flex items-center justify-between mb-3">
-                                <span class="text-sm font-medium" style="color: var(--tg-text);">Auto-Reply</span>
-                                <button @click="aiAutoReplyEnabled = !aiAutoReplyEnabled"
-                                    class="w-10 h-5 rounded-full transition-colors relative"
-                                    :style="aiAutoReplyEnabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
-                                    <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
-                                        :class="aiAutoReplyEnabled ? 'translate-x-5' : 'translate-x-0.5'"></span>
-                                </button>
-                            </div>
-                            <p class="text-xs mb-3" style="color: var(--tg-muted);">When enabled, AI will draft or send replies automatically when you're away.</p>
-                            <div class="space-y-3">
-                                <div>
-                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Mode</label>
-                                    <select v-model="aiAutoReplyMode" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <option value="draft">Draft only (review before sending)</option>
-                                        <option value="auto">Auto-send after delay</option>
-                                    </select>
-                                </div>
-                                <div v-if="aiAutoReplyMode === 'auto'">
-                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Delay before sending</label>
-                                    <select v-model="aiAutoReplyDelay" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <option value="30">30 seconds</option>
-                                        <option value="60">1 minute</option>
-                                        <option value="300">5 minutes</option>
-                                        <option value="900">15 minutes</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="text-xs mb-1 block" style="color: var(--tg-muted);">Persona / Tone</label>
-                                    <select v-model="aiAutoReplyTone" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <option value="professional">Professional</option>
-                                        <option value="friendly">Friendly</option>
-                                        <option value="concise">Concise</option>
-                                        <option value="custom">Custom instructions...</option>
-                                    </select>
-                                </div>
-                                <div v-if="aiAutoReplyTone === 'custom'">
-                                    <textarea v-model="aiAutoReplyCustom" rows="3" placeholder="Describe how AI should reply on your behalf..."
-                                        class="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none"
-                                        style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);"></textarea>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- Auto-Reply Status -->
-                        <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                            <div class="text-sm font-medium mb-2" style="color: var(--tg-text);">Auto-Reply Status</div>
-                            <div class="flex items-center gap-2 text-xs" style="color: var(--tg-muted);">
-                                <span class="w-2 h-2 rounded-full" :style="aiAutoReplyEnabled ? 'background: #22c55e;' : 'background: var(--tg-border);'"></span>
-                                {{ aiAutoReplyEnabled ? 'Active — monitoring for new messages' : 'Disabled' }}
-                            </div>
-                            <div v-if="aiAutoReplyEnabled" class="mt-2 text-xs" style="color: var(--tg-muted);">
-                                Drafts pending: {{ aiDraftCount }}
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Admin Tab (master only) -->
-                    <div v-if="settingsActiveTab === 'admin' && authRequired && isAuthenticated && userRole === 'master'">
-                        <!-- Admin sub-tabs -->
-                        <div class="flex mb-4 -mt-2" style="border-bottom: 1px solid var(--tg-border);">
-                            <button @click="adminActiveTab = 'viewers'" :class="adminActiveTab === 'viewers' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                                Viewer Accounts
-                            </button>
-                            <button @click="adminActiveTab = 'tokens'; loadAdminTokens(); loadAdminChats()" :class="adminActiveTab === 'tokens' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'tokens' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                                Share Tokens
-                            </button>
-                            <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                                Audit Log
-                            </button>
-                            <button @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                                Listener
-                            </button>
-                            <button @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                                Backup
-                            </button>
                         </div>
                         <!-- Viewers Tab -->
                         <div v-if="adminActiveTab === 'viewers'">
@@ -2904,7 +2903,12 @@
                         <div v-if="adminActiveTab === 'listener'">
                             <div class="space-y-4">
                                 <div class="rounded-lg p-4" style="background: var(--tg-bg);">
-                                    <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Listener Status</h3>
+                                    <div class="flex items-center justify-between mb-3">
+                                        <h3 class="text-sm font-medium" style="color: var(--tg-text);">Listener Status</h3>
+                                        <button @click="loadListenerStatus" class="text-xs px-2 py-1 rounded hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-sync-alt mr-1"></i>Refresh
+                                        </button>
+                                    </div>
                                     <div class="grid grid-cols-2 gap-3">
                                         <div>
                                             <span class="text-xs" style="color: var(--tg-muted);">Status</span>
@@ -2912,9 +2916,10 @@
                                                 <span class="w-2 h-2 rounded-full" :class="{
                                                     'bg-green-500': listenerInfo.status === 'running',
                                                     'bg-yellow-500 animate-pulse': listenerInfo.status === 'grace_period' || listenerInfo.status === 'starting',
+                                                    'bg-blue-500': listenerInfo.status === 'viewer-only',
                                                     'bg-gray-500': listenerInfo.status === 'stopped' || listenerInfo.status === 'stopping'
                                                 }"></span>
-                                                <span class="text-sm capitalize" style="color: var(--tg-text);">{{ listenerInfo.status || 'unknown' }}</span>
+                                                <span class="text-sm capitalize" style="color: var(--tg-text);">{{ listenerInfo.status === 'viewer-only' ? 'Viewer Only' : (listenerInfo.status || 'unknown') }}</span>
                                             </div>
                                         </div>
                                         <div>
@@ -2931,11 +2936,15 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div v-if="listenerInfo.status === 'viewer-only'" class="rounded-lg p-4 text-xs" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: var(--tg-text);">
+                                    <p class="mb-1"><i class="fas fa-info-circle text-blue-400 mr-1"></i><strong>Viewer-only container</strong></p>
+                                    <p style="color: var(--tg-muted);">The Telegram listener runs in the backup container, not here. The viewer shows real-time updates via WebSocket when the backup container's listener is active.</p>
+                                </div>
                                 <div class="rounded-lg p-4 text-xs" style="background: var(--tg-bg); color: var(--tg-muted);">
                                     <p class="mb-2"><strong style="color: var(--tg-text);">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
                                     <p class="mb-2"><strong style="color: var(--tg-text);">always</strong> — Listener always runs (legacy behavior)</p>
                                     <p><strong style="color: var(--tg-text);">off</strong> — Listener never runs</p>
-                                    <p class="mt-3" style="opacity: 0.6;">Mode is configured via <code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> env var</p>
+                                    <p class="mt-3" style="opacity: 0.6;">Mode is configured via <code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> env var in the backup container</p>
                                 </div>
                             </div>
                         </div>
@@ -3143,7 +3152,8 @@
                     settingsActiveTab.value = tab || 'appearance'
                     showSettingsModal.value = true
                     if (settingsActiveTab.value === 'admin' && userRole.value === 'master') {
-                        Promise.all([loadAdminViewers(), loadAdminChats(), loadAdminAudit(), loadAdminTokens()])
+                        adminActiveTab.value = 'ai-models'
+                        loadAiConfig()
                     }
                 }
                 // AI Assistant panel state
@@ -6211,30 +6221,53 @@
                     } catch {}
                 }
 
+                const embeddingAbort = ref(null)
                 const triggerEmbedding = async () => {
                     if (!selectedChat.value || embeddingRunning.value) return
                     embeddingRunning.value = true
+                    embeddingAbort.value = false
+                    let retries = 0
+                    const MAX_RETRIES = 60  // ~30 min max wait with backoff
                     try {
                         let hasMore = true
-                        while (hasMore) {
-                            const resp = await fetch(`/api/semantic/embed?chat_id=${selectedChat.value.id}&limit=50`, {
-                                method: 'POST', credentials: 'include'
-                            })
-                            if (!resp.ok) { showToast?.('Embedding failed: ' + resp.status, 'error'); break }
+                        while (hasMore && !embeddingAbort.value) {
+                            let resp
+                            try {
+                                resp = await fetch(`/api/semantic/embed?chat_id=${selectedChat.value.id}&limit=50`, {
+                                    method: 'POST', credentials: 'include'
+                                })
+                            } catch (netErr) {
+                                // Network error (server unreachable)
+                                resp = null
+                            }
+                            if (!resp || !resp.ok) {
+                                retries++
+                                if (retries > MAX_RETRIES) {
+                                    showToast?.('Embedding stopped: too many retries', 'error')
+                                    break
+                                }
+                                // Backoff: 5s, 10s, 15s... capped at 30s
+                                const wait = Math.min(retries * 5, 30)
+                                showToast?.(`Embedding server unavailable, retry ${retries} in ${wait}s...`, 'warning')
+                                await new Promise(r => setTimeout(r, wait * 1000))
+                                continue
+                            }
+                            retries = 0  // Reset on success
                             const data = await resp.json()
                             embeddingStats.value = { total: data.total, embedded: data.embedded }
-                            // batch_stored=0 when all done; message key present on early "already embedded" return
                             if (data.batch_stored === 0 || data.message) break
                             hasMore = data.embedded < data.total
                         }
-                        showToast?.('Embedding complete', 'success')
+                        if (!embeddingAbort.value) showToast?.('Embedding complete', 'success')
                     } catch (e) {
                         showToast?.('Embedding error: ' + e.message, 'error')
                     } finally {
                         embeddingRunning.value = false
+                        embeddingAbort.value = null
                         await loadEmbeddingStats()
                     }
                 }
+                const stopEmbedding = () => { embeddingAbort.value = true }
 
                 const handleSemanticSearch = async () => {
                     const q = msgSearchQuery.value.trim()
@@ -6482,7 +6515,7 @@
                 const adminEditingId = ref(null)
                 const adminError = ref('')
                 const adminChatFilter = ref('')
-                const adminActiveTab = ref('viewers')
+                const adminActiveTab = ref('ai-models')
                 // v7.2.0: Share tokens
                 const adminTokens = ref([])
                 const adminTokenForm = ref({ label: '', allowed_chat_ids: [], no_download: false, expires_at: '' })
@@ -6774,6 +6807,8 @@
                     embeddingStats,
                     embeddingRunning,
                     triggerEmbedding,
+                    stopEmbedding,
+                    embeddingAbort,
                     loadEmbeddingStats,
                     // Auth
                     isAuthenticated,

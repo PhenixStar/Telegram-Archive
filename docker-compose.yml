@@ -63,9 +63,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-telegram_backup}
 
       # Real-time Listener
-      # ENABLE_LISTENER is the master switch — when false, all LISTEN_* vars are ignored
+      # LISTENER_MODE: auto (start on viewer connect), always, off
+      # Takes priority over ENABLE_LISTENER when set
+      LISTENER_MODE: ${LISTENER_MODE:-auto}
+      # ENABLE_LISTENER is the legacy switch — superseded by LISTENER_MODE
       ENABLE_LISTENER: ${ENABLE_LISTENER:-false}
-      # Granular listener controls (only apply when ENABLE_LISTENER=true):
+      # Granular listener controls (only apply when listener is active):
       # LISTEN_EDITS: ${LISTEN_EDITS:-true}
       # LISTEN_DELETIONS: ${LISTEN_DELETIONS:-true}
       # LISTEN_NEW_MESSAGES: ${LISTEN_NEW_MESSAGES:-true}
@@ -159,6 +162,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-telegram}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-telegram_backup}
+
+      # Real-time Listener (viewer needs these to show correct status)
+      LISTENER_MODE: ${LISTENER_MODE:-auto}
+      ENABLE_LISTENER: ${ENABLE_LISTENER:-false}
 
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
