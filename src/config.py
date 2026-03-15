@@ -153,6 +153,10 @@ class Config:
         self.fill_gaps = os.getenv("FILL_GAPS", "false").lower() == "true"
         self.gap_threshold = int(os.getenv("GAP_THRESHOLD", "50"))
 
+        # Early stop: stop scanning after N consecutive chats with 0 new messages
+        # Only applies on incremental runs (not initial backup). Set 0 to disable.
+        self.early_stop_threshold = int(os.getenv("EARLY_STOP_THRESHOLD", "20"))
+
         # Real-time listener mode
         # When enabled, runs a background listener that catches message edits and deletions
         # in real-time instead of batch-checking on each backup run

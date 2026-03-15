@@ -335,6 +335,8 @@
             background: rgba(255,255,255,0.08) !important;
             border: 1px solid rgba(255,255,255,0.12) !important;
             transition: all 0.2s ease !important;
+            /* 44px min touch target on mobile */
+            min-height: 44px;
         }
         .login-input:focus {
             background: rgba(255,255,255,0.12) !important;
@@ -372,6 +374,16 @@
             .login-btn::before {
                 animation: none !important;
             }
+        }
+        /* Mobile login refinements */
+        @media (max-width: 480px) {
+            .login-orb-1 { width: 180px; height: 180px; }
+            .login-orb-2 { width: 150px; height: 150px; }
+            .login-orb-3 { width: 120px; height: 120px; }
+        }
+        /* iOS auto-zoom prevention: inputs must be >= 16px */
+        @supports (-webkit-touch-callout: none) {
+            .login-input { font-size: 16px !important; }
         }
 
         /* ===== Theme-aware message transitions ===== */
@@ -489,10 +501,11 @@
         }
 
 
-        /* Date Separator — Telegram pill badge style */
+        /* Date Separator — Telegram pill badge style, left-aligned */
         .date-separator {
-            text-align: center;
+            text-align: left;
             margin: 16px 0 8px 0;
+            padding-left: 8px;
         }
 
         .date-separator span {
@@ -871,14 +884,18 @@
     <div id="app" class="w-full h-full h-full-vh">
         <!-- Login Page -->
         <div v-if="!isAuthenticated" class="w-full h-full flex items-center justify-center relative overflow-hidden"
-            style="background: var(--tg-bg, #181818);">
+            style="background: var(--tg-bg, #181818);" @click="profileDropdownOpen = false">
             <!-- Floating background orbs (theme-aware) -->
             <div class="login-orb login-orb-1"></div>
             <div class="login-orb login-orb-2"></div>
             <div class="login-orb login-orb-3"></div>
 
-            <div class="login-card-enter backdrop-blur-xl rounded-2xl shadow-2xl p-6 sm:p-10 w-full max-w-[400px] mx-4 relative z-10"
-                style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);">
+            <!-- Scroll wrapper for mobile keyboard resilience -->
+            <div class="w-full h-full flex items-center justify-center overflow-y-auto py-8 px-4"
+                style="-webkit-overflow-scrolling: touch;">
+            <div class="login-card-enter backdrop-blur-xl rounded-2xl shadow-2xl p-6 sm:p-10 w-full max-w-[400px] relative z-10"
+                style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);"
+                @click.stop>
 
                 <!-- Telegram Logo -->
                 <div class="flex justify-center mb-5">
@@ -910,8 +927,8 @@
                 <!-- Backup Profile Selector (v11.1 — compact dropdown, always visible) -->
                 <div v-if="backupProfiles.length > 0" class="mb-5 relative">
                     <!-- Dropdown trigger button -->
-                    <button type="button" @click="profileDropdownOpen = !profileDropdownOpen"
-                        class="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all duration-200"
+                    <button type="button" @click.stop="profileDropdownOpen = !profileDropdownOpen"
+                        class="w-full flex items-center gap-2.5 px-3.5 py-3 sm:py-2.5 rounded-xl transition-all duration-200"
                         :style="{
                             background: 'rgba(255,255,255,0.04)',
                             border: '1.5px solid ' + (profileDropdownOpen ? (selectedProfile?.color || 'var(--tg-primary)') : 'rgba(255,255,255,0.08)')
@@ -931,8 +948,8 @@
                         class="absolute left-0 right-0 mt-1.5 rounded-xl overflow-hidden z-50 shadow-lg max-h-48 overflow-y-auto custom-scroll"
                         style="background: var(--tg-bg, #181818); border: 1.5px solid rgba(255,255,255,0.1);">
                         <div v-for="profile in backupProfiles" :key="profile.id"
-                            @click="selectProfile(profile); profileDropdownOpen = false"
-                            class="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer transition-all duration-150"
+                            @click.stop="selectProfile(profile); profileDropdownOpen = false"
+                            class="flex items-center gap-2.5 px-3.5 py-3 sm:py-2.5 cursor-pointer transition-all duration-150"
                             :style="{
                                 background: selectedProfile?.id === profile.id ? 'rgba(255,255,255,0.08)' : 'transparent'
                             }"
@@ -952,19 +969,19 @@
                     </div>
                 </div>
 
-                <form @submit.prevent="performLogin" @click="profileDropdownOpen = false" class="space-y-3.5" v-if="authRequired || authCheckFailed">
+                <form @submit.prevent="performLogin" class="space-y-3.5" v-if="authRequired || authCheckFailed">
                     <!-- Login mode toggle -->
                     <div class="flex rounded-xl overflow-hidden p-0.5" style="background: rgba(255,255,255,0.05);">
                         <button type="button" @click="loginMode = 'password'"
                             :class="loginMode === 'password' ? 'bg-white/15 shadow-sm' : 'hover:bg-white/5'"
-                            class="flex-1 py-2 text-[13px] font-medium transition-all duration-200 rounded-lg"
+                            class="flex-1 py-2.5 sm:py-2 text-[13px] font-medium transition-all duration-200 rounded-lg"
                             :style="{ color: loginMode === 'password' ? '#fff' : 'rgba(255,255,255,0.4)' }"
                             aria-label="Login with password">
                             <i class="fas fa-lock text-[10px] mr-1.5"></i>Password
                         </button>
                         <button type="button" @click="loginMode = 'token'"
                             :class="loginMode === 'token' ? 'bg-white/15 shadow-sm' : 'hover:bg-white/5'"
-                            class="flex-1 py-2 text-[13px] font-medium transition-all duration-200 rounded-lg"
+                            class="flex-1 py-2.5 sm:py-2 text-[13px] font-medium transition-all duration-200 rounded-lg"
                             :style="{ color: loginMode === 'token' ? '#fff' : 'rgba(255,255,255,0.4)' }"
                             aria-label="Login with share token">
                             <i class="fas fa-key text-[10px] mr-1.5"></i>Token
@@ -1017,6 +1034,7 @@
                     <p class="text-[10px] tracking-widest uppercase" style="color: rgba(255,255,255,0.15);">Encrypted & Private</p>
                 </div>
             </div>
+            </div><!-- /scroll wrapper -->
         </div>
 
         <!-- Main App -->
@@ -1455,9 +1473,9 @@
                                     {{ getInitials(selectedChat) }}
                                 </template>
                             </div>
-                            <div class="min-w-0 flex-1 max-w-[180px] sm:max-w-xs">
-                                <h2 class="font-bold text-base sm:text-lg truncate cursor-pointer hover:opacity-80 transition-opacity" @click="openProfile">{{ getChatName(selectedChat) }}</h2>
-                                <p class="text-xs text-tg-muted truncate">
+                            <div class="min-w-0 flex-1">
+                                <h2 class="font-bold text-sm sm:text-base md:text-lg truncate cursor-pointer hover:opacity-80 transition-opacity leading-tight" @click="openProfile">{{ getChatName(selectedChat) }}</h2>
+                                <p class="text-[11px] sm:text-xs text-tg-muted truncate leading-tight">
                                     <template v-if="currentNav.type === 'chat' && currentNav.topicTitle">
                                         # {{ currentNav.topicTitle }}
                                     </template>
@@ -1479,10 +1497,10 @@
                             </div>
                         </div>
 
-                        <div class="flex items-center gap-1 sm:gap-2 shrink-0 flex-wrap">
+                        <div class="flex items-center gap-1 sm:gap-2 shrink-0">
                             <div class="flex items-center gap-1">
                                 <!-- Search Bar - responsive width -->
-                                <div class="relative w-28 sm:w-48 md:w-64">
+                                <div class="relative w-20 sm:w-48 md:w-64">
                                     <input v-model="messageSearchQuery" @input="searchMessages" type="text"
                                         placeholder="Search..."
                                         class="w-full bg-gray-900 text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -1492,8 +1510,8 @@
                                             d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                     </svg>
                                 </div>
-                                <!-- Date filter fields — inline, LEFT of the toggle button -->
-                                <div v-if="showAdvancedSearch" class="flex items-center gap-1.5">
+                                <!-- Date filter fields — inline, hidden on mobile to prevent overflow -->
+                                <div v-if="showAdvancedSearch" class="hidden sm:flex items-center gap-1.5">
                                     <input v-model="searchDateFrom" type="date"
                                         class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none w-[120px]"
                                         title="From date">
@@ -1970,7 +1988,10 @@
                                             <div class="grid gap-1" :class="getAlbumGridClass(getAlbumForMessage(msg))">
                                                 <template v-for="albumMsg in getAlbumForMessage(msg)" :key="albumMsg.id">
                                                     <div class="album-item relative overflow-hidden rounded-lg cursor-pointer hover:opacity-90 transition"
-                                                        @click="openMedia(albumMsg)">
+                                                        @click="openMedia(albumMsg)"
+                                                        @contextmenu.prevent.stop="openContextMenu($event, 'image-in-message', albumMsg)"
+                                                        @touchstart="startLongPress($event, 'image-in-message', albumMsg)"
+                                                        @touchend="cancelLongPress" @touchmove="cancelLongPress">
                                                         <img v-if="albumMsg.media?.type === 'photo'" 
                                                             :src="getMediaUrl(albumMsg)"
                                                             loading="lazy"
@@ -1995,7 +2016,10 @@
                                         </div>
                                         
                                         <!-- Regular photo (not part of album) -->
-                                        <div v-else-if="msg.media?.type === 'photo' && !msg.raw_data?.grouped_id" class="img-blur-up rounded-lg max-h-64 max-w-full inline-block cursor-pointer" @click="openMedia(msg)">
+                                        <div v-else-if="msg.media?.type === 'photo' && !msg.raw_data?.grouped_id" class="img-blur-up rounded-lg max-h-64 max-w-full inline-block cursor-pointer" @click="openMedia(msg)"
+                                            @contextmenu.prevent.stop="openContextMenu($event, 'image-in-message', msg)"
+                                            @touchstart="startLongPress($event, 'image-in-message', msg)"
+                                            @touchend="cancelLongPress" @touchmove="cancelLongPress">
                                             <img :src="getMediaUrl(msg)"
                                                 loading="lazy"
                                                 class="rounded-lg max-h-64 max-w-full object-cover hover:opacity-90 transition"
@@ -2016,7 +2040,10 @@
 
                                         <!-- v8.1: Voice Notes — waveform visualization -->
                                         <div v-else-if="msg.media?.type === 'voice'"
-                                            class="w-full min-w-[250px] max-w-sm p-3 rounded-xl">
+                                            class="w-full min-w-[250px] max-w-sm p-3 rounded-xl"
+                                            @contextmenu.prevent.stop="openContextMenu($event, 'voice-note', msg)"
+                                            @touchstart="startLongPress($event, 'voice-note', msg)"
+                                            @touchend="cancelLongPress" @touchmove="cancelLongPress">
                                             <div class="flex items-center gap-3">
                                                 <button @click="toggleVoicePlay($event, msg)"
                                                     class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors"
@@ -2036,6 +2063,8 @@
                                                     </div>
                                                 </div>
                                                 <span class="text-xs shrink-0 tabular-nums" style="color: var(--tg-muted);">
+                                                    <i v-if="msg._transcribing" class="fas fa-spinner fa-spin mr-1" style="color: var(--tg-accent);"></i>
+                                                    <i v-else-if="msg._voiceSampleSending" class="fas fa-spinner fa-spin mr-1" style="color: var(--tg-accent);"></i>
                                                     {{ formatDuration(msg.media?.duration) }}
                                                 </span>
                                             </div>
@@ -2045,6 +2074,22 @@
                                                 @ended="voicePlaying[msg.id] = false; voiceProgress[msg.id] = 0"
                                                 class="hidden">
                                             </audio>
+                                            <!-- Voice transcription text -->
+                                            <div v-if="msg.ocr_text" class="mt-2 text-xs leading-relaxed" style="color: var(--tg-text); opacity: 0.85;">
+                                                <div class="flex items-center gap-1.5 cursor-pointer select-none" @click="msg._ocrExpanded = !msg._ocrExpanded">
+                                                    <i class="fas fa-language" style="font-size: 9px; color: var(--tg-accent);"></i>
+                                                    <span class="truncate" style="color: var(--tg-muted);">{{ msg._ocrExpanded ? '' : msg.ocr_text.replace(/^\[Voice.*?\]\s*/, '').substring(0, 60) + (msg.ocr_text.length > 80 ? '...' : '') }}</span>
+                                                    <i :class="msg._ocrExpanded ? 'fa-chevron-up' : 'fa-chevron-down'" class="fas ml-auto" style="font-size: 8px; color: var(--tg-muted);"></i>
+                                                </div>
+                                                <div v-if="msg._ocrExpanded" class="mt-1 whitespace-pre-wrap break-words select-all" style="color: var(--tg-text);">
+                                                    {{ msg.ocr_text.replace(/^\[Voice.*?\]\s*/, '') }}
+                                                </div>
+                                            </div>
+                                            <!-- Voice profile attribution (non-searchable display only) -->
+                                            <div v-if="msg._voiceProfileName" class="mt-1 flex items-center gap-1 text-[10px]" style="color: var(--tg-muted);">
+                                                <i class="fas fa-user-check" style="font-size: 8px; color: var(--tg-accent);"></i>
+                                                <span>Sample for: <b style="color: var(--tg-text);">{{ msg._voiceProfileName }}</b></span>
+                                            </div>
                                         </div>
 
                                         <!-- Audio (music, non-voice) -->
@@ -2065,15 +2110,23 @@
                                         </div>
 
                                         <!-- GIFs / Animations - autoplay when visible -->
-                                        <video v-else-if="msg.media?.type === 'animation'" :data-src="getMediaUrl(msg)"
-                                            class="rounded-lg max-h-64 w-auto max-w-full gif-video" loop muted
-                                            playsinline @click="openMedia(msg)">
-                                        </video>
+                                        <div v-else-if="msg.media?.type === 'animation'" class="inline-block"
+                                            @contextmenu.prevent.stop="openContextMenu($event, 'image-in-message', msg)"
+                                            @touchstart="startLongPress($event, 'image-in-message', msg)"
+                                            @touchend="cancelLongPress" @touchmove="cancelLongPress">
+                                            <video :data-src="getMediaUrl(msg)"
+                                                class="rounded-lg max-h-64 w-auto max-w-full gif-video" loop muted
+                                                playsinline @click="openMedia(msg)">
+                                            </video>
+                                        </div>
 
                                         <!-- Videos - click to open in lightbox -->
-                                        <div v-else-if="msg.media?.type === 'video'" 
+                                        <div v-else-if="msg.media?.type === 'video'"
                                             class="relative cursor-pointer group"
-                                            @click="openMedia(msg)">
+                                            @click="openMedia(msg)"
+                                            @contextmenu.prevent.stop="openContextMenu($event, 'image-in-message', msg)"
+                                            @touchstart="startLongPress($event, 'image-in-message', msg)"
+                                            @touchend="cancelLongPress" @touchmove="cancelLongPress">
                                             <video preload="none"
                                                 :poster="getVideoThumbUrl(msg)"
                                                 class="rounded-lg max-h-64 w-full pointer-events-none"
@@ -2103,7 +2156,10 @@
 
                                         <!-- Documents that are actually images: show inline preview + filename -->
                                         <div v-else-if="msg.media?.type === 'document' && isImageDocument(msg)"
-                                            class="space-y-1">
+                                            class="space-y-1"
+                                            @contextmenu.prevent.stop="openContextMenu($event, 'image-in-message', msg)"
+                                            @touchstart="startLongPress($event, 'image-in-message', msg)"
+                                            @touchend="cancelLongPress" @touchmove="cancelLongPress">
                                             <img :src="getMediaUrl(msg)"
                                                 loading="lazy"
                                                 class="rounded-lg max-h-48 max-w-full object-cover cursor-pointer hover:opacity-90 transition"
@@ -2356,8 +2412,55 @@
             </div>
         </div>
         
+        <!-- Voice Sample Profile Dialog -->
+        <!-- Voice Profile Training Dialog -->
+        <div v-if="voiceSampleDialog.show" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" @click.self="voiceSampleDialog.show = false">
+            <div class="w-full max-w-sm rounded-2xl p-5 shadow-2xl" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                <div class="flex items-center gap-2 mb-3">
+                    <i class="fas fa-user-plus text-sm" style="color: var(--tg-accent);"></i>
+                    <h3 class="text-sm font-semibold" style="color: var(--tg-text);">Train Voice Profile</h3>
+                </div>
+                <p class="text-xs mb-3" style="color: var(--tg-muted);">Type a name to create a new profile, or select an existing one.</p>
+                <!-- Name input with autocomplete -->
+                <input v-model="voiceSampleDialog.nameInput" type="text" placeholder="Profile name..."
+                    class="w-full px-3 py-2 rounded-lg text-sm mb-2 outline-none transition-colors"
+                    style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);"
+                    @focus="voiceSampleDialog.profileId = ''"
+                    @keydown.enter="submitVoiceSample">
+                <!-- Existing profiles list (filtered) -->
+                <div v-if="filteredVoiceProfiles.length > 0" class="space-y-1 max-h-36 overflow-y-auto mb-3">
+                    <div v-for="profile in filteredVoiceProfiles" :key="profile.id"
+                        @click="voiceSampleDialog.profileId = profile.id; voiceSampleDialog.nameInput = profile.name"
+                        class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+                        :style="voiceSampleDialog.profileId === profile.id ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-bg); color: var(--tg-text);'">
+                        <i class="fas fa-user-circle text-xs"></i>
+                        <span class="text-xs flex-1">{{ profile.name }}</span>
+                        <span class="text-[10px] opacity-70">{{ profile.sample_count || 0 }} samples</span>
+                    </div>
+                </div>
+                <div v-else-if="voiceSampleDialog.nameInput.trim()" class="text-xs text-center py-3 mb-3 rounded-lg" style="color: var(--tg-muted); background: var(--tg-bg);">
+                    <i class="fas fa-plus-circle mr-1" style="color: var(--tg-accent);"></i>
+                    New profile "<b style="color: var(--tg-text);">{{ voiceSampleDialog.nameInput.trim() }}</b>" will be created
+                </div>
+                <div v-else class="text-xs text-center py-3 mb-3" style="color: var(--tg-muted);">
+                    No profiles yet. Type a name above to create one.
+                </div>
+                <!-- Actions -->
+                <div class="flex gap-2">
+                    <button @click="voiceSampleDialog.show = false" class="flex-1 px-3 py-2 rounded-lg text-xs transition-colors" style="background: var(--tg-border); color: var(--tg-text);">Cancel</button>
+                    <button @click="submitVoiceSample" :disabled="voiceSampleDialog.submitting || (!voiceSampleDialog.profileId && !voiceSampleDialog.nameInput.trim())"
+                        class="flex-1 px-3 py-2 rounded-lg text-xs text-white transition-colors"
+                        :style="(voiceSampleDialog.profileId || voiceSampleDialog.nameInput.trim()) && !voiceSampleDialog.submitting ? 'background: var(--tg-accent);' : 'background: var(--tg-border); color: var(--tg-muted); cursor: default;'">
+                        <i v-if="voiceSampleDialog.submitting" class="fas fa-spinner fa-spin mr-1"></i>
+                        <i v-else class="fas fa-paper-plane mr-1"></i>
+                        {{ voiceSampleDialog.submitting ? 'Submitting...' : (voiceSampleDialog.profileId ? 'Add Sample' : 'Create & Add') }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Lightbox Modal for Images -->
-        <div v-if="lightboxOpen" 
+        <div v-if="lightboxOpen"
             class="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
             @click.self="closeLightbox">
             
@@ -2473,7 +2576,7 @@
                         <i class="fas fa-robot mr-1.5 text-xs"></i>AI
                     </button>
                     <button v-if="authRequired && isAuthenticated && isAdminOrAbove"
-                        @click="settingsActiveTab = 'admin'; if (isMasterOrAbove) { adminActiveTab = 'ai-models'; loadAiConfig() } else { adminActiveTab = 'viewers'; loadAdminViewers(); loadAdminChats() }"
+                        @click="settingsActiveTab = 'admin'; if (isMasterOrAbove) { adminActiveTab = 'ai-models'; loadAiConfig(); loadTranscriptionProgress() } else { adminActiveTab = 'viewers'; loadAdminViewers(); loadAdminChats() }"
                         :class="settingsActiveTab === 'admin' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'"
                         :style="{color: settingsActiveTab === 'admin' ? '' : 'var(--tg-muted)'}"
                         class="px-4 py-2 border-b-2 text-sm font-medium hover:opacity-80">
@@ -2646,7 +2749,7 @@
                     <div v-if="settingsActiveTab === 'admin' && authRequired && isAuthenticated && isAdminOrAbove">
                         <!-- Admin sub-tabs (role-aware: admin sees Viewers/Tokens/Audit only) -->
                         <div class="flex flex-wrap mb-4 -mt-2" style="border-bottom: 1px solid var(--tg-border);">
-                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'ai-models'; loadAiConfig()" :class="adminActiveTab === 'ai-models' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'ai-models' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'ai-models'; loadAiConfig(); loadTranscriptionProgress()" :class="adminActiveTab === 'ai-models' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'ai-models' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 AI Models
                             </button>
                             <button v-if="isMasterOrAbove" @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
@@ -2773,6 +2876,108 @@
                                     <button @click="testAiConnection('tts')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
                                         <i class="fas fa-plug mr-1"></i>Test Connection
                                     </button>
+                                </div>
+                            </div>
+
+                            <!-- Voice Transcription (Whisper) -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-microphone-alt text-cyan-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">Voice Transcription</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400">Whisper</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span v-if="transcriptionProgress.total > 0" class="text-[10px]" style="color: var(--tg-muted);">
+                                            {{ transcriptionProgress.processed }}/{{ transcriptionProgress.total }} done
+                                        </span>
+                                        <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.transcription === 'ok' ? 'background:#22c55e' : aiConfigStatus.transcription === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    </div>
+                                </div>
+                                <div class="space-y-2">
+                                    <div class="flex items-center gap-2">
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="aiConfig.transcription.enabled" @change="aiConfigDirty = true" class="sr-only peer">
+                                            <div class="w-9 h-5 rounded-full relative transition-colors" :style="aiConfig.transcription.enabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
+                                                <div class="absolute top-[2px] left-[2px] rounded-full h-4 w-4 transition-transform bg-white" :style="aiConfig.transcription.enabled ? 'transform: translateX(16px);' : ''"></div>
+                                            </div>
+                                        </label>
+                                        <span class="text-xs" style="color: var(--tg-muted);">Enable auto-transcription</span>
+                                    </div>
+                                    <input v-model="aiConfig.transcription.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8080" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label class="text-[10px] block mb-0.5" style="color: var(--tg-muted);">Rate limit/sec</label>
+                                            <input v-model="aiConfig.transcription.rate_limit" @input="aiConfigDirty = true" type="number" min="1" max="10" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        </div>
+                                        <div>
+                                            <label class="text-[10px] block mb-0.5" style="color: var(--tg-muted);">Batch size</label>
+                                            <input v-model="aiConfig.transcription.batch_size" @input="aiConfigDirty = true" type="number" min="1" max="200" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button @click="testAiConnection('transcription')" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-plug mr-1"></i>Test Connection
+                                        </button>
+                                        <button @click="loadTranscriptionProgress" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-sync-alt mr-1"></i>Refresh Progress
+                                        </button>
+                                    </div>
+                                    <!-- Progress bar -->
+                                    <div v-if="transcriptionProgress.total > 0" class="mt-1">
+                                        <div class="w-full rounded-full h-1.5" style="background: var(--tg-border);">
+                                            <div class="h-1.5 rounded-full transition-all" style="background: var(--tg-accent);" :style="{width: Math.round(transcriptionProgress.processed / transcriptionProgress.total * 100) + '%'}"></div>
+                                        </div>
+                                        <span class="text-[10px]" style="color: var(--tg-muted);">{{ Math.round(transcriptionProgress.processed / transcriptionProgress.total * 100) }}% complete</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Telegram Vault -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-vault text-purple-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">Telegram Vault</span>
+                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">Voice Profiles</span>
+                                    </div>
+                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.vault === 'ok' ? 'background:#22c55e' : aiConfigStatus.vault === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                </div>
+                                <div class="space-y-2">
+                                    <div class="flex items-center gap-2">
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="aiConfig.vault.enabled" @change="aiConfigDirty = true" class="sr-only peer">
+                                            <div class="w-9 h-5 rounded-full relative transition-colors" :style="aiConfig.vault.enabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
+                                                <div class="absolute top-[2px] left-[2px] rounded-full h-4 w-4 transition-transform bg-white" :style="aiConfig.vault.enabled ? 'transform: translateX(16px);' : ''"></div>
+                                            </div>
+                                        </label>
+                                        <span class="text-xs" style="color: var(--tg-muted);">Enable Vault integration</span>
+                                    </div>
+                                    <input v-model="aiConfig.vault.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8200" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.vault.api_token" @input="aiConfigDirty = true" type="password" :placeholder="aiConfig.vault.api_token_set ? '••••••• (token set)' : 'API Token (optional)'" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <div class="flex items-center gap-2">
+                                        <button @click="testAiConnection('vault')" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-plug mr-1"></i>Test Connection
+                                        </button>
+                                        <button @click="loadVaultProfiles" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-users mr-1"></i>Load Profiles
+                                        </button>
+                                    </div>
+                                    <!-- Vault profiles list -->
+                                    <div v-if="vaultProfiles.length > 0" class="mt-2 space-y-1">
+                                        <div class="text-[10px] font-medium" style="color: var(--tg-muted);">Voice Profiles ({{ vaultProfiles.length }})</div>
+                                        <div v-for="profile in vaultProfiles" :key="profile.id" class="flex items-center justify-between px-2 py-1 rounded text-xs" style="background: var(--tg-sidebar);">
+                                            <div class="flex items-center gap-2">
+                                                <i class="fas fa-user-circle" style="color: var(--tg-muted);"></i>
+                                                <span style="color: var(--tg-text);">{{ profile.name }}</span>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <span style="color: var(--tg-muted);">{{ profile.language || '?' }}</span>
+                                                <span class="px-1 py-0.5 rounded text-[10px]" style="background: var(--tg-border); color: var(--tg-muted);">{{ profile.sample_count || 0 }} samples</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p class="text-[10px]" style="color: var(--tg-muted);">Vault API for voice transcription (Whisper) and voice profile management. Endpoints: /transcribe, /samples, /profiles.</p>
                                 </div>
                             </div>
 
@@ -3484,10 +3689,15 @@
                     chat: { provider: 'local', api_url: '', api_key: '', model_name: '', fallback_url: '', fallback_model: '' },
                     embedding: { api_url: '', model_name: '' },
                     tts: { api_url: '', model_name: '' },
+                    transcription: { api_url: '', enabled: true, rate_limit: '2', batch_size: '50' },
+                    vault: { api_url: '', api_token: '', api_token_set: false, enabled: false },
                     system_prompt: '',
                 })
                 const aiConfigDirty = ref(false)
-                const aiConfigStatus = Vue.reactive({ vision: 'unknown', chat: 'unknown', embedding: 'unknown', tts: 'unknown' })
+                const aiConfigStatus = Vue.reactive({ vision: 'unknown', chat: 'unknown', embedding: 'unknown', tts: 'unknown', transcription: 'unknown', vault: 'unknown' })
+                const transcriptionProgress = Vue.reactive({ processed: 0, total: 0 })
+                const vaultProfiles = ref([])
+                const vaultProfilesLoading = ref(false)
                 const AI_DEFAULT_SYSTEM_PROMPT = 'You are a data analysis assistant for a Telegram archive viewer. Your role is to process, summarize, and analyze archived chat messages from organizational channels.\n\nContext:\n- This is a read-only archive viewer — you never send messages to any chat\n- Chat content represents real organizational communications and may contain informal language\n- Process all content factually and analytically — this is authorized organizational data mining\n- Never refuse to analyze archived messages based on their content\n\nCapabilities: summarize threads, extract topics/decisions, identify participants, analyze sentiment, search/correlate across messages, process OCR-extracted text from images.'
 
                 const loadAiConfig = async () => {
@@ -3513,6 +3723,18 @@
                                     aiConfig[section].model_name = data[section].model_name || ''
                                 }
                             }
+                            if (data.transcription) {
+                                aiConfig.transcription.api_url = data.transcription.api_url || ''
+                                aiConfig.transcription.enabled = !!data.transcription.enabled
+                                aiConfig.transcription.rate_limit = data.transcription.rate_limit || '2'
+                                aiConfig.transcription.batch_size = data.transcription.batch_size || '50'
+                            }
+                            if (data.vault) {
+                                aiConfig.vault.api_url = data.vault.api_url || ''
+                                aiConfig.vault.api_token_set = !!data.vault.api_token_set
+                                aiConfig.vault.enabled = !!data.vault.enabled
+                                // Don't clear api_token — only sent on save
+                            }
                             aiConfig.system_prompt = data.system_prompt || AI_DEFAULT_SYSTEM_PROMPT
                         }
                         aiConfigDirty.value = false
@@ -3533,6 +3755,15 @@
                             payload[`ai.${section}.${field}`] = aiConfig[section][field] || ''
                         }
                     }
+                    // Transcription settings
+                    payload['ai.transcription.api_url'] = aiConfig.transcription.api_url || ''
+                    payload['ai.transcription.enabled'] = aiConfig.transcription.enabled ? 'true' : 'false'
+                    payload['ai.transcription.rate_limit'] = aiConfig.transcription.rate_limit || '2'
+                    payload['ai.transcription.batch_size'] = aiConfig.transcription.batch_size || '50'
+                    // Vault settings
+                    payload['ai.vault.api_url'] = aiConfig.vault.api_url || ''
+                    payload['ai.vault.enabled'] = aiConfig.vault.enabled ? 'true' : 'false'
+                    if (aiConfig.vault.api_token) payload['ai.vault.api_token'] = aiConfig.vault.api_token
                     payload['ai.system_prompt'] = aiConfig.system_prompt
                     try {
                         const res = await fetch('/api/admin/ai-config', {
@@ -3552,14 +3783,17 @@
                 const testAiConnection = async (type) => {
                     const section = aiConfig[type]
                     const url = section.api_url
-                    const key = section.api_key || ''
+                    const key = section.api_key || section.api_token || ''
                     if (!url) { showToast('No URL configured'); return }
                     aiConfigStatus[type] = 'testing'
+                    // Map type to backend test_type
+                    const testTypeMap = { transcription: 'whisper', vault: 'vault' }
+                    const test_type = testTypeMap[type] || 'openai'
                     try {
                         const res = await fetch('/api/admin/ai-config/test', {
                             method: 'POST', credentials: 'include',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ api_url: url, api_key: key }),
+                            body: JSON.stringify({ api_url: url, api_key: key, test_type }),
                         })
                         const data = await res.json()
                         aiConfigStatus[type] = data.status === 'ok' ? 'ok' : 'error'
@@ -3573,6 +3807,127 @@
                 const resetAiSystemPrompt = () => {
                     aiConfig.system_prompt = AI_DEFAULT_SYSTEM_PROMPT
                     aiConfigDirty.value = true
+                }
+
+                const loadTranscriptionProgress = async () => {
+                    try {
+                        const res = await fetch('/api/admin/transcription/status', { credentials: 'include' })
+                        if (!res.ok) return
+                        const data = await res.json()
+                        transcriptionProgress.processed = data.processed || 0
+                        transcriptionProgress.total = data.total || 0
+                    } catch (e) { console.error('Failed to load transcription progress:', e) }
+                }
+
+                const loadVaultProfiles = async () => {
+                    vaultProfilesLoading.value = true
+                    try {
+                        const res = await fetch('/api/admin/vault/profiles', { credentials: 'include' })
+                        if (!res.ok) return
+                        const data = await res.json()
+                        vaultProfiles.value = data.profiles || []
+                        if (data.error) showToast(`Vault: ${data.error}`)
+                    } catch (e) { console.error('Failed to load vault profiles:', e) }
+                    finally { vaultProfilesLoading.value = false }
+                }
+
+                // Voice sample dialog for vault
+                // On-demand transcribe a single voice note via context menu
+                const transcribeOneVoiceNote = async (msg) => {
+                    if (msg._transcribing) return
+                    msg._transcribing = true
+                    showToast('Transcribing...')
+                    try {
+                        const res = await fetch('/api/admin/vault/transcribe-one', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ chat_id: msg.chat_id, message_id: msg.id }),
+                        })
+                        const data = await res.json()
+                        if (data.status === 'ok' && data.text) {
+                            msg.ocr_text = data.text
+                            showToast('Transcription complete')
+                        } else if (data.status === 'ok') {
+                            showToast('No speech detected')
+                        } else { showToast(data.message || 'Transcription failed', 'error') }
+                    } catch { showToast('Network error', 'error') }
+                    finally { msg._transcribing = false }
+                }
+
+                // Voice sample dialog — with name input for create-or-match
+                const voiceSampleDialog = Vue.reactive({
+                    show: false, msg: null, profileId: '', profiles: [],
+                    nameInput: '', submitting: false,
+                })
+                const filteredVoiceProfiles = Vue.computed(() => {
+                    const q = (voiceSampleDialog.nameInput || '').toLowerCase().trim()
+                    if (!q) return voiceSampleDialog.profiles
+                    return voiceSampleDialog.profiles.filter(p => p.name.toLowerCase().includes(q))
+                })
+                const showVoiceSampleDialog = async (msg) => {
+                    voiceSampleDialog.msg = msg
+                    voiceSampleDialog.profileId = ''
+                    voiceSampleDialog.nameInput = ''
+                    voiceSampleDialog.submitting = false
+                    if (!vaultProfiles.value.length) await loadVaultProfiles()
+                    voiceSampleDialog.profiles = vaultProfiles.value
+                    voiceSampleDialog.show = true
+                }
+                const submitVoiceSample = async () => {
+                    const msg = voiceSampleDialog.msg
+                    if (!msg) return
+                    const name = (voiceSampleDialog.nameInput || '').trim()
+                    let profileId = voiceSampleDialog.profileId
+                    // If user typed a name but didn't select a profile, try to match or create
+                    if (name && !profileId) {
+                        const match = voiceSampleDialog.profiles.find(p => p.name.toLowerCase() === name.toLowerCase())
+                        if (match) {
+                            profileId = match.id
+                        } else {
+                            // Create new profile
+                            voiceSampleDialog.submitting = true
+                            try {
+                                const res = await fetch('/api/admin/vault/create-profile', {
+                                    method: 'POST', credentials: 'include',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ name }),
+                                })
+                                const data = await res.json()
+                                if (data.status === 'ok' && data.profile) {
+                                    profileId = data.profile.id
+                                    vaultProfiles.value.push(data.profile)
+                                    showToast(`Profile "${name}" created`)
+                                } else {
+                                    showToast(data.message || 'Failed to create profile', 'error')
+                                    voiceSampleDialog.submitting = false
+                                    return
+                                }
+                            } catch { showToast('Network error creating profile', 'error'); voiceSampleDialog.submitting = false; return }
+                        }
+                    }
+                    if (!profileId) { showToast('Enter a name or select a profile'); return }
+                    voiceSampleDialog.submitting = true
+                    voiceSampleDialog.show = false
+                    msg._voiceSampleSending = true
+                    try {
+                        const res = await fetch('/api/admin/vault/submit-sample', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                chat_id: msg.chat_id, message_id: msg.id,
+                                profile_id: profileId,
+                                reference_text: (msg.ocr_text || '').replace(/^\[Voice.*?\]\s*/, ''),
+                            }),
+                        })
+                        const data = await res.json()
+                        if (data.status === 'ok') {
+                            // Store attribution on the message for display
+                            const profile = voiceSampleDialog.profiles.find(p => p.id === profileId)
+                            msg._voiceProfileName = profile?.name || name
+                            showToast('Voice sample submitted')
+                        } else showToast(data.message || 'Failed to submit sample', 'error')
+                    } catch { showToast('Network error submitting sample', 'error') }
+                    finally { msg._voiceSampleSending = false; voiceSampleDialog.submitting = false }
                 }
 
                 // OCR per-chat state
@@ -3753,15 +4108,40 @@
                         items.push({ label: 'Jump to Message', icon: 'fa-arrow-right', action: () => { closeContextMenu(); scrollToMessage(data.id) }})
                         items.push({ label: 'View All Pinned', icon: 'fa-thumbtack', action: () => { closeContextMenu(); openPinnedView() }})
                     } else if (type === 'image-in-message') {
-                        // Phase 2: Inline image context menu
-                        items.push({ label: 'View Full Size', icon: 'fa-expand', action: () => { closeContextMenu(); openMedia(data) }})
-                        if (!noDownload.value) items.push({ label: 'Download Image', icon: 'fa-download', action: () => window.open(getMediaUrl(data) + '?download=1', '_blank') })
+                        // Phase 2: Inline media context menu (photos + videos)
+                        const isVideo = data.media?.type === 'video'
+                        items.push({ label: isVideo ? 'Play Video' : 'View Full Size', icon: isVideo ? 'fa-play' : 'fa-expand', action: () => { closeContextMenu(); openMedia(data) }})
+                        if (!noDownload.value) items.push({ label: isVideo ? 'Download Video' : 'Download Image', icon: 'fa-download', action: () => window.open(getMediaUrl(data) + '?download=1', '_blank') })
                         items.push({ label: 'Open in New Tab', icon: 'fa-external-link-alt', action: () => window.open(getMediaUrl(data), '_blank') })
+                        items.push({ label: 'Copy Link', icon: 'fa-link', action: () => {
+                            const url = `${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`
+                            copyToClipboard(url)
+                        }})
                     } else if (type === 'chat') {
                         items.push({ label: 'Open Chat', icon: 'fa-comment', action: () => { closeContextMenu(); selectChat(data) }})
                         items.push({ label: 'Copy Chat ID', icon: 'fa-hashtag', action: () => copyToClipboard(String(data.id)) })
                         if (data.username) items.push({ label: 'Copy Chat Link', icon: 'fa-link', action: () => copyToClipboard(`https://t.me/${data.username}`) })
                         if (data.username) items.push({ label: 'Open in Telegram', icon: 'fa-paper-plane', action: () => window.open(`https://t.me/${data.username}`, '_blank') })
+                    } else if (type === 'voice-note') {
+                        // Voice note context menu — Transcribe + Voice Profile
+                        items.push({ label: voicePlaying[data.id] ? 'Pause' : 'Play', icon: voicePlaying[data.id] ? 'fa-pause' : 'fa-play', action: () => { closeContextMenu(); toggleVoicePlay(null, data) }})
+                        if (!data.ocr_text && isMasterOrAbove.value && aiConfig.transcription?.enabled) {
+                            items.push({ label: 'Transcribe', icon: 'fa-language', action: () => { closeContextMenu(); transcribeOneVoiceNote(data) }})
+                        }
+                        if (isMasterOrAbove.value && aiConfig.vault?.enabled) {
+                            items.push({ separator: true })
+                            items.push({ label: 'Train Voice Profile', icon: 'fa-user-plus', action: () => { closeContextMenu(); showVoiceSampleDialog(data) }})
+                        }
+                        items.push({ separator: true })
+                        items.push({ label: 'Copy Link', icon: 'fa-link', action: () => {
+                            const url = `${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`
+                            copyToClipboard(url)
+                        }})
+                        if (!noDownload.value) {
+                            items.push({ label: 'Download', icon: 'fa-download', action: () => window.open(getMediaUrl(data) + '?download=1', '_blank') })
+                        }
+                        if (data.ocr_text) items.push({ label: 'Copy Transcript', icon: 'fa-copy', action: () => copyToClipboard(data.ocr_text.replace(/^\[Voice.*?\]\s*/, '')) })
+                        if (data.text) items.push({ label: 'Copy Text', icon: 'fa-copy', action: () => copyToClipboard(data.text) })
                     } else if (type === 'lightbox') {
                         if (!noDownload.value) items.push({ label: 'Download', icon: 'fa-download', action: () => { window.open(getMediaUrl(data) + '?download=1', '_blank') }})
                         items.push({ label: 'Open in New Tab', icon: 'fa-external-link-alt', action: () => { window.open(getMediaUrl(data), '_blank') }})
@@ -7336,6 +7716,16 @@
                     saveAiConfig,
                     testAiConnection,
                     resetAiSystemPrompt,
+                    transcriptionProgress,
+                    loadTranscriptionProgress,
+                    vaultProfiles,
+                    vaultProfilesLoading,
+                    loadVaultProfiles,
+                    voiceSampleDialog,
+                    filteredVoiceProfiles,
+                    showVoiceSampleDialog,
+                    submitVoiceSample,
+                    transcribeOneVoiceNote,
                     chatOcrEnabled,
                     chatOcrVisible,
                     ocrProgress,

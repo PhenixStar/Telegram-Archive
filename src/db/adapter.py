@@ -910,6 +910,13 @@ class DatabaseAdapter:
             row = result.scalar_one_or_none()
             return row if row else 0
 
+    async def get_all_last_message_ids(self) -> dict[int, int]:
+        """Bulk-load {chat_id: last_message_id} for all synced chats."""
+        async with self.db_manager.async_session_factory() as session:
+            stmt = select(SyncStatus.chat_id, SyncStatus.last_message_id)
+            result = await session.execute(stmt)
+            return {row.chat_id: row.last_message_id for row in result}
+
     @retry_on_locked()
     async def update_sync_status(self, chat_id: int, last_message_id: int, message_count: int) -> None:
         """Update sync status for a chat using atomic upsert."""
@@ -2693,6 +2700,11 @@ class DatabaseAdapter:
                         Message.ocr_text.is_(None),
                         Media.type.in_(["photo", "document"]),
                         Media.downloaded == 1,
+                        # Exclude PDFs/videos/audio — only process images
+                        ~Media.file_path.ilike("%.pdf"),
+                        ~Media.file_path.ilike("%.mp4"),
+                        ~Media.file_path.ilike("%.mp3"),
+                        ~Media.file_path.ilike("%.ogg"),
                     )
                 )
                 .order_by(Message.date.desc())
@@ -2701,6 +2713,28 @@ class DatabaseAdapter:
             result = await session.execute(stmt)
             return [
                 {"message_id": r[0], "chat_id": r[1], "file_path": r[2], "type": r[3], "mime_type": r[4]}
+                for r in result
+            ]
+
+    async def get_messages_needing_transcription(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Get voice messages that haven't been transcribed yet (across all chats)."""
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(Message.id, Message.chat_id, Media.file_path)
+                .join(Media, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+                .where(
+                    and_(
+                        Message.ocr_text.is_(None),
+                        Media.type == "voice",
+                        Media.downloaded == 1,
+                    )
+                )
+                .order_by(Message.date.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [
+                {"message_id": r[0], "chat_id": r[1], "file_path": r[2]}
                 for r in result
             ]
 
@@ -2737,6 +2771,38 @@ class DatabaseAdapter:
             processed = processed_result.scalar() or 0
 
             return {"processed": processed, "total": total}
+
+    async def get_transcription_progress(self) -> dict[str, int]:
+        """Get global voice transcription progress: processed vs total."""
+        async with self.db_manager.async_session_factory() as session:
+            total_result = await session.execute(
+                select(func.count(Media.id))
+                .join(Message, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+                .where(and_(Media.type == "voice", Media.downloaded == 1))
+            )
+            total = total_result.scalar() or 0
+            processed_result = await session.execute(
+                select(func.count(Media.id))
+                .join(Message, and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id))
+                .where(and_(Media.type == "voice", Media.downloaded == 1, Message.ocr_text.isnot(None)))
+            )
+            processed = processed_result.scalar() or 0
+            return {"processed": processed, "total": total}
+
+    async def get_media_for_message(self, chat_id: int, message_id: int) -> dict[str, Any] | None:
+        """Get the first media record for a specific message."""
+        async with self.db_manager.async_session_factory() as session:
+            stmt = select(Media).where(
+                and_(Media.chat_id == chat_id, Media.message_id == message_id)
+            ).limit(1)
+            result = await session.execute(stmt)
+            m = result.scalar_one_or_none()
+            if not m:
+                return None
+            return {
+                "id": m.id, "message_id": m.message_id, "chat_id": m.chat_id,
+                "type": m.type, "file_path": m.file_path, "downloaded": m.downloaded,
+            }
 
     async def get_ai_context_for_chat(self, chat_id: int, limit: int = 30) -> list[dict[str, Any]]:
         """Get recent messages with AI annotations for AI context building."""

@@ -495,21 +495,28 @@ _OLLAMA_V1 = f"{_OLLAMA_BASE}/v1" if not _OLLAMA_BASE.endswith("/v1") else _OLLA
 
 _AI_CONFIG_DEFAULTS = {
     "ai.vision.provider": "local",
-    "ai.vision.api_url": "http://host.docker.internal:8080/v1",
+    "ai.vision.api_url": "http://host.docker.internal:8081/v1",
     "ai.vision.api_key": "",
     "ai.vision.model_name": "glm-ocr",
     "ai.vision.fallback_url": _OLLAMA_V1,
-    "ai.vision.fallback_model": "qwen3-vl-30b-a3b",
+    "ai.vision.fallback_model": "gemma3:27b",
     "ai.chat.provider": "local",
     "ai.chat.api_url": _OLLAMA_V1,
     "ai.chat.api_key": "",
-    "ai.chat.model_name": "qwen3-next-80b-a3b",
+    "ai.chat.model_name": "qwen3-next-80b",
     "ai.chat.fallback_url": "",
     "ai.chat.fallback_model": "",
     "ai.embedding.api_url": _OLLAMA_V1,
     "ai.embedding.model_name": config.ollama_embed_model,
+    "ai.transcription.api_url": "http://host.docker.internal:8080",
+    "ai.transcription.enabled": "true",
+    "ai.transcription.rate_limit": "2",
+    "ai.transcription.batch_size": "50",
     "ai.tts.api_url": "http://host.docker.internal:8880/v1",
     "ai.tts.model_name": "kokoro",
+    "ai.vault.api_url": "http://host.docker.internal:8200",
+    "ai.vault.api_token": "",
+    "ai.vault.enabled": "false",
     "ai.system_prompt": (
         "You are a data analysis assistant for a Telegram archive viewer. "
         "Your role is to process, summarize, and analyze archived chat messages from organizational channels.\n\n"
@@ -727,8 +734,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.ocr_worker = ocr_worker
     await ocr_worker.start()
 
+    # Start background voice transcription worker
+    from ..transcription_worker import TranscriptionWorker
+    transcription_worker = TranscriptionWorker(db, config)
+    app.state.transcription_worker = transcription_worker
+    await transcription_worker.start()
+
 
     yield
+
+    # Stop transcription worker
+    if hasattr(app.state, "transcription_worker") and app.state.transcription_worker:
+        await app.state.transcription_worker.stop()
 
     # Stop OCR worker
     if hasattr(app.state, "ocr_worker") and app.state.ocr_worker:
@@ -3164,6 +3181,17 @@ async def ai_config_endpoint(user: UserContext = Depends(require_auth)):
             "api_url": ai_keys.get("ai.tts.api_url", ""),
             "model_name": ai_keys.get("ai.tts.model_name", ""),
         },
+        "transcription": {
+            "api_url": ai_keys.get("ai.transcription.api_url", ""),
+            "enabled": ai_keys.get("ai.transcription.enabled", "true") == "true",
+            "rate_limit": ai_keys.get("ai.transcription.rate_limit", "2"),
+            "batch_size": ai_keys.get("ai.transcription.batch_size", "50"),
+        },
+        "vault": {
+            "api_url": ai_keys.get("ai.vault.api_url", ""),
+            "api_token_set": bool(ai_keys.get("ai.vault.api_token", "")),
+            "enabled": ai_keys.get("ai.vault.enabled", "false") == "true",
+        },
         "system_prompt": ai_keys.get("ai.system_prompt", ""),
     }
 
@@ -3173,7 +3201,7 @@ async def update_ai_config(request: Request, user: UserContext = Depends(require
     """Bulk update AI configuration settings (admin only)."""
     body = await request.json()
     # Whitelist of allowed keys to prevent arbitrary setting writes
-    allowed_prefixes = ("ai.vision.", "ai.chat.", "ai.embedding.", "ai.tts.", "ai.system_prompt")
+    allowed_prefixes = ("ai.vision.", "ai.chat.", "ai.embedding.", "ai.tts.", "ai.transcription.", "ai.vault.", "ai.system_prompt")
     for key, value in body.items():
         if not any(key.startswith(p) or key == p for p in allowed_prefixes):
             continue
@@ -3188,6 +3216,7 @@ async def test_ai_connection(request: Request, user: UserContext = Depends(requi
     body = await request.json()
     api_url = body.get("api_url", "").rstrip("/")
     api_key = body.get("api_key", "")
+    test_type = body.get("test_type", "openai")
     if not api_url:
         return {"status": "error", "message": "No URL provided"}
     headers = {"Content-Type": "application/json"}
@@ -3195,15 +3224,30 @@ async def test_ai_connection(request: Request, user: UserContext = Depends(requi
         headers["Authorization"] = f"Bearer {api_key}"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Try /v1/models first (OpenAI-compatible), fallback to /health
-            for path in [f"{api_url}/models", f"{api_url.rsplit('/v1', 1)[0]}/health"]:
-                try:
-                    resp = await client.get(path, headers=headers)
-                    if resp.status_code < 500:
-                        return {"status": "ok", "message": f"Connected ({resp.status_code})"}
-                except Exception:
-                    continue
-            return {"status": "error", "message": "Endpoint unreachable"}
+            if test_type == "whisper":
+                # Voicebox health check
+                resp = await client.get(f"{api_url}/health", headers=headers)
+                if resp.status_code < 500:
+                    return {"status": "ok", "message": f"Whisper connected ({resp.status_code})"}
+                return {"status": "error", "message": f"Whisper unreachable ({resp.status_code})"}
+            elif test_type == "vault":
+                # Vault API — check /profiles endpoint
+                resp = await client.get(f"{api_url}/profiles", headers=headers)
+                if resp.status_code < 500:
+                    profiles = resp.json() if resp.status_code == 200 else []
+                    count = len(profiles) if isinstance(profiles, list) else 0
+                    return {"status": "ok", "message": f"Vault connected — {count} profiles"}
+                return {"status": "error", "message": f"Vault unreachable ({resp.status_code})"}
+            else:
+                # Default: OpenAI-compatible — try /v1/models, fallback /health
+                for path in [f"{api_url}/models", f"{api_url.rsplit('/v1', 1)[0]}/health"]:
+                    try:
+                        resp = await client.get(path, headers=headers)
+                        if resp.status_code < 500:
+                            return {"status": "ok", "message": f"Connected ({resp.status_code})"}
+                    except Exception:
+                        continue
+                return {"status": "error", "message": "Endpoint unreachable"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:200]}
 
@@ -3241,6 +3285,161 @@ async def toggle_chat_ocr_visibility(chat_id: int, request: Request, user: UserC
     visible = body.get("visible", True)
     await db.set_setting(f"ocr_visible:{chat_id}", "true" if visible else "false")
     return {"chat_id": chat_id, "ocr_visible": visible}
+
+
+@app.get("/api/admin/transcription/status")
+async def get_transcription_status(user: UserContext = Depends(require_master)):
+    """Get global voice transcription progress (admin only)."""
+    progress = await db.get_transcription_progress()
+    enabled_val = await db.get_setting("ai.transcription.enabled")
+    return {
+        "enabled": enabled_val == "true" if enabled_val else True,
+        **progress,
+    }
+
+
+@app.get("/api/admin/vault/profiles")
+async def get_vault_profiles(user: UserContext = Depends(require_master)):
+    """Proxy to Vault API to list voice profiles (admin only)."""
+    import httpx
+    vault_url = (await db.get_setting("ai.vault.api_url") or "").rstrip("/")
+    vault_token = await db.get_setting("ai.vault.api_token") or ""
+    if not vault_url:
+        return {"profiles": [], "error": "Vault API URL not configured"}
+    headers = {}
+    if vault_token:
+        headers["Authorization"] = f"Bearer {vault_token}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{vault_url}/profiles", headers=headers)
+            resp.raise_for_status()
+            return {"profiles": resp.json()}
+    except Exception as e:
+        return {"profiles": [], "error": str(e)[:200]}
+
+
+@app.post("/api/admin/vault/submit-sample")
+async def submit_vault_voice_sample(request: Request, user: UserContext = Depends(require_master)):
+    """Submit a voice note as a voice sample to the Vault API."""
+    import httpx
+    import base64
+    body = await request.json()
+    chat_id = body.get("chat_id")
+    message_id = body.get("message_id")
+    profile_id = body.get("profile_id", "")
+    reference_text = body.get("reference_text", "")
+    if not all([chat_id, message_id, profile_id]):
+        return {"status": "error", "message": "Missing chat_id, message_id, or profile_id"}
+    # Get the voice note file path from DB
+    media = await db.get_media_for_message(chat_id, message_id)
+    if not media or not media.get("file_path"):
+        return {"status": "error", "message": "Voice note file not found"}
+    # Resolve path
+    file_path = media["file_path"]
+    if not os.path.isabs(file_path):
+        file_path = os.path.join(config.backup_path, file_path)
+    if not os.path.isabs(file_path) or not os.path.exists(file_path):
+        # Fallback: extract relative media/ subpath
+        raw = media["file_path"]
+        if "/media/" in raw:
+            rel = raw[raw.index("/media/") + 1:]
+            file_path = os.path.join(config.backup_path, rel)
+    if not os.path.exists(file_path):
+        return {"status": "error", "message": "Voice note file not found on disk"}
+    # Read and base64-encode the audio
+    with open(file_path, "rb") as f:
+        audio_b64 = base64.b64encode(f.read()).decode()
+    # Submit to Vault API
+    vault_url = (await db.get_setting("ai.vault.api_url") or "").rstrip("/")
+    vault_token = await db.get_setting("ai.vault.api_token") or ""
+    if not vault_url:
+        return {"status": "error", "message": "Vault API URL not configured"}
+    headers = {"Content-Type": "application/json"}
+    if vault_token:
+        headers["Authorization"] = f"Bearer {vault_token}"
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{vault_url}/samples", headers=headers, json={
+                "profile_id": profile_id,
+                "audio_base64": audio_b64,
+                "reference_text": reference_text,
+                "filename": os.path.basename(file_path),
+            })
+            resp.raise_for_status()
+            return {"status": "ok", "sample": resp.json()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+
+
+@app.post("/api/admin/vault/create-profile")
+async def create_vault_profile(request: Request, user: UserContext = Depends(require_master)):
+    """Create a new voice profile in the Vault API."""
+    import httpx
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    language = body.get("language", "auto")
+    if not name:
+        return {"status": "error", "message": "Profile name is required"}
+    vault_url = (await db.get_setting("ai.vault.api_url") or "").rstrip("/")
+    vault_token = await db.get_setting("ai.vault.api_token") or ""
+    if not vault_url:
+        return {"status": "error", "message": "Vault API URL not configured"}
+    headers = {"Content-Type": "application/json"}
+    if vault_token:
+        headers["Authorization"] = f"Bearer {vault_token}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(f"{vault_url}/profiles", headers=headers, json={
+                "name": name,
+                "language": language,
+            })
+            resp.raise_for_status()
+            profile = resp.json()
+            return {"status": "ok", "profile": profile}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+
+
+@app.post("/api/admin/vault/transcribe-one")
+async def transcribe_single_voice_note(request: Request, user: UserContext = Depends(require_master)):
+    """Transcribe a single voice note on-demand via Voicebox."""
+    import httpx
+    body = await request.json()
+    chat_id = body.get("chat_id")
+    message_id = body.get("message_id")
+    if not all([chat_id, message_id]):
+        return {"status": "error", "message": "Missing chat_id or message_id"}
+    media = await db.get_media_for_message(chat_id, message_id)
+    if not media or not media.get("file_path"):
+        return {"status": "error", "message": "Voice note file not found"}
+    file_path = media["file_path"]
+    if not os.path.isabs(file_path):
+        file_path = os.path.join(config.backup_path, file_path)
+    if not os.path.exists(file_path):
+        raw = media["file_path"]
+        if "/media/" in raw:
+            rel = raw[raw.index("/media/") + 1:]
+            file_path = os.path.join(config.backup_path, rel)
+    if not os.path.exists(file_path):
+        return {"status": "error", "message": "Voice note file not found on disk"}
+    api_url = (await db.get_setting("ai.transcription.api_url") or "http://host.docker.internal:8080").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            with open(file_path, "rb") as f:
+                files = {"file": (os.path.basename(file_path), f, "audio/ogg")}
+                resp = await client.post(f"{api_url}/transcribe/file", files=files)
+            resp.raise_for_status()
+            data = resp.json()
+            text = (data.get("text") or "").strip()
+            if text:
+                lang = data.get("language", "")
+                duration = data.get("duration", 0)
+                transcript = f"[Voice {duration:.0f}s, {lang}] {text}"
+                await db.update_ocr_text(chat_id, message_id, transcript)
+                return {"status": "ok", "text": transcript}
+            return {"status": "ok", "text": ""}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
 
 
 @app.post("/api/ai/ocr/{chat_id}/{message_id}")
