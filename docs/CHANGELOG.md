@@ -6,6 +6,14 @@ For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
 ## [Unreleased]
 
+### Changed
+
+- **Code structure refactor** — Split 3 oversized files into modular architecture:
+  - `db/adapter.py` (3,142 LOC) → 7 files via mixin pattern (adapter + 6 domain mixins)
+  - `web/main.py` (3,849 LOC) → 8 files via APIRouter pattern (main + dependencies + 6 route modules)
+  - `telegram_backup.py` (1,827 LOC) → 3 files via mixin pattern (orchestration + media + extraction)
+- **Total:** 39 source files, 15,864 LOC. All public APIs preserved — zero breaking changes.
+
 ## [7.3.0] - 2026-03-11
 
 ### Added

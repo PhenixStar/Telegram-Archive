@@ -8,10 +8,26 @@
 
 ## Key File Locations
 - `src/web/templates/index.html` — entire frontend (Vue 3 app, CSS, HTML)
-- `src/web/main.py` — FastAPI routes, auth, WebSocket
-- `src/db/adapter.py` — database query layer (SQLAlchemy async)
-- `src/db/models.py` — SQLAlchemy ORM models
-- `src/db/base.py` — database manager, engine setup
+- `src/web/main.py` — FastAPI app bootstrap, lifespan, background tasks (493 LOC)
+- `src/web/dependencies.py` — shared state, auth helpers, ConnectionManager (528 LOC)
+- `src/web/routes_auth.py` — login, logout, auth check, profiles (371 LOC)
+- `src/web/routes_chat.py` — chat list, messages, search, FTS (726 LOC)
+- `src/web/routes_media.py` — media serving, thumbnails, LQIP (188 LOC)
+- `src/web/routes_admin.py` — admin CRUD, settings, backup config (867 LOC)
+- `src/web/routes_ai.py` — AI chat, OCR, semantic search, embedding (667 LOC)
+- `src/web/routes_websocket.py` — WebSocket, broadcast helpers (141 LOC)
+- `src/db/adapter.py` — database adapter (mixin composition class, 178 LOC)
+- `src/db/adapter_messages.py` — message CRUD, pagination (840 LOC)
+- `src/db/adapter_media.py` — media files, reactions (294 LOC)
+- `src/db/adapter_viewer.py` — auth, sessions, tokens, audit (433 LOC)
+- `src/db/adapter_sync.py` — chats, sync, folders, profiles, stats (1023 LOC)
+- `src/db/adapter_settings.py` — app settings (57 LOC)
+- `src/db/adapter_search.py` — FTS, OCR, embeddings, semantic search (491 LOC)
+- `src/db/models.py` — SQLAlchemy ORM models (522 LOC)
+- `src/db/base.py` — database manager, engine setup (312 LOC)
+- `src/telegram_backup.py` — backup orchestration (1167 LOC, uses mixins)
+- `src/backup_media.py` — media download/processing mixin (382 LOC)
+- `src/backup_extraction.py` — data extraction mixin (312 LOC)
 - `src/config.py` — environment variable config
 - `src/realtime.py` — Telegram real-time listener
 
@@ -30,6 +46,9 @@
 - Access control: `user.allowed_chat_ids` filters per-viewer
 - Message rendering: `v-for` on `sortedMessages`, service vs regular branching
 - Media: lightbox for images/videos, audio player for voice notes
+- **Web routes:** FastAPI APIRouter pattern — each `routes_*.py` imports `from . import dependencies as deps` and accesses shared state via `deps.db`, `deps.config`, `deps.manager` (module-level vars set during lifespan via `set_app_state()`)
+- **DB adapter:** Mixin composition — `DatabaseAdapter` inherits 6 domain mixins; each mixin uses `self.db_manager` for DB access
+- **Backup:** Mixin composition — `TelegramBackup` inherits `BackupMediaMixin` + `BackupExtractionMixin`
 
 ## Build & Run
 ```bash
