@@ -43,7 +43,7 @@ async def serve_thumbnail(
     user: UserContext = Depends(require_auth),
 ):
     """Serve on-demand generated thumbnails with auth and path traversal protection."""
-    if not _media_root:
+    if not deps._media_root:
         raise HTTPException(status_code=404, detail="Media directory not configured")
 
     user_chat_ids = get_user_chat_ids(user)
@@ -57,9 +57,9 @@ async def serve_thumbnail(
 
     from .thumbnails import ensure_thumbnail, ensure_video_thumbnail, _is_video
 
-    thumb_path = await ensure_thumbnail(_media_root, size, folder, filename)
+    thumb_path = await ensure_thumbnail(deps._media_root, size, folder, filename)
     if not thumb_path and _is_video(filename):
-        thumb_path = await ensure_video_thumbnail(_media_root, size, folder, filename)
+        thumb_path = await ensure_video_thumbnail(deps._media_root, size, folder, filename)
 
     if not thumb_path:
         raise HTTPException(status_code=404, detail="Thumbnail not available")
@@ -74,7 +74,7 @@ async def serve_thumbnail(
 @router.get("/api/lqip/{folder:path}/{filename}")
 async def serve_lqip(folder: str, filename: str, user: UserContext = Depends(require_auth)):
     """Return a tiny base64 blur placeholder for progressive image loading."""
-    if not _media_root:
+    if not deps._media_root:
         return JSONResponse({"blur": None})
 
     user_chat_ids = get_user_chat_ids(user)
@@ -89,7 +89,7 @@ async def serve_lqip(folder: str, filename: str, user: UserContext = Depends(req
     from .thumbnails import generate_lqip_base64
 
     try:
-        blur = await generate_lqip_base64(_media_root, folder, filename)
+        blur = await generate_lqip_base64(deps._media_root, folder, filename)
     except Exception:
         blur = None
 
@@ -102,7 +102,7 @@ async def serve_lqip(folder: str, filename: str, user: UserContext = Depends(req
 @router.get("/media/{path:path}")
 async def serve_media(path: str, download: int = Query(0), user: UserContext = Depends(require_auth)):
     """Serve media files with authentication, path traversal protection, and no_download enforcement."""
-    if not _media_root:
+    if not deps._media_root:
         raise HTTPException(status_code=404, detail="Media directory not configured")
 
     if user.no_download and download:
@@ -111,12 +111,12 @@ async def serve_media(path: str, download: int = Query(0), user: UserContext = D
     if ".." in path.split("/") or path.startswith("/"):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    candidate = _media_root / path
+    candidate = deps._media_root / path
     try:
         resolved = candidate.resolve(strict=True)
     except (OSError, ValueError):
         raise HTTPException(status_code=404, detail="File not found")
-    if not resolved.is_relative_to(_media_root):
+    if not resolved.is_relative_to(deps._media_root):
         raise HTTPException(status_code=403, detail="Access denied")
 
     user_chat_ids = get_user_chat_ids(user)

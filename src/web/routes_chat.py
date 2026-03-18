@@ -677,7 +677,7 @@ async def push_subscribe(request: Request, user: UserContext = Depends(require_a
 @router.post("/api/push/unsubscribe")
 async def push_unsubscribe(request: Request, user: UserContext = Depends(require_auth)):
     """Unsubscribe from push notifications."""
-    if not push_manager:
+    if not deps.push_manager:
         raise HTTPException(status_code=400, detail="Push notifications not enabled")
 
     try:
@@ -702,8 +702,6 @@ async def push_unsubscribe(request: Request, user: UserContext = Depends(require
 @router.post("/internal/push")
 async def internal_push(request: Request):
     """Internal endpoint for SQLite real-time push notifications."""
-    from .dependencies import realtime_listener
-
     client_host = request.client.host if request.client else None
 
     allowed = False
@@ -718,8 +716,8 @@ async def internal_push(request: Request):
 
     try:
         payload = await request.json()
-        if realtime_listener:
-            await realtime_listener.handle_http_push(payload)
+        if deps.realtime_listener:
+            await deps.realtime_listener.handle_http_push(payload)
         return {"status": "ok"}
     except Exception as e:
         logger.warning(f"Error handling internal push: {e}")
