@@ -1501,15 +1501,32 @@
                             <div class="flex items-center gap-1">
                                 <!-- Search Bar - responsive width -->
                                 <div class="relative w-20 sm:w-48 md:w-64">
-                                    <input v-model="messageSearchQuery" @input="searchMessages" type="text"
-                                        placeholder="Search..."
-                                        class="w-full bg-gray-900 text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <input v-model="messageSearchQuery" @input="searchMessages"
+                                        @keydown.enter.prevent="navigateSearchMatch(1)"
+                                        @keydown.escape.prevent="clearHeaderSearch"
+                                        type="text" placeholder="Search..."
+                                        class="w-full text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        style="background: color-mix(in srgb, var(--tg-sidebar) 80%, white)">
                                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
                                         stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                     </svg>
                                 </div>
+                                <!-- Match count + navigation (visible when header searching) -->
+                                <template v-if="messageSearchQuery.trim()">
+                                    <span class="text-xs whitespace-nowrap hidden sm:inline" style="color: var(--tg-muted);">
+                                        {{ searchMatchCount > 0 ? `${searchMatchIndex + 1} / ${searchMatchCount}` : 'No matches' }}
+                                    </span>
+                                    <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(-1)"
+                                        class="p-0.5 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Previous match">
+                                        <i class="fas fa-chevron-up text-[10px]"></i>
+                                    </button>
+                                    <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(1)"
+                                        class="p-0.5 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Next match">
+                                        <i class="fas fa-chevron-down text-[10px]"></i>
+                                    </button>
+                                </template>
                                 <!-- Date filter fields — inline, hidden on mobile to prevent overflow -->
                                 <div v-if="showAdvancedSearch" class="hidden sm:flex items-center gap-1.5">
                                     <input v-model="searchDateFrom" type="date"
@@ -1829,7 +1846,7 @@
                         {{ floatingDate }}
                     </div>
                     <!-- Search bar (absolute overlay at top) -->
-                    <div v-show="searchBarVisible" class="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2 border-b shadow-lg" style="background: var(--tg-sidebar); border-color: var(--tg-border); z-index: 20;">
+                    <div v-show="searchBarVisible" class="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2 border-b shadow-lg" style="background: color-mix(in srgb, var(--tg-sidebar) 80%, white); border-color: var(--tg-border); z-index: 20;">
                         <button @click="semanticSearchMode = !semanticSearchMode; handleSearchInput()" class="p-1 rounded hover:opacity-80" :style="{ color: semanticSearchMode ? 'var(--tg-accent)' : 'var(--tg-muted)' }" :title="semanticSearchMode ? 'Semantic search (AI)' : 'Text search'">
                             <i :class="semanticSearchMode ? 'fas fa-brain' : 'fas fa-search'" class="text-xs"></i>
                         </button>
@@ -5707,6 +5724,14 @@
                     showMediaPanel.value = false  // Close panels when switching chats
                     showProfilePanel.value = false
                     stopOcrPolling()
+                    // Clear overlay search state on chat switch (without reloading — selectChat handles that)
+                    searchBarVisible.value = false
+                    msgSearchQuery.value = ''
+                    searchMatchCount.value = 0
+                    searchMatchIndex.value = -1
+                    semanticResults.value = []
+                    semanticSearchLoading.value = false
+                    clearSearchHighlights()
                     chatOcrEnabled.value = false
                     chatOcrVisible.value = false
                     ocrProgress.value = null
@@ -5942,6 +5967,20 @@
                         if (messagesScrollObserver && loadMoreSentinel.value) {
                             messagesScrollObserver.observe(loadMoreSentinel.value)
                         }
+                        // Re-apply search highlights if header search is active
+                        const activeQ = messageSearchQuery.value.trim().replace(/from:\S+/g, '').trim()
+                        if (activeQ) {
+                            applySearchHighlights(messagesContainer.value, activeQ)
+                            const marks = messagesContainer.value?.querySelectorAll('mark') || []
+                            searchMatchCount.value = marks.length
+                            if (searchMatchIndex.value >= marks.length) {
+                                searchMatchIndex.value = marks.length > 0 ? 0 : -1
+                            }
+                            // Restore current match highlight
+                            if (searchMatchIndex.value >= 0 && marks[searchMatchIndex.value]) {
+                                marks[searchMatchIndex.value].classList.add('current')
+                            }
+                        }
                     }
                 }
 
@@ -5997,7 +6036,41 @@
                     messages.value = []
                     page.value = 0
                     hasMore.value = true
+                    // Clear previous highlights before loading
+                    clearSearchHighlights()
+                    searchMatchCount.value = 0
+                    searchMatchIndex.value = -1
                     await loadMessages()
+                    // Apply highlights after messages render (strip from: prefix for sender searches)
+                    const rawQ = messageSearchQuery.value.trim()
+                    const q = rawQ.replace(/from:\S+/g, '').trim()
+                    if (q) {
+                        await Vue.nextTick()
+                        applySearchHighlights(messagesContainer.value, q)
+                        const marks = messagesContainer.value?.querySelectorAll('mark') || []
+                        searchMatchCount.value = marks.length
+                        searchMatchIndex.value = marks.length > 0 ? 0 : -1
+                        if (marks.length > 0) {
+                            marks[0].classList.add('current')
+                            marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
+                        }
+                    } else {
+                        searchMatchCount.value = 0
+                        searchMatchIndex.value = -1
+                    }
+                }
+
+                const clearHeaderSearch = () => {
+                    messageSearchQuery.value = ''
+                    clearSearchHighlights()
+                    searchMatchCount.value = 0
+                    searchMatchIndex.value = -1
+                    // Invalidate in-flight search responses
+                    ++chatVersion
+                    messages.value = []
+                    page.value = 0
+                    hasMore.value = true
+                    loadMessages()
                 }
 
                 let _scrollRafPending = false
@@ -7492,6 +7565,7 @@
                     openPinnedView,
                     closePinnedView,
                     searchMessages,
+                    clearHeaderSearch,
                     isOwnMessage,
                     getSenderName,
                     getSenderInitial,
