@@ -419,7 +419,7 @@ async def delete_token(token_id: int, request: Request, user: UserContext = Depe
 @router.get("/api/admin/profiles")
 async def admin_list_profiles(user: UserContext = Depends(require_master)):
     """List backup profiles."""
-    profiles = await deps.db.list_backup_profiles() if db else []
+    profiles = await deps.db.list_backup_profiles() if deps.db else []
     if user.role == "admin" and user.allowed_profile_ids is not None:
         profiles = [p for p in profiles if p["id"] in user.allowed_profile_ids]
     return {"profiles": profiles}
@@ -470,8 +470,8 @@ async def admin_delete_profile(profile_id: str, user: UserContext = Depends(requ
 @router.get("/api/admin/admins")
 async def admin_list_admins(user: UserContext = Depends(require_super_admin)):
     """List all admin/super_admin user accounts."""
-    accounts = await deps.db.list_user_accounts() if db else []
-    profiles = await deps.db.list_backup_profiles() if db else []
+    accounts = await deps.db.list_user_accounts() if deps.db else []
+    profiles = await deps.db.list_backup_profiles() if deps.db else []
     profile_map = {p["id"]: p["name"] for p in profiles}
     safe_accounts = []
     for acct in accounts:
@@ -502,10 +502,10 @@ async def admin_create_admin(request: Request, user: UserContext = Depends(requi
     if len(password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
 
-    existing = await deps.db.get_user_by_username(username) if db else None
+    existing = await deps.db.get_user_by_username(username) if deps.db else None
     if existing:
         raise HTTPException(409, "Username already exists")
-    existing_viewer = await deps.db.get_viewer_by_username(username) if db else None
+    existing_viewer = await deps.db.get_viewer_by_username(username) if deps.db else None
     if existing_viewer:
         raise HTTPException(409, "Username already exists as viewer")
 

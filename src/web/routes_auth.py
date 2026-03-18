@@ -43,7 +43,7 @@ async def get_profiles():
     Always returns at least one profile so the selector is always visible.
     """
     # 1. DB-backed profiles (v11.0.0)
-    if db:
+    if deps.db:
         try:
             profiles = await deps.db.list_backup_profiles(active_only=True)
             if profiles:
@@ -145,7 +145,7 @@ async def login(request: Request):
     user_agent = request.headers.get("user-agent", "")[:500]
 
     # 1. Check DB user accounts (super_admin / admin) first
-    if db:
+    if deps.db:
         user_acct = await deps.db.get_user_by_username(username)
         if user_acct and user_acct["is_active"]:
             if _verify_password(password, user_acct["salt"], user_acct["password_hash"]):
@@ -167,7 +167,7 @@ async def login(request: Request):
                     samesite="lax",
                     max_age=AUTH_SESSION_SECONDS,
                 )
-                if db:
+                if deps.db:
                     await deps.db.create_audit_log(
                         username=username,
                         role=acct_role,
@@ -179,7 +179,7 @@ async def login(request: Request):
                 return response
 
     # 2. Check DB viewer accounts
-    if db:
+    if deps.db:
         viewer = await deps.db.get_viewer_by_username(username)
         if viewer and viewer["is_active"]:
             if _verify_password(password, viewer["salt"], viewer["password_hash"]):
@@ -202,7 +202,7 @@ async def login(request: Request):
                     max_age=AUTH_SESSION_SECONDS,
                 )
 
-                if db:
+                if deps.db:
                     await deps.db.create_audit_log(
                         username=username,
                         role="viewer",
@@ -229,7 +229,7 @@ async def login(request: Request):
             max_age=AUTH_SESSION_SECONDS,
         )
 
-        if db:
+        if deps.db:
             await deps.db.create_audit_log(
                 username=username,
                 role="super_admin",
@@ -241,7 +241,7 @@ async def login(request: Request):
         return response
 
     # Failed login
-    if db:
+    if deps.db:
         await deps.db.create_audit_log(
             username=username or "(empty)",
             role="unknown",
@@ -261,7 +261,7 @@ async def logout(
     """Invalidate current session and clear cookie."""
     if auth_cookie:
         session = _sessions.pop(auth_cookie, None)
-        if db:
+        if deps.db:
             try:
                 if not session:
                     row = await deps.db.get_session(auth_cookie)
@@ -287,7 +287,7 @@ async def logout(
 @router.post("/auth/token")
 async def auth_via_token(request: Request):
     """Authenticate using a share token. Creates a session scoped to the token's allowed chats."""
-    if not db:
+    if not deps.db:
         raise HTTPException(status_code=500, detail="Database not available")
 
     direct_ip = request.client.host if request.client else "unknown"

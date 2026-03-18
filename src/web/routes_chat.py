@@ -347,7 +347,7 @@ async def get_stats(user: UserContext = Depends(require_auth)):
         stats["listener_active_since"] = listener_active_since if listener_active_since else None
 
         stats["push_notifications"] = deps.config.push_notifications
-        stats["push_enabled"] = push_manager is not None and deps.push_manager.is_enabled
+        stats["push_enabled"] = deps.push_manager is not None and deps.push_manager.is_enabled
 
         stats["enable_notifications"] = deps.config.enable_notifications or deps.config.push_notifications in ("basic", "full")
 
@@ -614,11 +614,11 @@ async def get_push_config():
     """Get push notification configuration (public, no auth)."""
     result = {
         "mode": deps.config.push_notifications,
-        "enabled": deps.config.push_notifications == "full" and push_manager is not None and deps.push_manager.is_enabled,
+        "enabled": deps.config.push_notifications == "full" and deps.push_manager is not None and deps.push_manager.is_enabled,
         "vapid_public_key": None,
     }
 
-    if push_manager and deps.push_manager.is_enabled:
+    if deps.push_manager and deps.push_manager.is_enabled:
         result["vapid_public_key"] = deps.push_manager.public_key
 
     return result
@@ -627,7 +627,7 @@ async def get_push_config():
 @router.post("/api/push/subscribe")
 async def push_subscribe(request: Request, user: UserContext = Depends(require_auth)):
     """Subscribe to push notifications."""
-    if not push_manager or not deps.push_manager.is_enabled:
+    if not deps.push_manager or not deps.push_manager.is_enabled:
         raise HTTPException(status_code=400, detail="Push notifications not enabled. Set PUSH_NOTIFICATIONS=full")
 
     try:

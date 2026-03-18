@@ -55,14 +55,14 @@ async def handle_realtime_notification(payload: dict):
             chat_id, {"type": "new_message", "chat_id": chat_id, "message": data.get("message")}
         )
 
-        if push_manager and deps.push_manager.is_enabled:
+        if deps.push_manager and deps.push_manager.is_enabled:
             message = data.get("message", {})
-            chat = await deps.db.get_chat_by_id(chat_id) if db else None
+            chat = await deps.db.get_chat_by_id(chat_id) if deps.db else None
             chat_title = chat.get("title", "Telegram") if chat else "Telegram"
 
             sender_name = ""
             if message.get("sender_id"):
-                sender = await deps.db.get_user_by_id(message.get("sender_id")) if db else None
+                sender = await deps.db.get_user_by_id(message.get("sender_id")) if deps.db else None
                 if sender:
                     sender_name = sender.get("first_name", "") or sender.get("username", "")
 
