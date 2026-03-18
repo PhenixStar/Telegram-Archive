@@ -1,6 +1,8 @@
 services:
   telegram-backup:
-    image: drumsergio/telegram-archive:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: telegram-backup
     restart: unless-stopped
     command: ["python", "-m", "src", "schedule"]
@@ -91,8 +93,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
     volumes:
-      # Persistent data storage
-      - ./data:/data
+      # Persistent data storage — shared with viewer via same host directory
+      - /home/phenix/projects/apps/tele-private/database:/data
     networks:
       - telegram-network
     # Security hardening

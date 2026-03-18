@@ -292,13 +292,9 @@ class TelegramBackup:
                 if priority_count > 0:
                     logger.info(f"📌 {priority_count} priority chat(s) will be processed first")
 
-            # Detect whether we've already completed at least one full backup run
-            # (i.e. some chats have a non-zero last_message_id recorded)
-            has_synced_before = False
-            for dialog in filtered_dialogs:
-                if await self.db.get_last_message_id(self._get_marked_id(dialog.entity)) > 0:
-                    has_synced_before = True
-                    break
+            # Bulk-load sync status for smart skip (Phase 1)
+            sync_map = await self.db.get_all_last_message_ids()
+            has_synced_before = any(v > 0 for v in sync_map.values())
 
             # Backup each dialog
             # v6.2.0: Check archived_chat_ids so chats in both INCLUDE_CHAT_IDS
@@ -307,6 +303,10 @@ class TelegramBackup:
             # archived, even if Telegram's API also returns it in folder=1.
             total_messages = 0
             backed_up_chat_ids = set()
+            skipped_chats = 0
+            consecutive_empty = 0
+            early_stop_threshold = self.config.early_stop_threshold
+
             for i, dialog in enumerate(filtered_dialogs, 1):
                 entity = dialog.entity
                 chat_id = self._get_marked_id(entity)
@@ -316,6 +316,30 @@ class TelegramBackup:
                     logger.warning(
                         f"  Chat {chat_name} (ID: {chat_id}) appears in both regular and archived dialog lists - treating as NOT archived"
                     )
+
+                # Phase 1: Smart skip — compare dialog's top message with last synced ID
+                last_synced = sync_map.get(chat_id, 0)
+                dialog_top_id = dialog.message.id if dialog.message else 0
+
+                if has_synced_before and last_synced > 0 and dialog_top_id <= last_synced:
+                    # No new messages — update metadata only
+                    chat_data = self._extract_chat_data(entity, is_archived=is_archived)
+                    await self.db.upsert_chat(chat_data)
+                    backed_up_chat_ids.add(chat_id)
+                    skipped_chats += 1
+                    consecutive_empty += 1
+
+                    # Phase 2: Early termination after N consecutive empty chats
+                    if (early_stop_threshold > 0
+                            and consecutive_empty >= early_stop_threshold
+                            and i > 10):
+                        logger.info(
+                            f"Early stop at chat {i}/{len(filtered_dialogs)}: "
+                            f"{consecutive_empty} consecutive chats with no new messages"
+                        )
+                        break
+                    continue
+
                 label = f"[{i}/{len(filtered_dialogs)}] Backing up{' (archived)' if is_archived else ''}: {chat_name} (ID: {chat_id})"
                 logger.info(label)
 
@@ -325,13 +349,28 @@ class TelegramBackup:
                     backed_up_chat_ids.add(chat_id)
                     logger.info(f"  → Backed up {message_count} new messages")
 
-                    # Optimization: after initial full run, if the most recently
-                    # active chat has no new messages, we assume the rest don't either.
+                    if message_count == 0:
+                        consecutive_empty += 1
+                        # Phase 2: Early termination also for full-scanned empty chats
+                        if (has_synced_before
+                                and early_stop_threshold > 0
+                                and consecutive_empty >= early_stop_threshold
+                                and i > 10):
+                            logger.info(
+                                f"Early stop at chat {i}/{len(filtered_dialogs)}: "
+                                f"{consecutive_empty} consecutive chats with no new messages"
+                            )
+                            break
+                    else:
+                        consecutive_empty = 0
 
                 except (ChannelPrivateError, ChatForbiddenError, UserBannedInChannelError) as e:
                     logger.warning(f"  → Skipped (no access): {e.__class__.__name__}")
                 except Exception as e:
                     logger.error(f"  → Error backing up {chat_name}: {e}", exc_info=True)
+
+            if skipped_chats:
+                logger.info(f"Smart skip: {skipped_chats} chats had no new messages (metadata updated)")
 
             # v6.2.0: Backup archived dialogs that weren't already processed above.
             # Apply the same chat type/ID filters so we don't back up unintended chats.
@@ -615,48 +654,49 @@ class TelegramBackup:
         # Get last synced message ID for incremental backup
         last_message_id = await self.db.get_last_message_id(chat_id)
 
-        # Fetch and process messages in batches with periodic checkpointing.
-        # sync_status is updated every checkpoint_interval batches so that
-        # a crash/restart only re-fetches messages since the last checkpoint
-        # instead of restarting the entire chat from scratch.
+        # Phase 3: Reverse-first fetch — newest messages first so they appear
+        # in the viewer immediately. Stop when we reach already-synced messages.
+        # On initial backup (last_message_id == 0), use forward order for efficiency.
         batch_data: list[dict] = []
         batch_size = self.config.batch_size
-        checkpoint_interval = self.config.checkpoint_interval
         grand_total = 0
-        uncheckpointed_count = 0
-        batches_since_checkpoint = 0
         running_max_id = last_message_id
 
-        async for message in self.client.iter_messages(entity, min_id=last_message_id, reverse=True):
-            msg_data = await self._process_message(message, chat_id)
-            batch_data.append(msg_data)
-            running_max_id = max(running_max_id, message.id)
+        if last_message_id > 0:
+            # Incremental: fetch newest first, stop at last synced
+            async for message in self.client.iter_messages(entity):
+                if message.id <= last_message_id:
+                    break
+                msg_data = await self._process_message(message, chat_id)
+                batch_data.append(msg_data)
+                running_max_id = max(running_max_id, message.id)
 
-            if len(batch_data) >= batch_size:
-                await self._commit_batch(batch_data, chat_id)
-                count = len(batch_data)
-                grand_total += count
-                uncheckpointed_count += count
-                batches_since_checkpoint += 1
-                logger.info(f"  → Processed {grand_total} messages...")
+                if len(batch_data) >= batch_size:
+                    await self._commit_batch(batch_data, chat_id)
+                    grand_total += len(batch_data)
+                    logger.info(f"  → Processed {grand_total} messages...")
+                    batch_data = []
+        else:
+            # Initial backup: forward order (old→new) for completeness
+            async for message in self.client.iter_messages(entity, reverse=True):
+                msg_data = await self._process_message(message, chat_id)
+                batch_data.append(msg_data)
+                running_max_id = max(running_max_id, message.id)
 
-                if batches_since_checkpoint >= checkpoint_interval:
-                    await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
-                    uncheckpointed_count = 0
-                    batches_since_checkpoint = 0
-
-                batch_data = []
+                if len(batch_data) >= batch_size:
+                    await self._commit_batch(batch_data, chat_id)
+                    grand_total += len(batch_data)
+                    logger.info(f"  → Processed {grand_total} messages...")
+                    batch_data = []
 
         # Flush remaining messages
         if batch_data:
             await self._commit_batch(batch_data, chat_id)
-            count = len(batch_data)
-            grand_total += count
-            uncheckpointed_count += count
+            grand_total += len(batch_data)
 
-        # Final checkpoint for any un-checkpointed messages
-        if uncheckpointed_count > 0:
-            await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
+        # Update sync status with highest message ID
+        if grand_total > 0:
+            await self.db.update_sync_status(chat_id, running_max_id, grand_total)
 
         # Sync deletions and edits if enabled (expensive!)
         if self.config.sync_deletions_edits:

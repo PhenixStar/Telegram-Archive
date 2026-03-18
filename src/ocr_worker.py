@@ -8,6 +8,7 @@ Processes images for chats with OCR enabled, rate-limited to avoid GPU saturatio
 import asyncio
 import base64
 import logging
+import mimetypes
 import os
 import time
 
@@ -49,14 +50,18 @@ class OcrWorker:
         logger.info("OCR worker stopped")
 
     async def _get_vision_config(self) -> dict:
-        """Read vision model config from app_settings."""
+        """Read vision model config from app_settings.
+
+        Uses `or` to handle empty-string values stored in the DB
+        (keys exist but are blank) by falling back to sensible defaults.
+        """
         settings = await self.db.get_all_settings()
         return {
-            "api_url": settings.get("ai.vision.api_url", "http://localhost:8080/v1"),
-            "api_key": settings.get("ai.vision.api_key", ""),
-            "model_name": settings.get("ai.vision.model_name", "glm-ocr"),
-            "fallback_url": settings.get("ai.vision.fallback_url", ""),
-            "fallback_model": settings.get("ai.vision.fallback_model", ""),
+            "api_url": settings.get("ai.vision.api_url", "") or "http://host.docker.internal:8081/v1",
+            "api_key": settings.get("ai.vision.api_key", "") or "",
+            "model_name": settings.get("ai.vision.model_name", "") or "glm-ocr",
+            "fallback_url": settings.get("ai.vision.fallback_url", "") or "http://host.docker.internal:11434/v1",
+            "fallback_model": settings.get("ai.vision.fallback_model", "") or "gemma3:27b",
         }
 
     async def _get_enabled_chats(self) -> list[int]:
@@ -130,16 +135,28 @@ class OcrWorker:
     ) -> bool:
         """Process a single image. Returns True on success."""
         file_path = item["file_path"]
-        abs_path = (
-            os.path.join(self.config.backup_path, file_path)
-            if not os.path.isabs(file_path)
-            else file_path
-        )
+        # Resolve path: relative → join with backup_path, absolute → use directly
+        if not os.path.isabs(file_path):
+            abs_path = os.path.join(self.config.backup_path, file_path)
+        else:
+            abs_path = file_path
+        # Fallback: extract relative media/ subpath from old absolute paths
+        if not os.path.exists(abs_path) and "/media/" in file_path:
+            rel = file_path[file_path.index("/media/") + 1:]
+            abs_path = os.path.join(self.config.backup_path, rel)
         if not os.path.exists(abs_path):
             return False
 
-        mime = item.get("mime_type", "image/jpeg") or "image/jpeg"
-        if not mime.startswith("image"):
+        # Detect MIME from file extension when DB value is missing
+        mime = item.get("mime_type") or ""
+        if not mime:
+            mime, _ = mimetypes.guess_type(abs_path)
+            mime = mime or ""
+        # Only process raster image formats Ollama can handle
+        supported = {"image/jpeg", "image/png", "image/gif", "image/bmp", "image/tiff"}
+        if mime not in supported:
+            if mime.startswith("image/"):
+                logger.debug(f"OCR: skipping unsupported image format {mime}: {abs_path}")
             return False
 
         try:
