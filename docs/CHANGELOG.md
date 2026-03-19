@@ -8,6 +8,15 @@ For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
 ### Changed
 
+- **Sidebar resize handle** — Fixed drag handle height to `740px` (was stretching with `bottom: 0`, ~741px computed).
+
+### Fixed
+
+- **WebSocket console spam on login page** — Real-time `/ws/updates` connections are only opened when the user has a session (or when viewer auth is disabled). Previously, unauthenticated loads hit the server which closes the socket with code 4001, and the client reconnected every 5s indefinitely. After login, the socket is started; logout stops it.
+- **WebSocket when auth check fails** — If `/api/auth/check` returned a non-2xx or network error, `auth_required` stayed at its initial `false`, so the client treated the app as “open” and still opened the WebSocket. Connection gating now treats failed auth checks as “do not connect” until login succeeds (or a successful check shows auth is off).
+
+### Changed
+
 - **Code structure refactor** — Split 3 oversized files into modular architecture:
   - `db/adapter.py` (3,142 LOC) → 7 files via mixin pattern (adapter + 6 domain mixins)
   - `web/main.py` (3,849 LOC) → 8 files via APIRouter pattern (main + dependencies + 6 route modules)

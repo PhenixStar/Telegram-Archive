@@ -765,7 +765,8 @@
             @media (min-width: 768px) { .sidebar-panel { width: 260px; } }
         }
         .sidebar-resize-handle {
-            position: absolute; right: -3px; top: 0; bottom: 0;
+            position: absolute; right: -3px; top: 0;
+            height: 740px;
             width: 6px; cursor: col-resize; background: transparent;
             transition: background 0.15s; z-index: 20;
         }
@@ -4253,6 +4254,26 @@
                 const pushVapidKey = ref(null)  // VAPID public key for push subscription
                 let ws = null
                 let wsReconnectTimer = null
+                /** WebSocket is only allowed when the server will accept the upgrade (session cookie if auth is on). */
+                const wsMayConnect = () => {
+                    if (isAuthenticated.value) return true
+                    if (authCheckFailed.value) return false
+                    if (!authRequired.value) return true
+                    return false
+                }
+                const stopWebSocket = () => {
+                    if (wsReconnectTimer) {
+                        clearTimeout(wsReconnectTimer)
+                        wsReconnectTimer = null
+                    }
+                    if (ws) {
+                        ws.onclose = null
+                        try {
+                            ws.close()
+                        } catch (e) {}
+                        ws = null
+                    }
+                }
                 let messageRefreshTimer = null  // Timer for auto-refreshing messages
                 let pushSubscription = null  // Current push subscription object
 
@@ -4831,6 +4852,7 @@
                         })
                         console.log('[DEBUG] Fetch response:', res.status, res.ok)
                         if (res.ok) {
+                            authCheckFailed.value = false
                             const data = await res.json()
                             console.log('[DEBUG] Auth response data:', JSON.stringify(data))
                             authRequired.value = !!data.auth_required
@@ -4932,7 +4954,9 @@
                     
                     // Initialize WebSocket and notifications (v5.0)
                     await initNotifications()
-                    initWebSocket()
+                    if (wsMayConnect()) {
+                        initWebSocket()
+                    }
                     
                     // Listen for notification clicks when app is already open
                     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
@@ -4957,16 +4981,20 @@
 
                 // WebSocket initialization for real-time updates
                 const initWebSocket = () => {
+                    if (!wsMayConnect()) {
+                        stopWebSocket()
+                        return
+                    }
                     if (ws) {
                         ws.close()
                     }
-                    
+
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
                     const wsUrl = `${protocol}//${window.location.host}/ws/updates`
-                    
+
                     try {
                         ws = new WebSocket(wsUrl)
-                        
+
                         ws.onopen = () => {
                             console.log('[WS] Connected to real-time updates')
                             // Subscribe to current chat if selected
@@ -4977,7 +5005,7 @@
                                 }))
                             }
                         }
-                        
+
                         ws.onmessage = (event) => {
                             try {
                                 const data = JSON.parse(event.data)
@@ -4986,12 +5014,15 @@
                                 console.error('[WS] Parse error:', e)
                             }
                         }
-                        
+
                         ws.onclose = () => {
+                            if (!wsMayConnect()) {
+                                return
+                            }
                             console.log('[WS] Connection closed, reconnecting in 5s...')
                             wsReconnectTimer = setTimeout(initWebSocket, 5000)
                         }
-                        
+
                         ws.onerror = (e) => {
                             console.warn('[WS] Error:', e)
                         }
@@ -5469,6 +5500,7 @@
 
                         const data = await res.json()
                         if (data.success) {
+                            authCheckFailed.value = false
                             isAuthenticated.value = true
                             userRole.value = data.role || 'super_admin'
                             currentUsername.value = data.username || ''
@@ -5480,6 +5512,7 @@
                             setupInfiniteScroll()
                             startViewerHeartbeat()
                             await initNotifications()
+                            initWebSocket()
 
                             // Handle redirect after login (from permalink 302)
                             const urlParams = new URLSearchParams(window.location.search)
@@ -5524,6 +5557,7 @@
                     try {
                         await fetch('/api/logout', { method: 'POST', credentials: 'include' })
                     } catch (e) { /* ignore */ }
+                    stopWebSocket()
                     isAuthenticated.value = false
                     userRole.value = ''
                     currentUsername.value = ''

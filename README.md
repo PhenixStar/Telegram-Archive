@@ -43,7 +43,7 @@
 - **Mobile-friendly** — Responsive design with iOS/Android optimizations
 - **Integrated lightbox** — View photos and videos without leaving the page
 - **Keyboard navigation** — Arrow keys to browse media, Esc to close
-- **Real-time updates** — WebSocket sync shows new messages instantly
+- **Real-time updates** — WebSocket sync shows new messages instantly (the client connects only after login when viewer authentication is enabled, so the login screen does not open a failing socket)
 - **Push notifications** — Get notified even when browser is closed
 - **Full-text search** — SQLite FTS5 search across all messages with fallback to pattern matching
 - **7 themes** — Midnight, Telegram Classic, AMOLED Black, Nord, Monokai, Solarized Dark, and Light Default with auto-detect support
