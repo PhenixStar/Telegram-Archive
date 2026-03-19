@@ -609,10 +609,13 @@
 
         /* Search Keyword Highlight */
         .search-highlight {
-            background: rgba(250, 204, 21, 0.3);
-            color: inherit;
+            background: #ffeb3b;
+            color: #000;
             border-radius: 2px;
             padding: 0 1px;
+        }
+        .search-highlight.current {
+            background: #ff9800;
         }
 
         /* Skeleton Shimmer */
@@ -1112,7 +1115,8 @@
                     
                     <div class="relative mb-3">
                         <input v-model="searchQuery" @input="onSearchInput" type="text" placeholder="Search all chats..."
-                            class="w-full bg-gray-900 text-white rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            class="w-full text-white rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border"
+                            style="background: color-mix(in srgb, var(--tg-sidebar) 50%, white); border-color: color-mix(in srgb, var(--tg-border) 50%, white)">
                         <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor"
                             viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1501,12 +1505,12 @@
                             <div class="flex items-center gap-1">
                                 <!-- Search Bar - responsive width -->
                                 <div class="relative w-20 sm:w-48 md:w-64">
-                                    <input v-model="messageSearchQuery" @input="searchMessages"
-                                        @keydown.enter.prevent="searchMatchCount > 0 ? navigateSearchMatch($event.shiftKey ? -1 : 1) : searchMessages()"
+                                    <input v-model="messageSearchQuery"
+                                        @keydown.enter.prevent="(searchMatchCount > 0 && messageSearchQuery.trim() === lastSearchedQuery) ? navigateSearchMatch($event.shiftKey ? -1 : 1) : searchMessages()"
                                         @keydown.escape.prevent="clearHeaderSearch"
                                         type="text" placeholder="Search..."
-                                        class="w-full text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        style="background: color-mix(in srgb, var(--tg-sidebar) 80%, white)">
+                                        class="w-full text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border"
+                                        style="background: color-mix(in srgb, var(--tg-sidebar) 50%, white); border-color: color-mix(in srgb, var(--tg-border) 50%, white)">
                                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
                                         stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1514,9 +1518,9 @@
                                     </svg>
                                 </div>
                                 <!-- Match count + navigation (visible when header searching) -->
-                                <template v-if="messageSearchQuery.trim()">
+                                <template v-if="messageSearchQuery.trim() && lastSearchedQuery">
                                     <span class="text-xs whitespace-nowrap hidden sm:inline" style="color: var(--tg-muted);">
-                                        {{ searchMatchCount > 0 ? `${searchMatchIndex + 1} / ${searchMatchCount}` : 'No matches' }}
+                                        {{ searchMatchCount > 0 ? `${searchMatchIndex + 1} / ${searchMatchCount}` : (messageSearchQuery.trim() === lastSearchedQuery ? 'No matches' : 'Press Enter') }}
                                     </span>
                                     <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(-1)"
                                         class="p-0.5 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Previous match">
@@ -1846,7 +1850,7 @@
                         {{ floatingDate }}
                     </div>
                     <!-- Search bar (absolute overlay at top) -->
-                    <div v-show="searchBarVisible" class="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2 border-b shadow-lg" style="background: color-mix(in srgb, var(--tg-sidebar) 80%, white); border-color: var(--tg-border); z-index: 20;">
+                    <div v-show="searchBarVisible" class="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2 border-b shadow-lg" style="background: color-mix(in srgb, var(--tg-sidebar) 50%, white); border-color: color-mix(in srgb, var(--tg-border) 50%, white); z-index: 20;">
                         <button @click="semanticSearchMode = !semanticSearchMode; handleSearchInput()" class="p-1 rounded hover:opacity-80" :style="{ color: semanticSearchMode ? 'var(--tg-accent)' : 'var(--tg-muted)' }" :title="semanticSearchMode ? 'Semantic search (AI)' : 'Text search'">
                             <i :class="semanticSearchMode ? 'fas fa-brain' : 'fas fa-search'" class="text-xs"></i>
                         </button>
@@ -2214,7 +2218,7 @@
                                     <!-- Text with clickable links + smart highlights -->
                                     <div class="whitespace-pre-wrap break-words message-text"
                                         @contextmenu="handleTextContextMenu($event, msg)"
-                                        v-html="linkifyText(msg.text, messageSearchQuery)"></div>
+                                        v-html="linkifyText(msg.text, searchHighlightTerm)"></div>
 
                                     <!-- Link preview card from raw_data -->
                                     <div v-if="getLinkPreview(msg)" class="link-preview-card"
@@ -3459,6 +3463,11 @@
                 const searchQuery = ref('')
                 const globalMessageResults = ref([])
                 const messageSearchQuery = ref('')
+                const lastSearchedQuery = ref('')
+                // Search term for highlighting (strip from: prefixes)
+                const searchHighlightTerm = computed(() =>
+                    messageSearchQuery.value.replace(/from:\S+/g, '').trim()
+                )
                 // Bidirectional loading state
                 const hasMoreNewer = ref(false)
                 const loadingNewer = ref(false)
@@ -4397,8 +4406,8 @@
                         clearTimeout(searchDebounceTimer)
                     }
                     
-                    const query = searchQuery.value.trim()
-                    
+                    const query = searchQuery.value.trim().replace(/^@/, '')
+
                     if (!query) {
                         searchResults.value = []
                         globalMessageResults.value = []
@@ -5967,19 +5976,11 @@
                         if (messagesScrollObserver && loadMoreSentinel.value) {
                             messagesScrollObserver.observe(loadMoreSentinel.value)
                         }
-                        // Re-apply search highlights if header search is active
-                        const activeQ = messageSearchQuery.value.trim().replace(/from:\S+/g, '').trim()
-                        if (activeQ) {
-                            applySearchHighlights(messagesContainer.value, activeQ)
-                            const marks = messagesContainer.value?.querySelectorAll('mark') || []
-                            searchMatchCount.value = marks.length
-                            if (searchMatchIndex.value >= marks.length) {
-                                searchMatchIndex.value = marks.length > 0 ? 0 : -1
-                            }
-                            // Restore current match highlight
-                            if (searchMatchIndex.value >= 0 && marks[searchMatchIndex.value]) {
-                                marks[searchMatchIndex.value].classList.add('current')
-                            }
+                        // Update search highlight count after new messages render
+                        // linkifyText already creates <mark class="search-highlight"> in v-html
+                        if (messageSearchQuery.value.trim()) {
+                            await nextTick()
+                            updateSearchHighlightCount()
                         }
                     }
                 }
@@ -6032,40 +6033,46 @@
                     }
                 }
 
+                // Count and navigate search-highlight marks created by linkifyText
+                const updateSearchHighlightCount = () => {
+                    const marks = messagesContainer.value?.querySelectorAll('mark.search-highlight') || []
+                    searchMatchCount.value = marks.length
+                    if (searchMatchIndex.value >= marks.length) {
+                        searchMatchIndex.value = marks.length > 0 ? 0 : -1
+                    }
+                    if (searchMatchIndex.value >= 0 && marks[searchMatchIndex.value]) {
+                        marks.forEach(m => m.classList.remove('current'))
+                        marks[searchMatchIndex.value].classList.add('current')
+                    }
+                }
+
                 const searchMessages = async () => {
                     messages.value = []
                     page.value = 0
                     hasMore.value = true
-                    // Clear previous highlights before loading
-                    clearSearchHighlights()
                     searchMatchCount.value = 0
                     searchMatchIndex.value = -1
+                    lastSearchedQuery.value = messageSearchQuery.value.trim()
                     await loadMessages()
-                    // Apply highlights after messages render (strip from: prefix for sender searches)
-                    const rawQ = messageSearchQuery.value.trim()
-                    const q = rawQ.replace(/from:\S+/g, '').trim()
-                    if (q) {
-                        await Vue.nextTick()
-                        applySearchHighlights(messagesContainer.value, q)
-                        const marks = messagesContainer.value?.querySelectorAll('mark') || []
-                        searchMatchCount.value = marks.length
-                        searchMatchIndex.value = marks.length > 0 ? 0 : -1
-                        if (marks.length > 0) {
-                            marks[0].classList.add('current')
-                            marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
-                        }
-                    } else {
-                        searchMatchCount.value = 0
-                        searchMatchIndex.value = -1
+                    // linkifyText already wraps matches in <mark class="search-highlight">
+                    // Wait for DOM to render, then count and focus first match
+                    await Vue.nextTick()
+                    await new Promise(r => setTimeout(r, 150))
+                    const marks = messagesContainer.value?.querySelectorAll('mark.search-highlight') || []
+                    searchMatchCount.value = marks.length
+                    searchMatchIndex.value = marks.length > 0 ? 0 : -1
+                    if (marks.length > 0) {
+                        marks[0].classList.add('current')
+                        marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
                     }
                 }
 
                 const clearHeaderSearch = () => {
                     messageSearchQuery.value = ''
-                    clearSearchHighlights()
+                    lastSearchedQuery.value = ''
                     searchMatchCount.value = 0
                     searchMatchIndex.value = -1
-                    // Invalidate in-flight search responses
+                    // Invalidate in-flight search responses and reload unfiltered
                     ++chatVersion
                     messages.value = []
                     page.value = 0
@@ -6990,7 +6997,10 @@
                 }
 
                 const navigateSearchMatch = (dir) => {
-                    const marks = messagesContainer.value?.querySelectorAll('mark') || []
+                    // Use search-highlight marks (from linkifyText) for header search,
+                    // plain marks (from applySearchHighlights) for overlay Ctrl+F search
+                    const selector = messageSearchQuery.value.trim() ? 'mark.search-highlight' : 'mark'
+                    const marks = messagesContainer.value?.querySelectorAll(selector) || []
                     if (marks.length === 0) return
                     marks.forEach(m => m.classList.remove('current'))
                     searchMatchIndex.value = (searchMatchIndex.value + dir + marks.length) % marks.length
@@ -7552,6 +7562,8 @@
                     sortedMessages,
                     searchQuery,
                     messageSearchQuery,
+                    lastSearchedQuery,
+                    searchHighlightTerm,
                     loading,
                     initialLoadDone,
                     isGroup,

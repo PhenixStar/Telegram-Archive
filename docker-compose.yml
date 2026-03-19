@@ -94,7 +94,7 @@ services:
 
     volumes:
       # Persistent data storage — shared with viewer via same host directory
-      - /home/phenix/projects/apps/tele-private/database:/data
+      - /home/phenix/projects/tele-private/database:/data
     networks:
       - telegram-network
     # Security hardening
@@ -174,9 +174,9 @@ services:
 
     volumes:
       # Mount the active database directory
-      - /home/phenix/projects/apps/tele-private/database:/data/backups
+      - /home/phenix/projects/tele-private/database:/data/backups
       # Mount media from backup dir
-      - /home/phenix/projects/apps/tele-private/database/backups/media:/data/backups/media
+      - /home/phenix/projects/tele-private/database/backups/media:/data/backups/media
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
