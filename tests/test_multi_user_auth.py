@@ -243,6 +243,75 @@ class TestPerUserFiltering:
         assert resp.status_code == 200
 
 
+class TestFolderFilters:
+    """Tests for folder filter query forwarding."""
+
+    def test_multi_folder_ids_forwarded_to_db(self, auth_env):
+        client, _, db = _get_client()
+        login_resp = client.post("/api/login", json={"username": "admin", "password": "testpass123"})
+        cookie = login_resp.cookies.get("viewer_auth")
+
+        resp = client.get("/api/chats?folder_ids=1&folder_ids=2", cookies={"viewer_auth": cookie})
+        assert resp.status_code == 200
+        db.get_all_chats.assert_called()
+        assert db.get_all_chats.call_args.kwargs["folder_ids"] == [1, 2]
+        assert db.get_chat_count.call_args.kwargs["folder_ids"] == [1, 2]
+
+    def test_single_folder_id_kept_for_backward_compat(self, auth_env):
+        client, _, db = _get_client()
+        login_resp = client.post("/api/login", json={"username": "admin", "password": "testpass123"})
+        cookie = login_resp.cookies.get("viewer_auth")
+
+        resp = client.get("/api/chats?folder_id=7", cookies={"viewer_auth": cookie})
+        assert resp.status_code == 200
+        db.get_all_chats.assert_called()
+        assert db.get_all_chats.call_args.kwargs["folder_id"] == 7
+        assert db.get_all_chats.call_args.kwargs["folder_ids"] is None
+
+
+class TestFolderScope:
+    """Tests for folder visibility scope by user permissions."""
+
+    def test_master_gets_unscoped_folders(self, auth_env):
+        client, _, db = _get_client()
+        login_resp = client.post("/api/login", json={"username": "admin", "password": "testpass123"})
+        cookie = login_resp.cookies.get("viewer_auth")
+
+        resp = client.get("/api/folders", cookies={"viewer_auth": cookie})
+        assert resp.status_code == 200
+        db.get_all_folders.assert_called_once()
+        assert db.get_all_folders.call_args.kwargs == {}
+
+    def test_viewer_gets_scoped_folders(self, auth_env):
+        import src.web.main as main_mod
+
+        mock_db = _make_mock_db()
+        salt = "folderscope"
+        pw_hash = main_mod._hash_password("viewerpass", salt)
+        mock_db.get_viewer_by_username = AsyncMock(
+            return_value={
+                "id": 5,
+                "username": "viewer_scope",
+                "password_hash": pw_hash,
+                "salt": salt,
+                "allowed_chat_ids": json.dumps([-1001]),
+                "is_active": 1,
+                "created_by": "admin",
+                "created_at": "2026-01-01T00:00:00",
+                "updated_at": "2026-01-01T00:00:00",
+            }
+        )
+        client, _, db = _get_client(mock_db)
+
+        login_resp = client.post("/api/login", json={"username": "viewer_scope", "password": "viewerpass"})
+        cookie = login_resp.cookies.get("viewer_auth")
+        resp = client.get("/api/folders", cookies={"viewer_auth": cookie})
+
+        assert resp.status_code == 200
+        db.get_all_folders.assert_called_once()
+        assert db.get_all_folders.call_args.kwargs["chat_ids"] == {-1001}
+
+
 class TestRateLimiting:
     """Tests for login rate limiting."""
 

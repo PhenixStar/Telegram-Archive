@@ -109,6 +109,7 @@ class SyncMixin:
         search: str = None,
         archived: bool | None = None,
         folder_id: int | None = None,
+        folder_ids: list[int] | None = None,
     ) -> list[dict[str, Any]]:
         """Get chats with their last message date, with optional pagination and search.
 
@@ -118,6 +119,7 @@ class SyncMixin:
             search: Optional search query (case-insensitive, matches title/first_name/last_name/username)
             archived: If True, only archived chats; if False, only non-archived; if None, all
             folder_id: If set, only chats in this folder
+            folder_ids: If set, chats in any of these folders (union)
         """
         async with self.db_manager.async_session_factory() as session:
             # Subquery for last message date
@@ -174,7 +176,11 @@ class SyncMixin:
             )
 
             # Filter by folder membership
-            if folder_id is not None:
+            if folder_ids:
+                normalized_folder_ids = sorted({int(fid) for fid in folder_ids})
+                member_subq = select(ChatFolderMember.chat_id).where(ChatFolderMember.folder_id.in_(normalized_folder_ids))
+                stmt = stmt.where(Chat.id.in_(member_subq))
+            elif folder_id is not None:
                 stmt = stmt.join(
                     ChatFolderMember, and_(ChatFolderMember.chat_id == Chat.id, ChatFolderMember.folder_id == folder_id)
                 )
@@ -232,7 +238,11 @@ class SyncMixin:
             return chats
 
     async def get_chat_count(
-        self, search: str = None, archived: bool | None = None, folder_id: int | None = None
+        self,
+        search: str = None,
+        archived: bool | None = None,
+        folder_id: int | None = None,
+        folder_ids: list[int] | None = None,
     ) -> int:
         """Get total number of chats (fast count for pagination).
 
@@ -240,11 +250,16 @@ class SyncMixin:
             search: Optional search query to filter count
             archived: If True, only archived chats; if False, only non-archived; if None, all
             folder_id: If set, only chats in this folder
+            folder_ids: If set, chats in any of these folders (union)
         """
         async with self.db_manager.async_session_factory() as session:
             stmt = select(func.count(Chat.id))
 
-            if folder_id is not None:
+            if folder_ids:
+                normalized_folder_ids = sorted({int(fid) for fid in folder_ids})
+                member_subq = select(ChatFolderMember.chat_id).where(ChatFolderMember.folder_id.in_(normalized_folder_ids))
+                stmt = stmt.where(Chat.id.in_(member_subq))
+            elif folder_id is not None:
                 stmt = stmt.join(
                     ChatFolderMember, and_(ChatFolderMember.chat_id == Chat.id, ChatFolderMember.folder_id == folder_id)
                 )
@@ -819,20 +834,35 @@ class SyncMixin:
 
             await session.commit()
 
-    async def get_all_folders(self) -> list[dict[str, Any]]:
-        """Get all chat folders with their chat counts."""
+    async def get_all_folders(self, chat_ids: set[int] | list[int] | None = None) -> list[dict[str, Any]]:
+        """Get chat folders with counts, optionally scoped to chat IDs."""
         async with self.db_manager.async_session_factory() as session:
-            count_subq = (
-                select(ChatFolderMember.folder_id, func.count(ChatFolderMember.chat_id).label("chat_count"))
-                .group_by(ChatFolderMember.folder_id)
-                .subquery()
-            )
-
-            stmt = (
-                select(ChatFolder, count_subq.c.chat_count)
-                .outerjoin(count_subq, ChatFolder.id == count_subq.c.folder_id)
-                .order_by(ChatFolder.sort_order, ChatFolder.title)
-            )
+            if chat_ids is not None:
+                normalized_chat_ids = sorted({int(cid) for cid in chat_ids})
+                if not normalized_chat_ids:
+                    return []
+                count_subq = (
+                    select(ChatFolderMember.folder_id, func.count(ChatFolderMember.chat_id).label("chat_count"))
+                    .where(ChatFolderMember.chat_id.in_(normalized_chat_ids))
+                    .group_by(ChatFolderMember.folder_id)
+                    .subquery()
+                )
+                stmt = (
+                    select(ChatFolder, count_subq.c.chat_count)
+                    .join(count_subq, ChatFolder.id == count_subq.c.folder_id)
+                    .order_by(ChatFolder.sort_order, ChatFolder.title)
+                )
+            else:
+                count_subq = (
+                    select(ChatFolderMember.folder_id, func.count(ChatFolderMember.chat_id).label("chat_count"))
+                    .group_by(ChatFolderMember.folder_id)
+                    .subquery()
+                )
+                stmt = (
+                    select(ChatFolder, count_subq.c.chat_count)
+                    .outerjoin(count_subq, ChatFolder.id == count_subq.c.folder_id)
+                    .order_by(ChatFolder.sort_order, ChatFolder.title)
+                )
 
             result = await session.execute(stmt)
             folders = []

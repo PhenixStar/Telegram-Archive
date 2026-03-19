@@ -88,20 +88,37 @@ async def get_chats(
     search: str = Query(None, description="Search query for chat names/usernames"),
     archived: bool | None = Query(None, description="Filter by archived status"),
     folder_id: int | None = Query(None, description="Filter by folder ID"),
+    folder_ids: list[int] | None = Query(None, description="Filter by multiple folder IDs (union)"),
 ):
     """Get chats with metadata, paginated. Returns most recent chats first."""
     try:
+        effective_folder_ids = folder_ids if folder_ids else None
         user_chat_ids = get_user_chat_ids(user)
         if user_chat_ids is not None:
-            chats = await deps.db.get_all_chats(search=search, archived=archived, folder_id=folder_id)
+            chats = await deps.db.get_all_chats(
+                search=search,
+                archived=archived,
+                folder_id=folder_id,
+                folder_ids=effective_folder_ids,
+            )
             chats = [c for c in chats if c["id"] in user_chat_ids]
             total = len(chats)
             chats = chats[offset : offset + limit]
         else:
             chats = await deps.db.get_all_chats(
-                limit=limit, offset=offset, search=search, archived=archived, folder_id=folder_id
+                limit=limit,
+                offset=offset,
+                search=search,
+                archived=archived,
+                folder_id=folder_id,
+                folder_ids=effective_folder_ids,
             )
-            total = await deps.db.get_chat_count(search=search, archived=archived, folder_id=folder_id)
+            total = await deps.db.get_chat_count(
+                search=search,
+                archived=archived,
+                folder_id=folder_id,
+                folder_ids=effective_folder_ids,
+            )
 
         for chat in chats:
             try:
@@ -293,9 +310,13 @@ async def get_fts_status(user: UserContext = Depends(require_auth)):
 
 @router.get("/api/folders")
 async def get_folders(user: UserContext = Depends(require_auth)):
-    """Get all chat folders with their chat counts."""
+    """Get chat folders with counts, scoped to user's allowed chats."""
     try:
-        folders = await deps.db.get_all_folders()
+        user_chat_ids = get_user_chat_ids(user)
+        if user_chat_ids is None:
+            folders = await deps.db.get_all_folders()
+        else:
+            folders = await deps.db.get_all_folders(chat_ids=user_chat_ids)
         return {"folders": folders}
     except Exception as e:
         logger.error(f"Error fetching folders: {e}", exc_info=True)

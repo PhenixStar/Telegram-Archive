@@ -40,7 +40,10 @@
 
 ### 🌐 Web Viewer
 - **Telegram-like dark UI** — Feels like the real app
-- **Mobile-friendly** — Responsive design with iOS/Android optimizations
+- **Mobile-friendly** — Responsive design with iOS/Android optimizations; on phones, **system / browser back** leaves an open (non-forum) chat and returns to the chat list via the History API
+- **Sidebar (desktop)** — Drag-to-resize between 220px and 600px; default width scales with viewport when no saved preference; chat titles truncate on one line without covering dates
+- **Sidebar controls** — Role icon in the header (crown for super admin), with Settings/Logout consolidated into the same header row
+- **Folder filtering** — Full-width `All Chats` dropdown with multi-folder selection (union filter); `All Chats` is exclusive and clears folder selections
 - **Integrated lightbox** — View photos and videos without leaving the page
 - **Keyboard navigation** — Arrow keys to browse media, Esc to close
 - **Real-time updates** — WebSocket sync shows new messages instantly (the client connects only after login when viewer authentication is enabled, so the login screen does not open a failing socket)

@@ -425,6 +425,7 @@
             overflow: visible; /* allow tail pseudo-element to show */
             position: relative;
             border-radius: 12px;
+            box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.15);
         }
         /* Inline timestamp: reserve space so text doesn't overlap the float */
         .message-bubble .message-text::after {
@@ -442,21 +443,23 @@
             content: '';
             position: absolute;
             right: -6px;
-            bottom: 0;
-            width: 9px;
-            height: 14px;
+            bottom: 6px;
+            width: 10px;
+            height: 10px;
             background: var(--bubble-bg, var(--tg-own-msg));
-            border-bottom-left-radius: 12px;
+            clip-path: polygon(0 0, 100% 50%, 0 100%);
+            transform: rotate(-90deg);
         }
         .bubble-tail-in::after {
             content: '';
             position: absolute;
             left: -6px;
-            bottom: 0;
-            width: 9px;
-            height: 14px;
+            bottom: 6px;
+            width: 10px;
+            height: 10px;
             background: var(--bubble-bg, var(--tg-other-msg));
-            border-bottom-right-radius: 12px;
+            clip-path: polygon(0 0, 100% 50%, 0 100%);
+            transform: rotate(90deg);
         }
 
         /* v8.1: Smooth message appear animation (#4) */
@@ -765,8 +768,7 @@
             @media (min-width: 768px) { .sidebar-panel { width: 260px; } }
         }
         .sidebar-resize-handle {
-            position: absolute; right: -3px; top: 0;
-            height: 740px;
+            position: absolute; right: -3px; top: 0; bottom: 0;
             width: 6px; cursor: col-resize; background: transparent;
             transition: background 0.15s; z-index: 20;
         }
@@ -1044,25 +1046,24 @@
         <!-- Main App -->
         <div v-else class="flex w-full h-full bg-tg-bg">
             <!-- Sidebar - hidden on mobile when chat is selected -->
-            <div class="bg-tg-sidebar flex flex-col border-r sidebar-panel" style="border-color: var(--tg-border);"
+            <div class="bg-tg-sidebar flex flex-col border-r sidebar-panel min-h-0" style="border-color: var(--tg-border);"
                 :class="{'hidden md:flex': selectedChat, 'w-full md:w-auto': true}"
                 ref="sidebarRef">
-                <!-- User bar -->
-                <div class="flex items-center gap-2 px-3 py-1 border-b border-[color:var(--tg-border)]">
-                    <span v-if="authRequired && isAuthenticated" class="text-xs text-gray-400 truncate flex-1">{{ currentUsername }}</span>
-                    <span v-else class="flex-1"></span>
-                    <!-- Settings (all users) -->
-                    <button @click="openSettings()" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Settings" aria-label="Settings">
-                        <i class="fas fa-cog text-xs"></i>
-                    </button>
-                    <button v-if="authRequired && isAuthenticated" @click="performLogout" class="text-gray-400 hover:text-red-400 p-1" title="Logout" aria-label="Sign out">
-                        <i class="fas fa-sign-out-alt"></i>
-                    </button>
-                </div>
                 <!-- Header with Stats Dropdown -->
                 <div class="p-4 border-b border-[color:var(--tg-border)]">
                     <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-3">
+                            <span v-if="authRequired && isAuthenticated"
+                                class="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
+                                :class="{
+                                    'text-amber-400': userRole === 'super_admin',
+                                    'text-blue-400': userRole !== 'super_admin',
+                                }"
+                                :title="roleIconLabel"
+                                :aria-label="roleIconLabel"
+                            >
+                                <i :class="roleIconClass" class="text-sm"></i>
+                            </span>
                             <h1 class="text-xl font-bold">Telegram Archive</h1>
                             <!-- Stats Dropdown Button (hidden if SHOW_STATS=false) -->
                             <div class="relative" v-if="showStatsUI && statsData.stats_calculated_at">
@@ -1104,42 +1105,88 @@
                                 </div>
                             </div>
                         </div>
-                        <!-- Small loading indicator for stats/WS initialization -->
-                        <div v-if="loadingStats" class="flex items-center gap-1.5 text-xs text-tg-muted">
-                            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            <span>Syncing...</span>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                            <!-- Small loading indicator for stats/WS initialization -->
+                            <div v-if="loadingStats" class="flex items-center gap-1.5 text-xs text-tg-muted">
+                                <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span>Syncing...</span>
+                            </div>
+                            <button @click="openSettings()" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Settings" aria-label="Settings">
+                                <i class="fas fa-cog text-xs"></i>
+                            </button>
+                            <button v-if="authRequired && isAuthenticated" @click="performLogout" class="text-gray-400 hover:text-red-400 p-1" title="Logout" aria-label="Sign out">
+                                <i class="fas fa-sign-out-alt"></i>
+                            </button>
                         </div>
                     </div>
                     
                     <div class="relative mb-3">
                         <input v-model="searchQuery" @input="onSearchInput" type="text" placeholder="Search all chats..."
-                            class="w-full text-white rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border"
-                            style="background: color-mix(in srgb, var(--tg-sidebar) 50%, white); border-color: color-mix(in srgb, var(--tg-border) 50%, white)">
+                            class="w-full rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border"
+                            style="background: color-mix(in srgb, var(--tg-sidebar) 85%, black); border-color: color-mix(in srgb, var(--tg-border) 65%, black); color: var(--tg-text);">
                         <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor"
                             viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                         </svg>
                     </div>
-                    <!-- v6.2.0: Folder Tabs -->
-                    <div v-if="folders.length > 0" class="flex gap-1 mb-3 overflow-x-auto pb-1 scrollbar-thin">
-                        <button @click="showAllChats()" 
-                            :class="activeTab === 'all' ? 'text-white' : 'text-tg-muted hover:opacity-80'"
-                            :style="activeTab === 'all' ? { background: 'var(--tg-accent)' } : { background: 'var(--tg-hover)' }"
-                            class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition-colors shrink-0">
-                            All Chats
+                    <!-- v7.4.0: Folder filter dropdown -->
+                    <div v-if="folders.length > 0" class="relative mb-3">
+                        <button
+                            type="button"
+                            class="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm border transition-colors"
+                            :style="{
+                                background: folderDropdownOpen ? 'color-mix(in srgb, var(--tg-accent) 18%, var(--tg-sidebar))' : 'color-mix(in srgb, var(--tg-sidebar) 85%, black)',
+                                borderColor: 'color-mix(in srgb, var(--tg-border) 65%, black)',
+                                color: 'var(--tg-text)'
+                            }"
+                            :aria-expanded="folderDropdownOpen ? 'true' : 'false'"
+                            aria-controls="folder-filter-dropdown"
+                            @click="folderDropdownOpen = !folderDropdownOpen"
+                        >
+                            <span class="truncate">{{ folderFilterLabel }}</span>
+                            <svg :class="{'rotate-180': folderDropdownOpen}" class="w-4 h-4 shrink-0 transition-transform text-tg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
                         </button>
-                        <button v-for="folder in folders" :key="folder.id"
-                            @click="selectFolder(folder.id)"
-                            :class="activeTab === 'folder_' + folder.id ? 'text-white' : 'text-tg-muted hover:opacity-80'"
-                            :style="activeTab === 'folder_' + folder.id ? { background: 'var(--tg-accent)' } : { background: 'var(--tg-hover)' }"
-                            class="px-3 py-1 text-xs rounded-full whitespace-nowrap transition-colors shrink-0">
-                            {{ folder.emoticon || '📁' }} {{ folder.title }}
-                            <span class="opacity-70 ml-0.5">({{ folder.chat_count }})</span>
-                        </button>
+                        <div v-if="folderDropdownOpen" @click="folderDropdownOpen = false" class="fixed inset-0 z-40"></div>
+                        <div
+                            v-if="folderDropdownOpen"
+                            id="folder-filter-dropdown"
+                            class="absolute left-0 right-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-2 max-h-72 overflow-y-auto"
+                        >
+                            <button
+                                type="button"
+                                class="w-full flex items-center justify-between px-2 py-1.5 rounded text-left text-sm transition-colors"
+                                :class="selectedFolderIds.length === 0 ? 'text-white bg-gray-700/50' : 'text-tg-muted hover:text-white hover:bg-gray-700/40'"
+                                @click="showAllChats(); folderDropdownOpen = false"
+                                :aria-pressed="selectedFolderIds.length === 0 ? 'true' : 'false'"
+                            >
+                                <span>All Chats</span>
+                                <i v-if="selectedFolderIds.length === 0" class="fas fa-check text-xs"></i>
+                            </button>
+                            <div class="mt-2 pt-2 border-t border-[color:var(--tg-border)] space-y-1">
+                                <label
+                                    v-for="folder in folders"
+                                    :key="folder.id"
+                                    class="flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer hover:bg-gray-700/40"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="rounded"
+                                        :checked="isFolderSelected(folder.id)"
+                                        @change="toggleFolderSelection(folder.id)"
+                                    >
+                                    <span class="truncate" style="color: var(--tg-text);">
+                                        {{ folder.emoticon || '📁' }} {{ folder.title }}
+                                    </span>
+                                    <span class="ml-auto text-xs opacity-70" style="color: var(--tg-muted);">({{ folder.chat_count }})</span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Last Backup Time / Real-time Status -->
@@ -1255,13 +1302,15 @@
                                 </svg>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <div class="flex justify-between items-baseline">
-                                    <h3 class="font-semibold truncate text-white text-sm">
-                                        <span v-if="topic.is_pinned" class="text-blue-400 mr-1">📌</span>
-                                        <span v-if="topic.is_closed" class="text-gray-500 mr-1">🔒</span>
-                                        {{ topic.title }}
-                                    </h3>
-                                    <span class="text-xs text-tg-muted shrink-0 ml-2">{{ formatDate(topic.last_message_date) }}</span>
+                                <div class="flex justify-between items-baseline gap-2">
+                                    <div class="min-w-0 flex-1 overflow-hidden">
+                                        <h3 class="font-semibold truncate text-white text-sm">
+                                            <span v-if="topic.is_pinned" class="text-blue-400 mr-1">📌</span>
+                                            <span v-if="topic.is_closed" class="text-gray-500 mr-1">🔒</span>
+                                            {{ topic.title }}
+                                        </h3>
+                                    </div>
+                                    <span class="text-xs text-tg-muted shrink-0">{{ formatDate(topic.last_message_date) }}</span>
                                 </div>
                                 <p class="text-xs text-tg-muted">
                                     {{ topic.message_count }} messages
@@ -1346,15 +1395,17 @@
                                 </div>
 
                                 <div class="flex-1 min-w-0">
-                                    <div class="flex justify-between items-baseline">
-                                        <h3 class="font-semibold truncate text-white">
-                                            <span v-if="chat.is_forum" class="text-blue-400 mr-1 text-xs" title="Forum">#</span>
-                                            {{ getChatName(chat) }}
-                                        </h3>
-                                        <div class="flex items-center gap-1.5">
+                                    <div class="flex justify-between items-baseline gap-2">
+                                        <div class="min-w-0 flex-1 overflow-hidden pr-1">
+                                            <h3 class="font-semibold truncate text-white">
+                                                <span v-if="chat.is_forum" class="text-blue-400 mr-1 text-xs" title="Forum">#</span>
+                                                {{ getChatName(chat) }}
+                                            </h3>
+                                        </div>
+                                        <div class="flex items-center gap-1.5 shrink-0">
                                             <!-- v8.1: Unread indicator dot -->
                                             <span v-if="hasUnread(chat)" class="w-2 h-2 rounded-full shrink-0" style="background: var(--tg-accent);"></span>
-                                            <span class="text-xs text-tg-muted" :class="{'text-blue-400 font-medium': hasUnread(chat)}">{{ formatDate(chat.last_message_date) }}</span>
+                                            <span class="text-xs text-tg-muted whitespace-nowrap" :class="{'text-blue-400 font-medium': hasUnread(chat)}">{{ formatDate(chat.last_message_date) }}</span>
                                         </div>
                                     </div>
                                     <!-- v8.1: Last message preview (like Telegram Web) -->
@@ -1452,7 +1503,7 @@
                         style="border-color: var(--tg-border);">
                         <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                             <!-- Back Button (mobile only) -->
-                            <button @click="currentNav.type === 'chat' && currentNav.topicId ? navigateBack() : selectedChat = null"
+                            <button @click="onMobileChatHeaderBack"
                                 class="md:hidden p-2 -ml-2 text-gray-400 hover:text-white touch-target-mobile" aria-label="Go back">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1505,13 +1556,13 @@
                         <div class="flex items-center gap-1 sm:gap-2 shrink-0">
                             <div class="flex items-center gap-1">
                                 <!-- Search Bar - responsive width -->
-                                <div class="relative w-20 sm:w-48 md:w-64">
+                                <div class="relative w-20 sm:w-40 md:w-52 lg:w-64">
                                     <input v-model="messageSearchQuery"
                                         @keydown.enter.prevent="(searchMatchCount > 0 && messageSearchQuery.trim() === lastSearchedQuery) ? navigateSearchMatch($event.shiftKey ? -1 : 1) : searchMessages()"
                                         @keydown.escape.prevent="clearHeaderSearch"
                                         type="text" placeholder="Search..."
-                                        class="w-full text-white rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border"
-                                        style="background: color-mix(in srgb, var(--tg-sidebar) 50%, white); border-color: color-mix(in srgb, var(--tg-border) 50%, white)">
+                                        class="w-full rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border"
+                                        style="background: color-mix(in srgb, var(--tg-sidebar) 85%, black); border-color: color-mix(in srgb, var(--tg-border) 65%, black); color: var(--tg-text);">
                                     <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
                                         stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -3493,7 +3544,17 @@
                 const mediaGridLarge = ref(false)
                 // Sidebar resize state
                 const sidebarRef = ref(null)
-                const sidebarWidth = ref(parseInt(localStorage.getItem('tg_sidebar_width')) || 260)
+                const computeDefaultSidebarWidth = () => {
+                    const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+                    return Math.max(220, Math.min(400, Math.round(vw * 0.24)))
+                }
+                const _rawSidebarW = typeof localStorage !== 'undefined' ? localStorage.getItem('tg_sidebar_width') : null
+                const _parsedSidebarW = _rawSidebarW != null ? parseInt(_rawSidebarW, 10) : NaN
+                const sidebarWidth = ref(
+                    Number.isFinite(_parsedSidebarW) && _parsedSidebarW >= 220 && _parsedSidebarW <= 600
+                        ? _parsedSidebarW
+                        : computeDefaultSidebarWidth()
+                )
                 const sidebarResizing = ref(false)
                 // PWA install
                 const pwaInstallPrompt = ref(null)
@@ -4298,6 +4359,7 @@
                 // v6.2.0: Navigation stack for folders, archived, topics
                 const navStack = ref([{ type: 'chatList', filter: 'all' }])
                 const folders = ref([])
+                const folderDropdownOpen = ref(false)
                 const archivedCount = ref(0)
                 const topics = ref([])
                 const loadingTopics = ref(false)
@@ -4370,8 +4432,14 @@
                         } else if (nav.filter === 'all') {
                             url += '&archived=false'
                         }
-                        if (nav.filter && typeof nav.filter === 'object' && nav.filter.folderId) {
-                            url += `&folder_id=${nav.filter.folderId}`
+                        if (nav.filter && typeof nav.filter === 'object') {
+                            if (Array.isArray(nav.filter.folderIds) && nav.filter.folderIds.length > 0) {
+                                for (const id of nav.filter.folderIds) {
+                                    url += `&folder_ids=${id}`
+                                }
+                            } else if (nav.filter.folderId) {
+                                url += `&folder_id=${nav.filter.folderId}`
+                            }
                         }
                         
                         const res = await fetch(url, {
@@ -4528,6 +4596,56 @@
                     }
                     // Main panel keeps showing current topic messages
                 }
+
+                /** Mobile (< md): History API for system back — plain chats only (forum/topics use in-app back). */
+                let mobileHistoryLayers = 0
+                const isMobileBreakpoint = () => typeof window !== 'undefined' && window.innerWidth < 768
+                const mobileBackStep = () => {
+                    const nav = currentNav.value
+                    if (nav.type === 'chat' && nav.topicId) {
+                        navigateBack()
+                        return
+                    }
+                    if (nav.type === 'topics') {
+                        navigateBack()
+                        return
+                    }
+                    if (selectedChat.value) {
+                        selectedChat.value = null
+                        stopMessageRefresh()
+                        messages.value = []
+                        return
+                    }
+                    if (canGoBack.value && nav.type === 'chatList') {
+                        navigateBack()
+                    }
+                }
+                const pushMobileHistoryIfNeeded = (chatId) => {
+                    if (!isMobileBreakpoint() || !Number.isFinite(Number(chatId))) return
+                    try {
+                        // Use `/` so URL matches the in-app clean state (permalink flow also replaceState → `/`).
+                        history.pushState({ tgMobileNav: true, chatId: Number(chatId) }, '', '/')
+                        mobileHistoryLayers++
+                    } catch (_) { /* ignore */ }
+                }
+                const pushMobileHistoryLayer = (state = {}) => {
+                    if (!isMobileBreakpoint()) return
+                    try {
+                        history.pushState({ tgMobileNav: true, ...state }, '', '/')
+                        mobileHistoryLayers++
+                    } catch (_) { /* ignore */ }
+                }
+                const onMobileChatHeaderBack = () => {
+                    if (isMobileBreakpoint() && mobileHistoryLayers > 0) {
+                        history.back()
+                        return
+                    }
+                    if (currentNav.value.type === 'chat' && currentNav.value.topicId) {
+                        navigateBack()
+                        return
+                    }
+                    selectedChat.value = null
+                }
                 
                 const loadFolders = async () => {
                     try {
@@ -4568,8 +4686,59 @@
                     }
                 }
                 
+                const setChatListFilter = (filter) => {
+                    const top = navStack.value[navStack.value.length - 1]
+                    if (top && top.type === 'chatList') {
+                        navStack.value[navStack.value.length - 1] = { ...top, filter }
+                    } else {
+                        navigateTo({ type: 'chatList', filter })
+                        return
+                    }
+                    loadChats()
+                }
+
+                const normalizeFolderIds = (folderIds) => {
+                    return [...new Set((folderIds || [])
+                        .map((id) => Number(id))
+                        .filter((id) => Number.isInteger(id) && id > 0))]
+                        .sort((a, b) => a - b)
+                }
+
+                const selectedFolderIds = computed(() => {
+                    const nav = currentNav.value
+                    if (nav.filter && typeof nav.filter === 'object') {
+                        if (Array.isArray(nav.filter.folderIds)) {
+                            return normalizeFolderIds(nav.filter.folderIds)
+                        }
+                        if (Number.isInteger(nav.filter.folderId)) {
+                            return [nav.filter.folderId]
+                        }
+                    }
+                    return []
+                })
+
+                const isFolderSelected = (folderId) => selectedFolderIds.value.includes(folderId)
+
+                const applyFolderSelection = (folderIds) => {
+                    const normalized = normalizeFolderIds(folderIds)
+                    if (normalized.length === 0) {
+                        setChatListFilter('all')
+                        return
+                    }
+                    setChatListFilter({ folderIds: normalized })
+                }
+
+                const toggleFolderSelection = (folderId) => {
+                    const selected = selectedFolderIds.value
+                    if (selected.includes(folderId)) {
+                        applyFolderSelection(selected.filter((id) => id !== folderId))
+                    } else {
+                        applyFolderSelection([...selected, folderId])
+                    }
+                }
+
                 const selectFolder = (folderId) => {
-                    navigateTo({ type: 'chatList', filter: { folderId } })
+                    applyFolderSelection([folderId])
                 }
                 
                 const showArchived = () => {
@@ -4577,7 +4746,7 @@
                 }
                 
                 const showAllChats = () => {
-                    // Reset nav stack to root
+                    // Keep legacy behavior: reset sidebar navigation to root chat list
                     navStack.value = [{ type: 'chatList', filter: 'all' }]
                     loadChats()
                 }
@@ -4586,6 +4755,7 @@
                     // v6.2.12: Store full chat object so selectTopic can use it for display name
                     navigateTo({ type: 'topics', chatId: chat.id, chatName: getChatName(chat), chat: chat })
                     await loadTopics(chat.id)
+                    pushMobileHistoryLayer({ layer: 'topics', chatId: chat.id })
                 }
                 
                 const selectTopic = async (chat, topic) => {
@@ -4613,17 +4783,52 @@
                     scrollToBottom()
                     setupMessagesScrollObserver()
                     startMessageRefresh()
+                    pushMobileHistoryLayer({ layer: 'topic-chat', chatId: chat.id, topicId: topic.id })
                 }
                 
-                // v6.2.0: Active folder tab tracking
-                const activeTab = computed(() => {
-                    const nav = currentNav.value
-                    if (nav.filter === 'all') return 'all'
-                    if (nav.filter === 'archived') return 'archived'
-                    if (nav.filter && typeof nav.filter === 'object' && nav.filter.folderId) {
-                        return `folder_${nav.filter.folderId}`
+                const folderFilterLabel = computed(() => {
+                    const selectedIds = selectedFolderIds.value
+                    if (selectedIds.length === 0) return 'All Chats'
+                    const selectedFolders = folders.value.filter((folder) => selectedIds.includes(folder.id))
+                    if (selectedFolders.length === 1) {
+                        const [folder] = selectedFolders
+                        return `${folder.emoticon || '📁'} ${folder.title}`
                     }
-                    return 'all'
+                    return `${selectedFolders.length} folders selected`
+                })
+
+                const roleIconClass = computed(() => {
+                    switch (userRole.value) {
+                        case 'super_admin':
+                            return 'fas fa-crown'
+                        case 'master':
+                            return 'fas fa-user-tie'
+                        case 'admin':
+                            return 'fas fa-user-shield'
+                        case 'viewer':
+                            return 'fas fa-user'
+                        case 'token':
+                            return 'fas fa-key'
+                        default:
+                            return 'fas fa-user'
+                    }
+                })
+
+                const roleIconLabel = computed(() => {
+                    switch (userRole.value) {
+                        case 'super_admin':
+                            return 'Super admin'
+                        case 'master':
+                            return 'Master'
+                        case 'admin':
+                            return 'Admin'
+                        case 'viewer':
+                            return 'Viewer'
+                        case 'token':
+                            return 'API token'
+                        default:
+                            return 'Signed in'
+                    }
                 })
                 
                 // Topic color map (Telegram standard topic colors)
@@ -4934,7 +5139,11 @@
                                     } else {
                                         showToast('Chat not found or access denied', 'error')
                                     }
+                                    mobileHistoryLayers = 0
                                     window.history.replaceState({}, '', '/')
+                                    if (isMobileBreakpoint() && selectedChat.value) {
+                                        pushMobileHistoryIfNeeded(selectedChat.value.id)
+                                    }
                                 }
                             }
                         } else {
@@ -5540,7 +5749,11 @@
                                         showToast('Chat not found or access denied', 'error')
                                     }
                                 }
+                                mobileHistoryLayers = 0
                                 window.history.replaceState({}, '', '/')
+                                if (isMobileBreakpoint() && selectedChat.value) {
+                                    pushMobileHistoryIfNeeded(selectedChat.value.id)
+                                }
                             }
                         } else {
                             loginError.value = 'Login failed'
@@ -5814,6 +6027,7 @@
                         setupMessagesScrollObserver()
                         setupNewerMessagesObserver()
                         // Do NOT start auto-refresh in context mode
+                        pushMobileHistoryIfNeeded(chat.id)
                         return
                     }
 
@@ -5834,6 +6048,7 @@
                     setupMessagesScrollObserver()
                     // Start auto-refresh for new messages
                     startMessageRefresh()
+                    pushMobileHistoryIfNeeded(chat.id)
                 }
                 
                 // Auto-refresh messages every 3 seconds to catch new messages
@@ -6373,14 +6588,25 @@
                     document.addEventListener('mousemove', onMove)
                     document.addEventListener('mouseup', onUp)
                 }
-                // Apply saved width on mount and clear on resize to mobile
+                // Apply saved width on mount; popstate for mobile chat stack (plain chats)
                 onMounted(() => {
                     applySidebarWidth()
-                    window.addEventListener('resize', () => {
+                    const onWinResize = () => {
                         if (window.innerWidth < 768 && sidebarRef.value) {
                             sidebarRef.value.style.width = ''
-                        } else { applySidebarWidth() }
-                    })
+                        } else {
+                            mobileHistoryLayers = 0
+                            applySidebarWidth()
+                        }
+                    }
+                    const onPopState = () => {
+                        if (!isMobileBreakpoint()) return
+                        if (mobileHistoryLayers <= 0) return
+                        mobileHistoryLayers--
+                        mobileBackStep()
+                    }
+                    window.addEventListener('resize', onWinResize)
+                    window.addEventListener('popstate', onPopState)
                 })
 
                 // Link preview from raw_data
@@ -7770,6 +7996,7 @@
                     sidebarWidth,
                     sidebarResizing,
                     startSidebarResize,
+                    onMobileChatHeaderBack,
                     // Jump to boundary
                     jumpToBoundary,
                     // Link previews
@@ -7967,6 +8194,11 @@
                     navigateBack,
                     navigateBackToChats,
                     folders,
+                    folderDropdownOpen,
+                    selectedFolderIds,
+                    isFolderSelected,
+                    toggleFolderSelection,
+                    folderFilterLabel,
                     archivedCount,
                     topics,
                     loadingTopics,
@@ -7975,7 +8207,8 @@
                     showAllChats,
                     openForumTopics,
                     selectTopic,
-                    activeTab,
+                    roleIconClass,
+                    roleIconLabel,
                     getTopicColor,
                 }
             }

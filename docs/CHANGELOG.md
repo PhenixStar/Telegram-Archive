@@ -6,12 +6,21 @@ For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
 ## [Unreleased]
 
+### Added
+
+- **Mobile chat navigation stack** — On narrow viewports, opening chats pushes `history` layers (`/`, stateful) so **system / browser back** mirrors Telegram-style navigation. Plain chats now return to chat list; forum/topic flows now step `topic-thread → topics-list → chat-list`. Permalink and post-login deep-link flows reset history then re-sync one layer so counts stay correct.
+- **Multi-folder chat filter API** — `GET /api/chats` now accepts repeated `folder_ids` parameters (union semantics) so viewers can filter chats by multiple folders at once while preserving `folder_id` backward compatibility.
+
 ### Changed
 
-- **Sidebar resize handle** — Fixed drag handle height to `740px` (was stretching with `bottom: 0`, ~741px computed).
+- **Sidebar default width (desktop)** — If `localStorage` has no valid `tg_sidebar_width`, the initial width is **viewport-based** (`≈24vw`, clamped 220–400px) instead of a fixed 260px; user-resized values in range 220–600px are still loaded and saved.
+- **Chat list & topic title rows** — Title/date flex uses `min-w-0` / `shrink-0` so names stay **one line** with ellipsis at minimum sidebar width without overlapping the date.
+- **Sidebar header controls** — Removed the duplicate top user bar, moved Settings/Logout into the main title row, and replaced username text with role icons (including crown for super admin).
+- **Folder picker UI** — Replaced horizontal folder pills with a full-width `All Chats` dropdown control that supports multi-select folders; selecting `All Chats` is exclusive and clears folder selections.
 
 ### Fixed
 
+- **Sidebar layout** — Chat list column uses `min-h-0` so the scroll area sizes correctly inside the flex layout; the resize drag handle spans the full sidebar height via `top`/`bottom` (no hard-coded pixel height).
 - **WebSocket console spam on login page** — Real-time `/ws/updates` connections are only opened when the user has a session (or when viewer auth is disabled). Previously, unauthenticated loads hit the server which closes the socket with code 4001, and the client reconnected every 5s indefinitely. After login, the socket is started; logout stops it.
 - **WebSocket when auth check fails** — If `/api/auth/check` returned a non-2xx or network error, `auth_required` stayed at its initial `false`, so the client treated the app as “open” and still opened the WebSocket. Connection gating now treats failed auth checks as “do not connect” until login succeeds (or a successful check shows auth is off).
 
@@ -22,6 +31,8 @@ For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
   - `web/main.py` (3,849 LOC) → 8 files via APIRouter pattern (main + dependencies + 6 route modules)
   - `telegram_backup.py` (1,827 LOC) → 3 files via mixin pattern (orchestration + media + extraction)
 - **Total:** 39 source files, 15,864 LOC. All public APIs preserved — zero breaking changes.
+
+*Web viewer / sidebar work in [Unreleased]: Phenix, with love and frustration.*
 
 ## [7.3.0] - 2026-03-11
 
