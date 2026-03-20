@@ -1049,8 +1049,27 @@
             <div class="bg-tg-sidebar flex flex-col border-r sidebar-panel min-h-0" style="border-color: var(--tg-border);"
                 :class="{'hidden md:flex': selectedChat, 'w-full md:w-auto': true}"
                 ref="sidebarRef">
-                <!-- Header with Stats Dropdown -->
-                <div class="p-4 border-b border-[color:var(--tg-border)]">
+                <!-- Sidebar header — compact (logo only) vs normal (full controls) -->
+                <div class="border-b border-[color:var(--tg-border)] transition-all duration-200"
+                    :class="sidebarFocusCompact ? 'flex items-center justify-center py-3' : 'p-4'">
+
+                    <!-- === COMPACT MODE: logo circle with role ring === -->
+                    <button v-if="sidebarFocusCompact"
+                        @click="rightDockOpen = false"
+                        class="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg
+                               hover:opacity-90 transition-opacity focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+                        :class="{
+                            'ring-[4px] ring-amber-400': userRole === 'super_admin',
+                            'ring-[4px] ring-blue-400': userRole && userRole !== 'super_admin',
+                            'ring-[4px] ring-gray-600': !userRole,
+                        }"
+                        style="background: var(--tg-accent);"
+                        :title="'Expand sidebar' + (roleIconLabel ? ' — ' + roleIconLabel : '')"
+                        :aria-label="'Expand sidebar' + (roleIconLabel ? ' — ' + roleIconLabel : '')"
+                    >TA</button>
+
+                    <!-- === NORMAL MODE: full header with title, search, folders === -->
+                    <template v-else>
                     <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-3">
                             <span v-if="authRequired && isAuthenticated"
@@ -1065,54 +1084,19 @@
                                 <i :class="roleIconClass" class="text-sm"></i>
                             </span>
                             <h1 class="text-xl font-bold">Telegram Archive</h1>
-                            <!-- Stats Dropdown Button (hidden if SHOW_STATS=false) -->
-                            <div class="relative" v-if="showStatsUI && statsData.stats_calculated_at">
-                                <button @click="statsPopupOpen = !statsPopupOpen" 
-                                    class="flex items-center gap-1.5 px-2 py-1 text-xs text-tg-muted hover:text-white hover:bg-gray-700/50 rounded transition-colors">
-                                    <span>📊</span>
-                                    <span>Stats</span>
-                                    <svg :class="{'rotate-180': statsPopupOpen}" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                    </svg>
-                                </button>
-                                <!-- Stats Popup + Click-outside overlay -->
-                                <div v-if="statsPopupOpen" @click="statsPopupOpen = false" class="fixed inset-0 z-40"></div>
-                                <div v-if="statsPopupOpen" 
-                                    class="absolute left-0 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-4 min-w-[220px]">
-                                    <div class="text-xs text-tg-muted space-y-2">
-                                        <div class="font-semibold text-white mb-3 pb-2 border-b border-[color:var(--tg-border)]">Backup Statistics</div>
-                                        <div class="flex justify-between"><span>💬 Chats:</span><span class="text-white">{{ formatNumber(statsData.chats) }}</span></div>
-                                        <div class="flex justify-between"><span>📬 Messages:</span><span class="text-white">{{ formatNumber(statsData.messages) }}</span></div>
-                                        <div class="flex justify-between"><span>🖼️ Media files:</span><span class="text-white">{{ formatNumber(statsData.media_files) }}</span></div>
-                                        <div class="flex justify-between"><span>💾 Storage:</span><span class="text-white">{{ formatSize(statsData.total_size_mb) }}</span></div>
-                                        <div class="pt-2 mt-2 border-t border-[color:var(--tg-border)] text-[10px] opacity-70">
-                                            {{ formatStatsTime(statsData.stats_calculated_at) }}
-                                        </div>
-                                        <!-- Footer -->
-                                        <div class="pt-3 mt-3 border-t border-[color:var(--tg-border)] text-center">
-                                            <div class="text-[10px] opacity-70">
-                                                Made with ❤️ by <a href="https://geiser.cloud" target="_blank" class="text-blue-400 hover:text-blue-300">Sergio Fernández</a>
-                                            </div>
-                                            <a href="https://github.com/sponsors/GeiserX" target="_blank" 
-                                                class="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 text-[9px] bg-pink-600/20 hover:bg-pink-600/30 text-pink-300 rounded transition-colors">
-                                                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
-                                                    <path fill-rule="evenodd" d="M4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.565 20.565 0 008 13.393a20.561 20.561 0 003.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.75.75 0 01-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5zM8 14.25l-.345.666-.002-.001-.006-.003-.018-.01a7.643 7.643 0 01-.31-.17 22.075 22.075 0 01-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.08 22.08 0 01-3.744 2.584l-.018.01-.006.003h-.002L8 14.25zm0 0l.345.666a.752.752 0 01-.69 0L8 14.25z"></path>
-                                                </svg>
-                                                Sponsor
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                         <div class="flex items-center gap-1.5 shrink-0">
-                            <!-- Small loading indicator for stats/WS initialization -->
-                            <div v-if="loadingStats" class="flex items-center gap-1.5 text-xs text-tg-muted">
-                                <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <!-- Syncing indicator: icon-only with hover tooltip (Phase 1) -->
+                            <div v-if="loadingStats" class="relative group">
+                                <svg class="w-3.5 h-3.5 animate-spin text-tg-muted" fill="none" viewBox="0 0 24 24">
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                <span>Syncing...</span>
+                                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 text-xs rounded
+                                            bg-gray-900 text-white whitespace-nowrap opacity-0 group-hover:opacity-100
+                                            pointer-events-none transition-opacity z-50 shadow-lg">
+                                    Syncing...
+                                </div>
                             </div>
                             <button @click="openSettings()" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Settings" aria-label="Settings">
                                 <i class="fas fa-cog text-xs"></i>
@@ -1122,7 +1106,7 @@
                             </button>
                         </div>
                     </div>
-                    
+
                     <div class="relative mb-3">
                         <input v-model="searchQuery" @input="onSearchInput" type="text" placeholder="Search all chats..."
                             class="w-full rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border"
@@ -1188,30 +1172,19 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Last Backup Time / Real-time Status -->
-                    <div class="text-xs text-tg-muted">
+
+                    <!-- Real-time sync indicator (backup info moved to Settings > Admin > Backup) -->
+                    <div v-if="listenerActive" class="text-xs text-tg-muted">
                         <div class="flex items-center gap-1.5">
-                            <template v-if="listenerActive">
-                                <!-- Real-time mode indicator -->
-                                <span class="relative flex h-2 w-2">
-                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                                    <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                                </span>
-                                <span class="text-green-400">Real-time sync</span>
-                                <span class="text-gray-500">•</span>
-                                <span>Last backup: {{ formatLastBackupTime(lastBackupTime, viewerTimezone, lastBackupTimeSource) }}</span>
-                            </template>
-                            <template v-else>
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                <span>Last backup: {{ formatLastBackupTime(lastBackupTime, viewerTimezone, lastBackupTimeSource) }}</span>
-                            </template>
+                            <span class="relative flex h-2 w-2">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                            <span class="text-green-400">Real-time sync</span>
                         </div>
                     </div>
-                </div>
+                    </template>
+                </div><!-- /sidebar header -->
 
                 <!-- Database Busy Error Banner -->
                 <div v-if="chatsError" class="px-3 py-2 bg-amber-900/80 border-b border-amber-700">
@@ -1351,50 +1324,73 @@
                             <span class="text-sm">{{ searchQuery ? 'No chats found' : 'No chats yet' }}</span>
                         </div>
                         <template v-else>
-                            <!-- v6.2.0: Archived Chats Row (only in "All Chats" view) -->
+                            <!-- v6.2.0: Archived Chats Row — compact: icon only; normal: full row -->
                             <div v-if="archivedCount > 0 && currentNav.filter === 'all' && !searchQuery"
                                 @click="showArchived()"
-                                class="p-3 cursor-pointer hover:bg-tg-hover transition-colors flex items-center gap-3 border-b border-[color:var(--tg-border)]/50">
+                                class="cursor-pointer hover:bg-tg-hover transition-colors border-b border-[color:var(--tg-border)]/50"
+                                :class="sidebarFocusCompact ? 'flex items-center justify-center py-2' : 'p-3 flex items-center gap-3'"
+                                :title="sidebarFocusCompact ? 'Archived (' + archivedCount + ')' : undefined">
                                 <div class="w-12 h-12 rounded-full flex items-center justify-center shrink-0" style="background: color-mix(in srgb, var(--tg-accent) 30%, transparent);">
                                     <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
                                     </svg>
                                 </div>
-                                <div class="flex-1 min-w-0">
+                                <div v-show="!sidebarFocusCompact" class="flex-1 min-w-0">
                                     <h3 class="font-semibold text-blue-400">Archived Chats</h3>
                                     <p class="text-xs text-tg-muted">{{ archivedCount }} chats</p>
                                 </div>
-                                <svg class="w-5 h-5 text-tg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg v-show="!sidebarFocusCompact" class="w-5 h-5 text-tg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                 </svg>
                             </div>
                             
-                            <!-- Chat items -->
+                            <!-- Chat items — compact: avatar-only centered; normal: full row -->
                             <div v-for="(chat, chatIdx) in filteredChats" :key="chat.id" @click="selectChat(chat)"
                                 @contextmenu.prevent="openContextMenu($event, 'chat', chat)"
-                                class="p-3 cursor-pointer hover:bg-tg-hover transition-colors flex items-center gap-3"
-                                :class="{'bg-tg-active sidebar-chat-active': selectedChat?.id === chat.id, 'chat-focused': chatListFocusIndex === chatIdx}">
-                                <!-- Avatar -->
-                                <div
-                                    class="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-white shrink-0 overflow-hidden relative"
-                                    :style="{ background: chat.avatar_url ? '' : PEER_COLORS[Math.abs(chat.id) % PEER_COLORS.length] }">
-                                    <img v-if="chat.avatar_url" :src="chat.avatar_url" class="w-full h-full object-cover"
-                                        @error="chat.avatar_url = null" :alt="getChatName(chat)">
-                                    <template v-else-if="isDeletedChat(chat)">
-                                        <!-- Deleted account icon -->
-                                        <svg class="w-7 h-7 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M12 14c2.21 0 4-1.343 4-3s-1.79-3-4-3-4 1.343-4 3 1.79 3 4 3z" />
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M5 21a7 7 0 0114 0" />
-                                        </svg>
-                                    </template>
-                                    <template v-else>
-                                        {{ getInitials(chat) }}
-                                    </template>
+                                role="button" :tabindex="sidebarFocusCompact ? '0' : undefined"
+                                :aria-label="sidebarFocusCompact ? getChatName(chat) : undefined"
+                                class="cursor-pointer hover:bg-tg-hover transition-all duration-200 ease-in-out
+                                       focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+                                :class="[
+                                    sidebarFocusCompact
+                                        ? 'flex flex-col items-center justify-center py-2 px-2'
+                                        : 'p-3 flex items-center gap-3',
+                                    !sidebarFocusCompact && selectedChat?.id === chat.id ? 'bg-tg-active sidebar-chat-active' : '',
+                                    chatListFocusIndex === chatIdx ? 'chat-focused' : ''
+                                ]">
+                                <!-- Avatar with compact selection ring + unread dot overlay -->
+                                <div class="relative">
+                                    <div
+                                        class="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold text-white shrink-0 overflow-hidden"
+                                        :class="{
+                                            'ring-[3px] ring-blue-500': sidebarFocusCompact && selectedChat?.id === chat.id,
+                                        }"
+                                        :style="{ background: chat.avatar_url ? '' : PEER_COLORS[Math.abs(chat.id) % PEER_COLORS.length] }">
+                                        <img v-if="chat.avatar_url" :src="chat.avatar_url" class="w-full h-full object-cover"
+                                            @error="chat.avatar_url = null" :alt="getChatName(chat)">
+                                        <template v-else-if="isDeletedChat(chat)">
+                                            <svg class="w-7 h-7 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M12 14c2.21 0 4-1.343 4-3s-1.79-3-4-3-4 1.343-4 3 1.79 3 4 3z" />
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M5 21a7 7 0 0114 0" />
+                                            </svg>
+                                        </template>
+                                        <template v-else>{{ getInitials(chat) }}</template>
+                                    </div>
+                                    <!-- Compact: unread dot overlay on avatar corner -->
+                                    <span v-if="sidebarFocusCompact && hasUnread(chat)"
+                                        class="absolute top-0 right-0 w-2.5 h-2.5 rounded-full border-2"
+                                        style="background: var(--tg-accent); border-color: var(--tg-sidebar); transform: translate(30%, -30%);"></span>
                                 </div>
+                                <!-- Compact: selected chat name label below avatar -->
+                                <span v-if="sidebarFocusCompact && selectedChat?.id === chat.id"
+                                    class="text-[9px] text-center text-blue-400 truncate max-w-[56px] mt-0.5 leading-tight">
+                                    {{ getChatName(chat) }}
+                                </span>
 
-                                <div class="flex-1 min-w-0">
+                                <!-- Normal mode: full chat info (v-show for perf — avoids DOM churn) -->
+                                <div v-show="!sidebarFocusCompact" class="flex-1 min-w-0">
                                     <div class="flex justify-between items-baseline gap-2">
                                         <div class="min-w-0 flex-1 overflow-hidden pr-1">
                                             <h3 class="font-semibold truncate text-white">
@@ -1403,12 +1399,10 @@
                                             </h3>
                                         </div>
                                         <div class="flex items-center gap-1.5 shrink-0">
-                                            <!-- v8.1: Unread indicator dot -->
                                             <span v-if="hasUnread(chat)" class="w-2 h-2 rounded-full shrink-0" style="background: var(--tg-accent);"></span>
                                             <span class="text-xs text-tg-muted whitespace-nowrap" :class="{'text-blue-400 font-medium': hasUnread(chat)}">{{ formatDate(chat.last_message_date) }}</span>
                                         </div>
                                     </div>
-                                    <!-- v8.1: Last message preview (like Telegram Web) -->
                                     <p class="text-sm text-tg-muted truncate">
                                         <template v-if="chat.last_message_text || chat.last_message_media_type">
                                             <span v-if="chat.type !== 'private' && chat.last_message_sender"
@@ -1472,12 +1466,14 @@
                 <!-- Sidebar Resize Handle (desktop only) — absolutely positioned at right edge -->
                 <div class="sidebar-resize-handle hidden md:block"
                     :class="{ active: sidebarResizing }"
+                    v-show="!sidebarFocusCompact"
                     @mousedown.prevent="startSidebarResize"></div>
             </div>
 
-            <!-- Main Chat Area - full width on mobile -->
+            <!-- Main Chat Area - full width on mobile, min-width prevents crush when dock open -->
             <div class="flex-1 flex flex-col bg-tg-bg relative min-w-0 overflow-hidden"
-                :class="{'hidden md:flex': !selectedChat, 'flex': selectedChat}">
+                :class="{'hidden md:flex': !selectedChat, 'flex': selectedChat}"
+                style="min-width: 280px;">
                 <!-- PWA Install Banner (inside main area, above content) -->
                 <div v-if="pwaInstallPrompt && !pwaBannerDismissed" class="pwa-install-banner">
                     <i class="fas fa-download"></i>
@@ -1538,51 +1534,42 @@
                                     <template v-else>{{ selectedChat.type }}</template>
                                 </p>
                             </div>
-                            <!-- Per-Chat Stats -->
-                            <div v-if="chatStats" class="hidden sm:flex items-center gap-3 ml-4 px-3 py-1 bg-gray-800/50 rounded-lg text-xs text-tg-muted">
-                                <span title="Messages in this chat">📬 {{ formatNumber(chatStats.messages) }} msgs</span>
-                                <span v-if="chatStats.media_files > 0" title="Media files">🖼️ {{ formatNumber(chatStats.media_files) }} media</span>
-                                <span v-if="chatStats.total_size_mb > 0" title="Storage used">💾 {{ formatSize(chatStats.total_size_mb) }}</span>
-                            </div>
-                            <!-- Loading indicator for chat stats -->
-                            <div v-else-if="selectedChat && !chatStats" class="hidden sm:flex items-center ml-4 text-xs text-tg-muted opacity-50">
-                                <svg class="w-3 h-3 animate-spin mr-1" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                            </div>
+                            <!-- Per-Chat Stats: relocated to profile panel (Phase 4) -->
                         </div>
 
                         <div class="flex items-center gap-1 sm:gap-2 shrink-0">
                             <div class="flex items-center gap-1">
                                 <!-- Search Bar - responsive width -->
-                                <div class="relative w-20 sm:w-40 md:w-52 lg:w-64">
-                                    <input v-model="messageSearchQuery"
-                                        @keydown.enter.prevent="(searchMatchCount > 0 && messageSearchQuery.trim() === lastSearchedQuery) ? navigateSearchMatch($event.shiftKey ? -1 : 1) : searchMessages()"
-                                        @keydown.escape.prevent="clearHeaderSearch"
-                                        type="text" placeholder="Search..."
-                                        class="w-full rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border"
-                                        style="background: color-mix(in srgb, var(--tg-sidebar) 85%, black); border-color: color-mix(in srgb, var(--tg-border) 65%, black); color: var(--tg-text);">
-                                    <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
-                                        stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                                    </svg>
+                                <!-- Search input with match nav -->
+                                <div class="flex items-center gap-1">
+                                    <div class="relative w-20 sm:w-40 md:w-52 lg:w-64">
+                                        <input v-model="messageSearchQuery"
+                                            @keydown.enter.prevent="(searchMatchCount > 0 && messageSearchQuery.trim() === lastSearchedQuery) ? navigateSearchMatch($event.shiftKey ? -1 : 1) : searchMessages()"
+                                            @keydown.escape.prevent="clearHeaderSearch"
+                                            type="text" placeholder="Search..."
+                                            class="w-full rounded-lg pl-8 sm:pl-10 pr-2 sm:pr-4 py-1.5 sm:py-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border"
+                                            style="background: color-mix(in srgb, var(--tg-sidebar) 85%, black); border-color: color-mix(in srgb, var(--tg-border) 65%, black); color: var(--tg-text);">
+                                        <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 absolute left-2 sm:left-3 top-2 sm:top-2.5" fill="none"
+                                            stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                        </svg>
+                                    </div>
+                                    <!-- Match count + nav arrows (separate elements, not inside input) -->
+                                    <template v-if="messageSearchQuery.trim() && lastSearchedQuery">
+                                        <span class="text-[10px] sm:text-xs whitespace-nowrap" style="color: var(--tg-muted);">
+                                            {{ searchMatchCount > 0 ? `${searchMatchIndex + 1}/${searchMatchCount}` : '0' }}
+                                        </span>
+                                        <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(1)"
+                                            class="p-1 rounded hover:bg-white/10 shrink-0" style="color: var(--tg-muted);" title="Previous (older)">
+                                            <i class="fas fa-chevron-up text-[10px]"></i>
+                                        </button>
+                                        <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(-1)"
+                                            class="p-1 rounded hover:bg-white/10 shrink-0" style="color: var(--tg-muted);" title="Next (newer)">
+                                            <i class="fas fa-chevron-down text-[10px]"></i>
+                                        </button>
+                                    </template>
                                 </div>
-                                <!-- Match count + navigation (visible when header searching) -->
-                                <template v-if="messageSearchQuery.trim() && lastSearchedQuery">
-                                    <span class="text-xs whitespace-nowrap hidden sm:inline" style="color: var(--tg-muted);">
-                                        {{ searchMatchCount > 0 ? `${searchMatchIndex + 1} / ${searchMatchCount}` : (messageSearchQuery.trim() === lastSearchedQuery ? 'No matches' : 'Press Enter') }}
-                                    </span>
-                                    <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(-1)"
-                                        class="p-0.5 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Previous match">
-                                        <i class="fas fa-chevron-up text-[10px]"></i>
-                                    </button>
-                                    <button v-if="searchMatchCount > 0" @click="navigateSearchMatch(1)"
-                                        class="p-0.5 rounded hover:opacity-80" style="color: var(--tg-muted);" title="Next match">
-                                        <i class="fas fa-chevron-down text-[10px]"></i>
-                                    </button>
-                                </template>
                                 <!-- Date filter fields — inline, hidden on mobile to prevent overflow -->
                                 <div v-if="showAdvancedSearch" class="hidden sm:flex items-center gap-1.5">
                                     <input v-model="searchDateFrom" type="date"
@@ -1615,22 +1602,22 @@
                                 </button>
                             </div>
 
-                            <!-- Timeline Toggle (Phase 7) -->
+                            <!-- Timeline Toggle (mobile only — desktop uses dock strip) -->
                             <button @click="showTimeline = !showTimeline; if(showTimeline && !timelineDensity.length) loadTimeline()"
                                 :style="showTimeline ? { color: 'var(--tg-accent)' } : { color: 'var(--tg-muted)' }"
-                                class="p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
+                                class="md:hidden p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
                                 title="Activity Timeline">
                                 <i class="fas fa-chart-bar text-xs sm:text-sm"></i>
                             </button>
-                            <!-- Media Panel Toggle (Phase 5) -->
+                            <!-- Media Panel Toggle (mobile only — desktop uses dock strip) -->
                             <button @click="showMediaPanel ? showMediaPanel = false : openMediaPanel()"
                                 :style="showMediaPanel ? { color: 'var(--tg-accent)' } : { color: 'var(--tg-muted)' }"
-                                class="p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
+                                class="md:hidden p-1.5 sm:p-2 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
                                 title="Shared Media">
                                 <i class="fas fa-photo-video text-xs sm:text-sm"></i>
                             </button>
-                            <!-- Export Button with format dropdown -->
-                            <div class="relative shrink-0">
+                            <!-- Export Button (mobile only — desktop uses dock strip) -->
+                            <div class="relative shrink-0 md:hidden">
                                 <button @click="showExportMenu = !showExportMenu"
                                     class="p-1.5 sm:p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
                                     title="Export Chat">
@@ -1650,9 +1637,9 @@
                                 </div>
                             </div>
 
-                            <!-- AI Assistant Panel Toggle -->
+                            <!-- AI Panel Toggle (mobile only — desktop uses dock strip) -->
                             <button @click="showAiPanel = !showAiPanel"
-                                class="p-1.5 sm:p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
+                                class="md:hidden p-1.5 sm:p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
                                 :style="showAiPanel ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
                                 title="AI Assistant">
                                 <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -1744,46 +1731,7 @@
 
                     <!-- Messages - uses flex-col-reverse for instant scroll-to-bottom -->
                     <div class="flex-1 relative min-h-0">
-                    <!-- Media Panel (Phase 5) -->
-                    <div v-if="showMediaPanel" class="absolute inset-y-0 right-0 w-80 z-30 flex flex-col border-l" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
-                        <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
-                            <button @click="showMediaPanel = false" class="text-tg-muted hover:text-white"><i class="fas fa-times"></i></button>
-                            <span class="font-semibold text-white text-sm flex-1">Shared Media</span>
-                            <button v-if="['photo','video'].includes(mediaPanelTab)"
-                                @click="mediaGridLarge = !mediaGridLarge"
-                                class="p-1.5 rounded hover:bg-white/10 text-tg-muted hover:text-white transition-colors"
-                                :title="mediaGridLarge ? 'Small grid' : 'Large grid'">
-                                <i class="fas" :class="mediaGridLarge ? 'fa-th' : 'fa-th-large'"></i>
-                            </button>
-                        </div>
-                        <div class="flex border-b" style="border-color: var(--tg-border);">
-                            <button v-for="tab in mediaPanelTabs" :key="tab.key" @click="mediaPanelTab = tab.key; loadMediaPanel(true)"
-                                :class="mediaPanelTab !== tab.key ? 'text-tg-muted border-transparent' : 'border-transparent'"
-                                :style="mediaPanelTab === tab.key ? { color: 'var(--tg-accent)', borderColor: 'var(--tg-accent)' } : {}"
-                                class="flex-1 py-2 text-xs font-medium border-b-2 transition-colors">
-                                <i class="fas" :class="tab.icon"></i>
-                            </button>
-                        </div>
-                        <div class="flex-1 overflow-y-auto p-2">
-                            <div v-if="['photo','video'].includes(mediaPanelTab)" class="grid gap-1" :class="mediaGridLarge ? 'grid-cols-2' : 'grid-cols-3'">
-                                <div v-for="item in mediaPanelItems" :key="item.id" @click="openMedia(item)" class="aspect-square cursor-pointer overflow-hidden rounded hover:opacity-80">
-                                    <img :src="getMediaUrl(item)" class="w-full h-full object-cover" loading="lazy">
-                                </div>
-                            </div>
-                            <div v-else class="space-y-1">
-                                <div v-for="item in mediaPanelItems" :key="item.id" class="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
-                                    <i class="fas text-tg-muted" :class="mediaPanelTab === 'voice' ? 'fa-microphone' : 'fa-file'"></i>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="text-sm truncate text-white">{{ item.media?.file_name || item.text?.substring(0, 40) || 'File' }}</div>
-                                        <div class="text-xs text-tg-muted">{{ formatDateFull(item.date) }}</div>
-                                    </div>
-                                </div>
-                            </div>
-                            <button v-if="mediaPanelHasMore && !mediaPanelLoading" @click="loadMediaPanel()" class="w-full py-2 text-xs" style="color: var(--tg-accent);">Load more</button>
-                            <div v-if="mediaPanelLoading" class="flex justify-center py-4"><div class="loading-spinner"></div></div>
-                            <div v-if="!mediaPanelLoading && mediaPanelItems.length === 0" class="text-center py-8 text-tg-muted text-xs">No media found</div>
-                        </div>
-                    </div>
+                    <!-- Media Panel: moved to right dock canvas -->
 
                     <!-- Profile Sidebar (Phase 6) -->
                     <div v-if="showProfilePanel" class="absolute inset-y-0 right-0 w-80 md:w-80 z-30 flex flex-col border-l overflow-y-auto profile-sidebar-mobile" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
@@ -1808,6 +1756,10 @@
                             <div class="text-center">
                                 <div class="text-lg font-bold text-white">{{ chatStats.media_files?.toLocaleString() }}</div>
                                 <div class="text-xs text-tg-muted">Media</div>
+                            </div>
+                            <div v-if="chatStats.total_size_mb > 0" class="text-center">
+                                <div class="text-lg font-bold text-white">{{ formatSize(chatStats.total_size_mb) }}</div>
+                                <div class="text-xs text-tg-muted">Storage</div>
                             </div>
                             <div v-if="selectedChat.member_count" class="text-center">
                                 <div class="text-lg font-bold text-white">{{ selectedChat.member_count }}</div>
@@ -1968,7 +1920,8 @@
                                     style="color: var(--tg-text);"
                                     :data-msg-id="msg.id"
                                     :class="[getBubbleGroupClass(msg, index), initialLoadDone ? 'msg-appear' : '']"
-                                    :style="[getSenderStyle(msg), {'--bubble-bg': getMessageBackground(msg)}]"
+                                    :style="[getSenderStyle(msg), {'--bubble-bg': getMessageBackground(msg)},
+                                        getMessageHighlight(msg) ? { borderLeft: '3px solid ' + getMessageHighlight(msg), background: getMessageHighlight(msg) + '15' } : {}]"
                                     @contextmenu.prevent="openContextMenu($event, 'message', msg)"
                                     @touchstart="startLongPress($event, 'message', msg)"
                                     @touchend="cancelLongPress" @touchmove="cancelLongPress">
@@ -2344,21 +2297,25 @@
                         <div ref="scrollAnchor"></div>
                     </div>
 
-                    <!-- Jump to First/Last + Scroll to Bottom -->
-                    <div class="absolute bottom-4 right-4 flex flex-col gap-2 z-20">
-                        <button v-if="showScrollToBottom" @click="jumpToBoundary('first')"
-                            class="w-10 h-10 rounded-full bg-tg-sidebar/90 backdrop-blur shadow-lg flex items-center justify-center text-tg-muted hover:text-white transition-colors"
+                    <!-- Scroll navigation: single themed button, swaps between "go to latest" and "go to oldest" -->
+                    <div class="absolute bottom-4 right-4 z-20">
+                        <!-- Go to oldest (shows after sustained upward scroll) -->
+                        <button v-if="showScrollToTop && !showScrollToBottom"
+                            @click="jumpToBoundary('first')"
+                            class="w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105"
+                            style="background: var(--tg-sidebar); border: 1px solid var(--tg-border); color: var(--tg-muted);"
                             title="Jump to oldest message">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
-                                <path stroke-linecap="round" stroke-width="2" d="M5 10h14"></path>
                             </svg>
                         </button>
-                        <button v-if="showScrollToBottom"
+                        <!-- Go to latest (shows when scrolled up) -->
+                        <button v-else-if="showScrollToBottom"
                             @click="scrollToLatest"
-                            class="scroll-to-bottom-btn"
+                            class="w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105"
+                            style="background: var(--tg-sidebar); border: 1px solid var(--tg-border); color: var(--tg-muted);"
                             title="Scroll to latest messages">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
                             </svg>
                         </button>
@@ -2367,88 +2324,205 @@
                 </template>
             </div>
 
-            <!-- AI Assistant Side Panel (IDE-style) -->
-            <transition name="ai-panel">
-            <div v-if="showAiPanel && selectedChat" class="ai-side-panel flex flex-col border-l" style="background: var(--tg-bg); border-color: var(--tg-border); width: 380px; min-width: 320px; max-width: 480px;">
-                <!-- Panel Header -->
-                <div class="flex items-center justify-between px-4 py-3 border-b" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
-                    <div class="flex items-center gap-2">
-                        <svg class="w-5 h-5" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
-                        </svg>
-                        <span class="font-semibold text-sm" style="color: var(--tg-text);">AI Assistant</span>
-                    </div>
-                    <button @click="showAiPanel = false" class="p-1 rounded hover:bg-white/10 transition-colors" style="color: var(--tg-muted);" title="Close panel">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                        </svg>
+            <!-- Right Dock: Tool Strip (always visible on md+ when chat selected) -->
+            <div v-if="selectedChat" class="hidden md:flex flex-col shrink-0 border-l items-center py-2 gap-1"
+                role="toolbar" aria-label="Tool strip"
+                style="width: 48px; background: var(--tg-sidebar); border-color: var(--tg-border);">
+                <button @click="onToolClick('timeline')"
+                    class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+                    :style="rightDockOpen && rightDockMode === 'timeline' ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
+                    :aria-pressed="rightDockOpen && rightDockMode === 'timeline'"
+                    title="Activity Timeline">
+                    <i class="fas fa-chart-bar"></i>
+                </button>
+                <button @click="onToolClick('media')"
+                    class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+                    :style="rightDockOpen && rightDockMode === 'media' ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
+                    :aria-pressed="rightDockOpen && rightDockMode === 'media'"
+                    title="Shared Media">
+                    <i class="fas fa-photo-video"></i>
+                </button>
+                <div class="relative">
+                    <button @click="showExportMenu = !showExportMenu"
+                        class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+                        :style="showExportMenu ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
+                        aria-haspopup="true" :aria-expanded="showExportMenu"
+                        title="Export Chat">
+                        <i class="fas fa-download"></i>
                     </button>
+                    <div v-if="showExportMenu" class="absolute left-full top-0 ml-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 min-w-[120px]">
+                        <div @click="showExportMenu = false" class="fixed inset-0 z-40"></div>
+                        <button @click="exportChat('json'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
+                            <i class="fas fa-code w-4 text-center"></i> JSON
+                        </button>
+                        <button @click="exportChat('csv'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
+                            <i class="fas fa-table w-4 text-center"></i> CSV
+                        </button>
+                    </div>
                 </div>
+                <button @click="onToolClick('ai')"
+                    class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+                    :style="rightDockOpen && rightDockMode === 'ai' ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
+                    :aria-pressed="rightDockOpen && rightDockMode === 'ai'"
+                    title="AI Assistant">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
+                    </svg>
+                </button>
+            </div>
 
-                <!-- Chat Content -->
-                <div class="flex-1 overflow-y-auto">
-                    <div class="flex flex-col h-full">
-                        <div class="flex-1 overflow-y-auto p-4 space-y-3">
-                            <div v-if="aiMessages.length === 0" class="text-center py-8">
-                                <svg class="w-12 h-12 mx-auto mb-3 opacity-30" style="color: var(--tg-muted);" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
-                                </svg>
-                                <p class="text-sm" style="color: var(--tg-muted);">Ask about this chat or get AI help</p>
-                                <div class="mt-3 space-y-1.5">
-                                    <button @click="aiPromptInput = 'Summarize the recent messages'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-compress-alt mr-1.5" style="color: var(--tg-accent);"></i>Summarize recent messages
-                                    </button>
-                                    <button @click="aiPromptInput = 'What are the key topics discussed?'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-tags mr-1.5" style="color: var(--tg-accent);"></i>Identify key topics
-                                    </button>
-                                    <button @click="aiPromptInput = 'Draft a reply to the last message'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-reply mr-1.5" style="color: var(--tg-accent);"></i>Draft a reply
-                                    </button>
-                                    <button @click="runBatchOcr" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-eye mr-1.5" style="color: var(--tg-accent);"></i>OCR all images in chat
-                                    </button>
-                                    <button @click="aiPromptInput = 'List all OCR text found in images'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-file-alt mr-1.5" style="color: var(--tg-accent);"></i>Show OCR inventory
-                                    </button>
+            <!-- Right Dock: Context Canvas (expandable panel) -->
+            <transition name="ai-panel">
+            <div v-if="rightDockOpen && selectedChat" class="flex flex-col shrink-0 border-l overflow-hidden"
+                style="background: var(--tg-bg); border-color: var(--tg-border); width: 380px; min-width: 320px; max-width: 480px;">
+
+                <!-- === TIMELINE MODE === -->
+                <template v-if="rightDockMode === 'timeline'">
+                    <div class="flex items-center gap-3 px-4 py-3 border-b" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                        <button @click="rightDockOpen = false" class="text-tg-muted hover:text-white" aria-label="Close panel"><i class="fas fa-times"></i></button>
+                        <span class="font-semibold text-white text-sm flex-1">Activity Timeline</span>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-4">
+                        <div class="flex gap-2 mb-4">
+                            <button v-for="g in ['day','week','month']" :key="g"
+                                @click="timelineGranularity = g; loadTimeline()"
+                                class="px-3 py-1 text-xs rounded-full border transition-colors"
+                                :style="timelineGranularity === g ? 'background: var(--tg-accent); color: #fff; border-color: var(--tg-accent);' : 'color: var(--tg-muted); border-color: var(--tg-border);'">
+                                {{ g.charAt(0).toUpperCase() + g.slice(1) }}
+                            </button>
+                        </div>
+                        <div v-if="timelineLoading" class="flex justify-center py-8"><div class="loading-spinner"></div></div>
+                        <div v-else-if="timelineDensity.length" class="space-y-1">
+                            <div v-for="d in timelineDensity" :key="d.date" @click="timelineJumpToDate(d.date)"
+                                class="flex items-center gap-2 cursor-pointer hover:bg-white/5 rounded px-2 py-1 transition-colors">
+                                <span class="text-xs text-tg-muted w-20 shrink-0">{{ d.date }}</span>
+                                <div class="flex-1 h-4 rounded overflow-hidden" style="background: rgba(255,255,255,0.05);">
+                                    <div class="h-full rounded transition-all" :style="{ width: (d.count / maxDensity * 100) + '%', background: getDensityColor(d.count) }"></div>
                                 </div>
+                                <span class="text-xs text-tg-muted w-8 text-right shrink-0">{{ d.count }}</span>
                             </div>
-                            <template v-for="(msg, i) in aiMessages" :key="i">
-                                <div class="flex gap-2" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
-                                    <div class="max-w-[85%] rounded-xl px-3 py-2 text-sm"
-                                        :style="msg.role === 'user' ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
-                                        <div style="white-space: pre-wrap;">{{ msg.content }}</div>
-                                        <div class="text-[10px] mt-1 opacity-60">{{ msg.time }}</div>
-                                    </div>
-                                </div>
-                            </template>
-                            <div v-if="aiLoading" class="flex gap-2 justify-start">
-                                <div class="rounded-xl px-3 py-2 text-sm" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                                    <div class="flex gap-1">
-                                        <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 0ms;"></span>
-                                        <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 150ms;"></span>
-                                        <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 300ms;"></span>
-                                    </div>
+                        </div>
+                        <div v-else class="text-center py-8 text-tg-muted text-xs">No timeline data</div>
+                    </div>
+                </template>
+
+                <!-- === MEDIA MODE === -->
+                <template v-else-if="rightDockMode === 'media'">
+                    <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
+                        <button @click="rightDockOpen = false" class="text-tg-muted hover:text-white" aria-label="Close panel"><i class="fas fa-times"></i></button>
+                        <span class="font-semibold text-white text-sm flex-1">Shared Media</span>
+                        <button v-if="['photo','video'].includes(mediaPanelTab)"
+                            @click="mediaGridLarge = !mediaGridLarge"
+                            class="p-1.5 rounded hover:bg-white/10 text-tg-muted hover:text-white transition-colors"
+                            :title="mediaGridLarge ? 'Small grid' : 'Large grid'">
+                            <i class="fas" :class="mediaGridLarge ? 'fa-th' : 'fa-th-large'"></i>
+                        </button>
+                    </div>
+                    <div class="flex border-b" style="border-color: var(--tg-border);">
+                        <button v-for="tab in mediaPanelTabs" :key="tab.key" @click="mediaPanelTab = tab.key; loadMediaPanel(true)"
+                            :class="mediaPanelTab !== tab.key ? 'text-tg-muted border-transparent' : 'border-transparent'"
+                            :style="mediaPanelTab === tab.key ? { color: 'var(--tg-accent)', borderColor: 'var(--tg-accent)' } : {}"
+                            class="flex-1 py-2 text-xs font-medium border-b-2 transition-colors">
+                            <i class="fas" :class="tab.icon"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-2">
+                        <div v-if="['photo','video'].includes(mediaPanelTab)" class="grid gap-1" :class="mediaGridLarge ? 'grid-cols-2' : 'grid-cols-3'">
+                            <div v-for="item in mediaPanelItems" :key="item.id" @click="openMedia(item)" class="aspect-square cursor-pointer overflow-hidden rounded hover:opacity-80">
+                                <img :src="getMediaUrl(item)" class="w-full h-full object-cover" loading="lazy">
+                            </div>
+                        </div>
+                        <div v-else class="space-y-1">
+                            <div v-for="item in mediaPanelItems" :key="item.id" class="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
+                                <i class="fas text-tg-muted" :class="mediaPanelTab === 'voice' ? 'fa-microphone' : 'fa-file'"></i>
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-sm truncate text-white">{{ item.media?.file_name || item.text?.substring(0, 40) || 'File' }}</div>
+                                    <div class="text-xs text-tg-muted">{{ formatDateFull(item.date) }}</div>
                                 </div>
                             </div>
                         </div>
-                        <!-- Input -->
-                        <div class="p-3 border-t" style="border-color: var(--tg-border);">
-                            <div class="flex gap-2">
-                                <input v-model="aiPromptInput" @keydown.enter.prevent="sendAiMessage" type="text"
-                                    placeholder="Ask AI about this chat..."
-                                    class="flex-1 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/50"
-                                    style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                <button @click="sendAiMessage" :disabled="!aiPromptInput.trim() || aiLoading"
-                                    class="px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
-                                    style="background: var(--tg-accent); color: #fff;">
-                                    <i class="fas fa-paper-plane text-xs"></i>
-                                </button>
+                        <button v-if="mediaPanelHasMore && !mediaPanelLoading" @click="loadMediaPanel()" class="w-full py-2 text-xs" style="color: var(--tg-accent);">Load more</button>
+                        <div v-if="mediaPanelLoading" class="flex justify-center py-4"><div class="loading-spinner"></div></div>
+                        <div v-if="!mediaPanelLoading && mediaPanelItems.length === 0" class="text-center py-8 text-tg-muted text-xs">No media found</div>
+                    </div>
+                </template>
+
+                <!-- === AI MODE === -->
+                <template v-else-if="rightDockMode === 'ai'">
+                    <div class="flex items-center justify-between px-4 py-3 border-b" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-5 h-5" style="color: var(--tg-accent);" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
+                            </svg>
+                            <span class="font-semibold text-sm" style="color: var(--tg-text);">AI Assistant</span>
+                        </div>
+                        <button @click="rightDockOpen = false" class="p-1 rounded hover:bg-white/10 transition-colors" style="color: var(--tg-muted);" title="Close panel">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="flex-1 flex flex-col min-h-0">
+                        <div class="flex flex-col h-full">
+                            <div class="flex-1 overflow-y-auto p-4 space-y-3">
+                                <div v-if="aiMessages.length === 0" class="text-center py-8">
+                                    <svg class="w-12 h-12 mx-auto mb-3 opacity-30" style="color: var(--tg-muted);" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M21.928 11.607c-.202-.488-.635-.605-.928-.633V8c0-1.103-.897-2-2-2h-6V4.61c.305-.274.5-.668.5-1.11a1.5 1.5 0 0 0-3 0c0 .442.195.836.5 1.11V6H5c-1.103 0-2 .897-2 2v2.997l-.082.006A1 1 0 0 0 1.99 12.308l1.01 4.545V18c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2v-1.146l1.01-4.546a1 1 0 0 0-.082-1.701ZM5 18v-8h14l.002 8H5Zm3.5-5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/>
+                                    </svg>
+                                    <p class="text-sm" style="color: var(--tg-muted);">Ask about this chat or get AI help</p>
+                                    <div class="mt-3 space-y-1.5">
+                                        <button @click="aiPromptInput = 'Summarize the recent messages'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-compress-alt mr-1.5" style="color: var(--tg-accent);"></i>Summarize recent messages
+                                        </button>
+                                        <button @click="aiPromptInput = 'What are the key topics discussed?'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-tags mr-1.5" style="color: var(--tg-accent);"></i>Identify key topics
+                                        </button>
+                                        <button @click="aiPromptInput = 'Draft a reply to the last message'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-reply mr-1.5" style="color: var(--tg-accent);"></i>Draft a reply
+                                        </button>
+                                        <button @click="runBatchOcr" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-eye mr-1.5" style="color: var(--tg-accent);"></i>OCR all images in chat
+                                        </button>
+                                        <button @click="aiPromptInput = 'List all OCR text found in images'" class="block w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-white/5 transition-colors" style="color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-file-alt mr-1.5" style="color: var(--tg-accent);"></i>Show OCR inventory
+                                        </button>
+                                    </div>
+                                </div>
+                                <template v-for="(msg, i) in aiMessages" :key="i">
+                                    <div class="flex gap-2" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                                        <div class="max-w-[85%] rounded-xl px-3 py-2 text-sm"
+                                            :style="msg.role === 'user' ? 'background: var(--tg-accent); color: #fff;' : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                            <div style="white-space: pre-wrap;">{{ msg.content }}</div>
+                                            <div class="text-[10px] mt-1 opacity-60">{{ msg.time }}</div>
+                                        </div>
+                                    </div>
+                                </template>
+                                <div v-if="aiLoading" class="flex gap-2 justify-start">
+                                    <div class="rounded-xl px-3 py-2 text-sm" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                        <div class="flex gap-1">
+                                            <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 0ms;"></span>
+                                            <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 150ms;"></span>
+                                            <span class="w-2 h-2 rounded-full animate-bounce" style="background: var(--tg-accent); animation-delay: 300ms;"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="p-3 border-t" style="border-color: var(--tg-border);">
+                                <div class="flex gap-2">
+                                    <input v-model="aiPromptInput" @keydown.enter.prevent="sendAiMessage" type="text"
+                                        placeholder="Ask AI about this chat..."
+                                        class="flex-1 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/50"
+                                        style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <button @click="sendAiMessage" :disabled="!aiPromptInput.trim() || aiLoading"
+                                        class="px-3 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40"
+                                        style="background: var(--tg-accent); color: #fff;">
+                                        <i class="fas fa-paper-plane text-xs"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Sort & Auto-Reply tabs moved to Settings > AI -->
-                </div>
+                </template>
             </div>
             </transition>
         </div>
@@ -2725,7 +2799,25 @@
                                 <option v-for="tz in timezoneList" :key="tz" :value="tz">{{ tz }}</option>
                             </select>
                         </div>
-                        <div class="text-[10px] pt-2 border-t" style="color: var(--tg-muted); border-color: var(--tg-border);">
+                        <!-- Message Highlights -->
+                        <div class="mt-4 pt-4 border-t" style="border-color: var(--tg-border);">
+                            <h4 class="text-sm font-semibold mb-1" style="color: var(--tg-text);">Message Highlights</h4>
+                            <p class="text-[10px] mb-3" style="color: var(--tg-muted);">Highlight matching messages with colored borders for faster scanning.</p>
+                            <div class="space-y-1">
+                                <label v-for="preset in highlightPresets" :key="preset.id"
+                                    class="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors">
+                                    <div class="w-3 h-3 rounded-full shrink-0" :style="{ background: preset.color }"></div>
+                                    <i class="fas text-sm" :class="preset.icon" style="color: var(--tg-muted); width: 16px;"></i>
+                                    <span class="flex-1 text-sm" style="color: var(--tg-text);">{{ preset.label }}</span>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" :checked="isHighlightActive(preset.id)" @change="toggleHighlight(preset.id)" class="sr-only peer">
+                                        <div class="w-8 h-4 rounded-full peer transition-colors" :style="{ background: isHighlightActive(preset.id) ? preset.color : 'var(--tg-border)' }"></div>
+                                        <div class="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white transition-transform" :class="isHighlightActive(preset.id) ? 'translate-x-4' : ''"></div>
+                                    </label>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="text-[10px] pt-2 mt-2 border-t" style="color: var(--tg-muted); border-color: var(--tg-border);">
                             Settings saved per-browser via localStorage.
                         </div>
                     </div>
@@ -2828,7 +2920,7 @@
                             <button v-if="isMasterOrAbove" @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Listener
                             </button>
-                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'backup'; loadBackupConfig()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'backup'; loadBackupConfig(); loadStats()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Backup
                             </button>
                             <button @click="adminActiveTab = 'viewers'; loadAdminViewers(); loadAdminChats()" :class="adminActiveTab === 'viewers' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'viewers' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
@@ -3145,8 +3237,21 @@
                                 </div>
                                 <div class="mt-3">
                                     <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats (required — tokens must be scoped)</label>
+                                    <!-- Chat search filter -->
+                                    <div class="relative mb-1.5">
+                                        <input v-model="tokenChatSearch" type="text" placeholder="Search chats..."
+                                            class="w-full rounded pl-7 pr-7 py-1.5 text-xs"
+                                            style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <svg class="w-3 h-3 absolute left-2.5 top-2 text-tg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                        </svg>
+                                        <button v-if="tokenChatSearch" @click="tokenChatSearch = ''" class="absolute right-2 top-1.5 text-tg-muted hover:text-white">
+                                            <i class="fas fa-times text-[9px]"></i>
+                                        </button>
+                                    </div>
+                                    <div class="text-[9px] mb-1" style="color: var(--tg-muted);">{{ filteredTokenChats.length }} of {{ adminChats.length }} chats</div>
                                     <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                                        <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
+                                        <label v-for="chat in filteredTokenChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
                                             <input type="checkbox" :value="chat.id" v-model="adminTokenForm.allowed_chat_ids" class="rounded" />
                                             {{ chat.title || chat.id }}
                                         </label>
@@ -3306,10 +3411,19 @@
                                     <p style="color: var(--tg-muted);">The Telegram listener runs in the backup container, not here. The viewer shows real-time updates via WebSocket when the backup container's listener is active.</p>
                                 </div>
                                 <div class="rounded-lg p-4 text-xs" style="background: var(--tg-bg); color: var(--tg-muted);">
-                                    <p class="mb-2"><strong style="color: var(--tg-text);">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
-                                    <p class="mb-2"><strong style="color: var(--tg-text);">always</strong> — Listener always runs (legacy behavior)</p>
-                                    <p><strong style="color: var(--tg-text);">off</strong> — Listener never runs</p>
-                                    <p class="mt-3" style="opacity: 0.6;">Mode is configured via <code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> env var in the backup container</p>
+                                    <p class="font-medium mb-2" style="color: var(--tg-text);">Listener Modes</p>
+                                    <p class="mb-1"><strong style="color: var(--tg-text);">auto</strong> — Starts when viewers connect, stops after grace period when all leave</p>
+                                    <p class="mb-1"><strong style="color: var(--tg-text);">always</strong> — Listener always runs (24/7 real-time sync)</p>
+                                    <p class="mb-3"><strong style="color: var(--tg-text);">off</strong> — Listener disabled, backup-only mode</p>
+                                    <p class="font-medium mb-2" style="color: var(--tg-text);">Configuration (Docker env vars)</p>
+                                    <div class="space-y-1 font-mono text-[10px]">
+                                        <p><code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_MODE</code> auto | always | off</p>
+                                        <p><code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTENER_GRACE_PERIOD</code> seconds before stop (default: 300)</p>
+                                        <p><code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTEN_NEW_MESSAGES</code> true | false</p>
+                                        <p><code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTEN_EDITS</code> true | false</p>
+                                        <p><code class="px-1 rounded" style="background: var(--tg-sidebar);">LISTEN_DELETIONS</code> true | false</p>
+                                    </div>
+                                    <p class="mt-2" style="opacity: 0.6;">Set in backup container's environment. Changes require container restart.</p>
                                 </div>
                             </div>
                         </div>
@@ -3319,31 +3433,33 @@
                                 <!-- Schedule -->
                                 <div class="rounded-lg p-4" style="background: var(--tg-bg);">
                                     <h3 class="text-sm font-medium mb-3" style="color: var(--tg-text);">Backup Schedule</h3>
-                                    <div class="space-y-3">
-                                        <div>
-                                            <label class="text-xs block mb-1" style="color: var(--tg-muted);">Cron Expression</label>
-                                            <div class="flex items-center gap-2">
-                                                <input v-model="backupConfig.schedule" placeholder="0 */6 * * *" class="flex-1 rounded px-3 py-2 text-sm font-mono" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                                <button @click="saveBackupConfig" class="px-3 py-2 text-white text-xs rounded shrink-0" style="background: var(--tg-accent);">Save</button>
-                                            </div>
-                                            <div class="text-[10px] mt-1" style="color: var(--tg-muted);">Default: {{ backupConfig.default_schedule || '0 */6 * * *' }}</div>
-                                        </div>
-                                        <!-- Preset buttons -->
-                                        <div class="flex flex-wrap gap-1.5">
-                                            <button v-for="preset in [
-                                                { label: 'Every 30min', cron: '*/30 * * * *' },
-                                                { label: 'Every 1h', cron: '0 * * * *' },
-                                                { label: 'Every 2h', cron: '0 */2 * * *' },
-                                                { label: 'Every 6h', cron: '0 */6 * * *' },
-                                                { label: 'Every 12h', cron: '0 */12 * * *' },
-                                                { label: 'Daily', cron: '0 0 * * *' },
-                                            ]" :key="preset.cron" @click="backupConfig.schedule = preset.cron; saveBackupConfig()"
-                                                class="px-2 py-1 text-[10px] rounded transition-colors"
-                                                :style="backupConfig.schedule === preset.cron ? 'background: rgba(135,116,225,0.2); color: #a78bfa; border: 1px solid rgba(135,116,225,0.3)' : 'color: var(--tg-muted); border: 1px solid var(--tg-border)'">
-                                                {{ preset.label }}
-                                            </button>
-                                        </div>
+                                    <p class="text-[10px] mb-3" style="color: var(--tg-muted);">Timer resets after each backup completes.</p>
+                                    <!-- Preset buttons (primary selection) -->
+                                    <div class="grid grid-cols-3 gap-2 mb-3">
+                                        <button v-for="preset in [
+                                            { label: '30 min', cron: '*/30 * * * *', desc: 'Frequent' },
+                                            { label: '1 hour', cron: '0 * * * *', desc: 'Hourly' },
+                                            { label: '2 hours', cron: '0 */2 * * *', desc: 'Standard' },
+                                            { label: '6 hours', cron: '0 */6 * * *', desc: 'Default' },
+                                            { label: '12 hours', cron: '0 */12 * * *', desc: 'Light' },
+                                            { label: '24 hours', cron: '0 0 * * *', desc: 'Daily' },
+                                        ]" :key="preset.cron" @click="backupConfig.schedule = preset.cron; saveBackupConfig()"
+                                            class="flex flex-col items-center py-2 px-1 rounded-lg transition-all text-center"
+                                            :style="backupConfig.schedule === preset.cron
+                                                ? 'background: rgba(135,116,225,0.15); border: 1.5px solid var(--tg-accent); color: #a78bfa;'
+                                                : 'border: 1.5px solid var(--tg-border); color: var(--tg-muted);'">
+                                            <span class="text-sm font-medium" :style="backupConfig.schedule === preset.cron ? 'color: var(--tg-text);' : ''">{{ preset.label }}</span>
+                                            <span class="text-[9px] opacity-70">{{ preset.desc }}</span>
+                                        </button>
                                     </div>
+                                    <!-- Custom cron (collapsed) -->
+                                    <details class="text-xs">
+                                        <summary class="cursor-pointer py-1" style="color: var(--tg-muted);">Custom cron expression</summary>
+                                        <div class="flex items-center gap-2 mt-2">
+                                            <input v-model="backupConfig.schedule" placeholder="0 */6 * * *" class="flex-1 rounded px-3 py-2 text-sm font-mono" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <button @click="saveBackupConfig" class="px-3 py-2 text-white text-xs rounded shrink-0" style="background: var(--tg-accent);">Save</button>
+                                        </div>
+                                    </details>
                                 </div>
                                 <!-- Active Viewer Boost -->
                                 <div class="rounded-lg p-4" style="background: var(--tg-bg);">
@@ -3360,10 +3476,47 @@
                                         Last viewer activity: {{ new Date(backupConfig.viewer_heartbeat).toLocaleString() }}
                                     </div>
                                 </div>
-                                <!-- Info -->
-                                <div class="rounded-lg p-4 text-xs" style="background: var(--tg-bg); color: var(--tg-muted);">
-                                    <p class="mb-2">The backup scheduler polls for config changes every <strong style="color: var(--tg-text);">30 seconds</strong>.</p>
-                                    <p>Schedule changes take effect on the next poll cycle — no container restart needed.</p>
+                                <!-- Backup Statistics (merged from Stats tab) -->
+                                <div v-if="showStatsUI" class="rounded-lg p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <h3 class="text-sm font-medium" style="color: var(--tg-text);">Backup Statistics</h3>
+                                        <button @click="loadStats" class="text-xs px-2 py-1 rounded hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-sync-alt mr-1"></i>Refresh
+                                        </button>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2 text-sm">
+                                        <div class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
+                                            <span style="color: var(--tg-muted);">💬 Chats</span>
+                                            <span style="color: var(--tg-text);">{{ formatNumber(statsData.chats) }}</span>
+                                        </div>
+                                        <div class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
+                                            <span style="color: var(--tg-muted);">📬 Messages</span>
+                                            <span style="color: var(--tg-text);">{{ formatNumber(statsData.messages) }}</span>
+                                        </div>
+                                        <div class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
+                                            <span style="color: var(--tg-muted);">🖼️ Media</span>
+                                            <span style="color: var(--tg-text);">{{ formatNumber(statsData.media_files) }}</span>
+                                        </div>
+                                        <div class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
+                                            <span style="color: var(--tg-muted);">💾 Storage</span>
+                                            <span style="color: var(--tg-text);">{{ formatSize(statsData.total_size_mb) }}</span>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center justify-between text-xs mt-3 pt-3" style="color: var(--tg-muted); border-top: 1px solid var(--tg-border);">
+                                        <span>Last backup: {{ formatLastBackupTime(lastBackupTime, viewerTimezone, lastBackupTimeSource) }}</span>
+                                        <span>Updated: {{ statsData.stats_calculated_at ? formatStatsTime(statsData.stats_calculated_at) : 'N/A' }}</span>
+                                    </div>
+                                </div>
+                                <!-- Info + Manual Backup -->
+                                <div class="rounded-lg p-4 text-xs flex items-start justify-between gap-3" style="background: var(--tg-bg); color: var(--tg-muted);">
+                                    <div>
+                                        <p class="mb-1">Scheduler polls every <strong style="color: var(--tg-text);">30s</strong>. No restart needed.</p>
+                                        <p>Timer resets after each backup completes.</p>
+                                    </div>
+                                    <!-- Future: wire to POST /api/admin/backup-now when backend supports it -->
+                                    <!-- <button class="px-3 py-1.5 text-white text-xs rounded shrink-0" style="background: var(--tg-accent);">
+                                        <i class="fas fa-play mr-1"></i>Backup Now
+                                    </button> -->
                                 </div>
                             </div>
                         </div>
@@ -3545,8 +3698,8 @@
                 // Sidebar resize state
                 const sidebarRef = ref(null)
                 const computeDefaultSidebarWidth = () => {
-                    const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
-                    return Math.max(220, Math.min(400, Math.round(vw * 0.24)))
+                    // Fixed 300px default — matches Telegram Desktop; user can drag 220-600px
+                    return 300
                 }
                 const _rawSidebarW = typeof localStorage !== 'undefined' ? localStorage.getItem('tg_sidebar_width') : null
                 const _parsedSidebarW = _rawSidebarW != null ? parseInt(_rawSidebarW, 10) : NaN
@@ -3563,6 +3716,58 @@
                 const globalSearchTotal = ref(0)
                 // Export menu
                 const showExportMenu = ref(false)
+                // Message highlight presets (client-side, localStorage)
+                const highlightPresets = [
+                    { id: 'transactions', label: 'Transactions', icon: 'fa-money-bill-wave', color: '#22c55e',
+                      patterns: [
+                        /receipt|invoice|payment|paid|transfer|refund|deposit|withdraw|sent|received|balance|remit|gcash|maya|bank/i,
+                        /(?:^|[\s(])[+-]\s*\d{1,3}(?:,?\d{3})*(?:\.\d{1,2})?(?=[\s).,;]|$)/,
+                        /\d[\d,]*\.?\d*\s*(?:k|K|g|G|pesos?|php|usd|eur|gbp|sar|aed|idr|myr|sgd|jpy|krw|thb|vnd|inr|bdt|pkr|egp|try|rub|brl|cop|pen|clp|ars|mxn)\b/i,
+                        /(?:₱|\$|€|£|¥|₹|﷼|₩|₫|฿)\s*\d[\d,.]*\d/,
+                        /\d[\d,.]*\d\s*(?:₱|\$|€|£|¥|₹|﷼|₩|₫|฿)/,
+                      ] },
+                    { id: 'links', label: 'Links & URLs', icon: 'fa-link', color: '#3b82f6', patterns: [/https?:\/\/\S+/i] },
+                    { id: 'media', label: 'Media Messages', icon: 'fa-image', color: '#a855f7', patterns: [] },
+                    { id: 'mentions', label: 'Mentions & Tags', icon: 'fa-at', color: '#f59e0b', patterns: [/@\w+/] },
+                    { id: 'forwarded', label: 'Forwarded', icon: 'fa-share', color: '#06b6d4', patterns: [] },
+                ]
+                const activeHighlights = ref(JSON.parse(localStorage.getItem('tg_highlight_presets') || '[]'))
+                const isHighlightActive = (pid) => activeHighlights.value.includes(pid)
+                const toggleHighlight = (pid) => {
+                    const i = activeHighlights.value.indexOf(pid)
+                    if (i >= 0) activeHighlights.value.splice(i, 1)
+                    else activeHighlights.value.push(pid)
+                    localStorage.setItem('tg_highlight_presets', JSON.stringify(activeHighlights.value))
+                }
+                const getMessageHighlight = (msg) => {
+                    if (!activeHighlights.value.length) return null
+                    const text = (msg.text || '') + ' ' + (msg.ocr_text || '')
+                    for (const pid of activeHighlights.value) {
+                        const preset = highlightPresets.find(p => p.id === pid)
+                        if (!preset) continue
+                        if (pid === 'media' && msg.media) return preset.color
+                        if (pid === 'forwarded' && msg.forward_from) return preset.color
+                        if (preset.patterns.length && preset.patterns.some(rx => rx.test(text))) return preset.color
+                    }
+                    return null
+                }
+                // Token chat search filter
+                const tokenChatSearch = ref('')
+                const filteredTokenChats = computed(() => {
+                    const q = tokenChatSearch.value.toLowerCase().trim()
+                    if (!q) return adminChats.value
+                    return adminChats.value.filter(c =>
+                        (c.title || '').toLowerCase().includes(q) || (c.username || '').toLowerCase().includes(q)
+                    )
+                })
+                // Right dock: tool strip + context canvas
+                const rightDockOpen = ref(false)
+                const rightDockMode = ref('media') // 'timeline' | 'media' | 'ai'
+                const aiMessagesByChatId = Vue.reactive({})
+                const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1200)
+                const sidebarFocusCompact = computed(() =>
+                    windowWidth.value >= 768 && !!selectedChat.value && rightDockOpen.value
+                )
                 // Profile panel (Phase 6)
                 const showProfilePanel = ref(false)
                 const profileMembers = ref([])
@@ -4301,6 +4506,9 @@
                 const selectedDate = ref(null)
                 let flatpickrInstance = null
                 const showScrollToBottom = ref(false)
+                const showScrollToTop = ref(false)
+                let _scrollUpTimer = null
+                let _lastScrollTop = 0
 
                 // WebSocket and Notifications (v5.0)
                 const notificationsEnabled = ref(false)
@@ -4636,6 +4844,7 @@
                     } catch (_) { /* ignore */ }
                 }
                 const onMobileChatHeaderBack = () => {
+                    rightDockOpen.value = false
                     if (isMobileBreakpoint() && mobileHistoryLayers > 0) {
                         history.back()
                         return
@@ -4904,7 +5113,6 @@
                     total_size_mb: 0,
                     stats_calculated_at: null
                 })
-                const statsPopupOpen = ref(false)
                 const showStatsUI = ref(true)  // Can be disabled via SHOW_STATS=false
                 
                 const loadStats = async () => {
@@ -5776,6 +5984,10 @@
                     currentUsername.value = ''
                     showSettingsModal.value = false
                     showAdminPanel.value = false
+                    rightDockOpen.value = false
+                    // Clear per-chat AI threads
+                    Object.keys(aiMessagesByChatId).forEach(k => delete aiMessagesByChatId[k])
+                    aiMessages.value = []
                 }
 
                 // v8.1: Unread badge tracking via localStorage
@@ -5949,6 +6161,7 @@
                 const selectChat = async (chat, opts = {}) => {
                     // v6.2.0: If forum chat, open topics list instead
                     if (chat.is_forum) {
+                        rightDockOpen.value = false
                         await openForumTopics(chat)
                         return
                     }
@@ -5977,8 +6190,12 @@
                     Object.keys(voiceAudioRefs).forEach(k => { delete voiceAudioRefs[k] })
                     currentPinnedIndex.value = 0
                     showPinnedOnly.value = false  // Exit pinned-only view when changing chat
-                    showMediaPanel.value = false  // Close panels when switching chats
+                    showMediaPanel.value = false  // Legacy flag (dock handles media now)
                     showProfilePanel.value = false
+                    // Right dock: keep open, hydrate for new chat
+                    if (rightDockOpen.value) {
+                        nextTick(() => hydratePanel(rightDockMode.value))
+                    }
                     stopOcrPolling()
                     // Clear overlay search state on chat switch (without reloading — selectChat handles that)
                     searchBarVisible.value = false
@@ -6312,7 +6529,9 @@
                     searchMatchIndex.value = marks.length > 0 ? 0 : -1
                     if (marks.length > 0) {
                         marks[0].classList.add('current')
-                        marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
+                        const bubble = marks[0].closest('.message-bubble') || marks[0].closest('[data-msg-id]')
+                        if (bubble) bubble.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                        else marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' })
                     }
                 }
 
@@ -6340,6 +6559,17 @@
                         // With flex-col-reverse: scrollTop is NEGATIVE when scrolled up from bottom
                         // scrollTop=0 is at bottom (newest), scrollTop=-1000 means scrolled up 1000px
                         showScrollToBottom.value = scrollTop < -300
+                        // "Go to top" button: shows after 2s of sustained upward scroll
+                        const scrollingUp = scrollTop < _lastScrollTop
+                        _lastScrollTop = scrollTop
+                        if (scrollingUp && scrollTop < -800) {
+                            if (!_scrollUpTimer) {
+                                _scrollUpTimer = setTimeout(() => { showScrollToTop.value = true }, 2000)
+                            }
+                        } else {
+                            clearTimeout(_scrollUpTimer); _scrollUpTimer = null
+                            showScrollToTop.value = false
+                        }
                         // Floating date badge (Phase 1): find topmost visible date separator
                         updateFloatingDate(e.target)
                     })
@@ -6566,11 +6796,18 @@
                 }
 
                 // Sidebar resize handlers — apply width directly to DOM (desktop only)
+                const COMPACT_RAIL_WIDTH = 64
                 const applySidebarWidth = () => {
                     if (sidebarRef.value && window.innerWidth >= 768) {
-                        sidebarRef.value.style.width = sidebarWidth.value + 'px'
+                        if (sidebarFocusCompact.value) {
+                            sidebarRef.value.style.width = COMPACT_RAIL_WIDTH + 'px'
+                        } else {
+                            sidebarRef.value.style.width = sidebarWidth.value + 'px'
+                        }
                     }
                 }
+                // Watch dock open/close to trigger sidebar compact
+                watch(rightDockOpen, () => { nextTick(applySidebarWidth) })
                 const startSidebarResize = (e) => {
                     sidebarResizing.value = true
                     const startX = e.clientX
@@ -6592,6 +6829,11 @@
                 onMounted(() => {
                     applySidebarWidth()
                     const onWinResize = () => {
+                        windowWidth.value = window.innerWidth
+                        // Auto-close dock canvas when resizing below md breakpoint
+                        if (window.innerWidth < 768 && rightDockOpen.value) {
+                            rightDockOpen.value = false
+                        }
                         if (window.innerWidth < 768 && sidebarRef.value) {
                             sidebarRef.value.style.width = ''
                         } else {
@@ -6729,6 +6971,7 @@
                     if (!selectedChat.value) return
                     showProfilePanel.value = true
                     showMediaPanel.value = false
+                    rightDockOpen.value = false  // Close dock canvas to avoid clutter
                     // Load OCR + embedding status for admin
                     loadOcrStatus()
                     loadEmbeddingStats()
@@ -6790,6 +7033,39 @@
                             }
                         }
                     } catch (e) { console.error('Timeline jump error:', e) }
+                }
+
+                // Right dock: FSM + hydrate
+                const hydratePanel = (mode) => {
+                    if (!selectedChat.value) return
+                    if (mode === 'media') { loadMediaPanel(true) }
+                    else if (mode === 'timeline') {
+                        if (!timelineDensity.value.length) loadTimeline()
+                    }
+                    else if (mode === 'ai') {
+                        // Swap to per-chat thread (use Vue.reactive array for mutation tracking)
+                        const cid = selectedChat.value.id
+                        if (!aiMessagesByChatId[cid]) aiMessagesByChatId[cid] = Vue.reactive([])
+                        aiMessages.value = aiMessagesByChatId[cid]
+                    }
+                }
+                const onToolClick = (mode) => {
+                    if (!selectedChat.value) return
+                    if (!rightDockOpen.value) {
+                        rightDockOpen.value = true
+                        rightDockMode.value = mode
+                        hydratePanel(mode)
+                    } else if (rightDockMode.value !== mode) {
+                        rightDockMode.value = mode
+                        hydratePanel(mode)
+                    } else {
+                        // Same tool clicked while open — collapse canvas
+                        rightDockOpen.value = false
+                    }
+                    // Close old panel flags (migration bridge)
+                    showMediaPanel.value = false
+                    showAiPanel.value = false
+                    showTimeline.value = false
                 }
 
                 // Phase 3: Message grouping helpers
@@ -7108,6 +7384,8 @@
                         if (contextMenu.visible) { closeContextMenu(); return }
                         if (showDatePickerModal.value) { closeDatePicker(); return }
                         if (showSettingsModal.value) { showSettingsModal.value = false; return }
+                        if (showExportMenu.value) { showExportMenu.value = false; return }
+                        if (rightDockOpen.value) { rightDockOpen.value = false; return }
                         if (showAiPanel.value) { showAiPanel.value = false; return }
                         if (searchBarVisible.value) { clearSearch(); return }
                         return
@@ -7257,15 +7535,21 @@
                 }
 
                 const navigateSearchMatch = (dir) => {
-                    // Use search-highlight marks (from linkifyText) for header search,
-                    // plain marks (from applySearchHighlights) for overlay Ctrl+F search
                     const selector = messageSearchQuery.value.trim() ? 'mark.search-highlight' : 'mark'
-                    const marks = messagesContainer.value?.querySelectorAll(selector) || []
+                    const container = messagesContainer.value
+                    if (!container) { console.warn('[nav] no container'); return }
+                    const marks = Array.from(container.querySelectorAll(selector))
+                    console.log('[nav] dir=', dir, 'marks=', marks.length, 'idx=', searchMatchIndex.value)
                     if (marks.length === 0) return
                     marks.forEach(m => m.classList.remove('current'))
                     searchMatchIndex.value = (searchMatchIndex.value + dir + marks.length) % marks.length
-                    marks[searchMatchIndex.value].classList.add('current')
-                    marks[searchMatchIndex.value].scrollIntoView({ block: 'center', behavior: 'smooth' })
+                    const mark = marks[searchMatchIndex.value]
+                    mark.classList.add('current')
+                    console.log('[nav] scrolling to mark', searchMatchIndex.value, mark.textContent?.substring(0, 20))
+                    // Scroll the message bubble into view
+                    const bubble = mark.closest('.message-bubble') || mark.closest('[data-msg-id]')
+                    const target = bubble || mark
+                    target.scrollIntoView({ block: 'center', behavior: 'smooth' })
                 }
 
                 const clearMsgSearch = () => {
@@ -8011,6 +8295,22 @@
                     installPwa,
                     // Export menu
                     showExportMenu,
+                    // Message highlight presets
+                    highlightPresets,
+                    activeHighlights,
+                    isHighlightActive,
+                    toggleHighlight,
+                    getMessageHighlight,
+                    // Token chat search
+                    tokenChatSearch,
+                    filteredTokenChats,
+                    // Right dock
+                    rightDockOpen,
+                    rightDockMode,
+                    aiMessagesByChatId,
+                    sidebarFocusCompact,
+                    onToolClick,
+                    hydratePanel,
                     // Profile panel (Phase 6)
                     showProfilePanel,
                     profileMembers,
@@ -8140,7 +8440,6 @@
                     loadingStats,
                     // Stats
                     statsData,
-                    statsPopupOpen,
                     showStatsUI,
                     formatStatsTime,
                     formatNumber,
@@ -8163,6 +8462,7 @@
                     jumpToDate,
                     // Scroll to bottom
                     showScrollToBottom,
+                    showScrollToTop,
                     scrollToLatest,
                     // Message pagination
                     hasMore,

@@ -287,7 +287,7 @@ The **Scope** column shows whether each variable applies to the backup scheduler
 | `AUTH_SESSION_DAYS` | `30` | V | Days before re-authentication is required |
 | `DISPLAY_CHAT_IDS` | - | V | Restrict viewer to specific chats (comma-separated IDs) |
 | `VIEWER_TIMEZONE` | `Europe/Madrid` | V | Timezone for displayed timestamps ([tz database names](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)) |
-| `SHOW_STATS` | `true` | V | Show backup statistics dropdown in viewer header |
+| `SHOW_STATS` | `true` | V | Show **Admin → Stats** tab and backup statistics panel in the viewer (when `false`, the tab is hidden) |
 | **Security** | | | |
 | `CORS_ORIGINS` | `*` | V | Allowed CORS origins, comma-separated (e.g., `https://my.domain.com`). Credentials auto-disabled when `*` |
 | `SECURE_COOKIES` | `auto` | V | `Secure` flag on auth cookies. Auto-detects from request protocol (`X-Forwarded-Proto` / scheme). Override with `true` or `false` |

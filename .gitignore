@@ -61,3 +61,4 @@ journal.md
 logs/
 docker_logs.txt
 error.log
+.env.bak

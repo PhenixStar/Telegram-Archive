@@ -8,15 +8,24 @@ For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
 ### Added
 
+- **Right Dock: tool strip + context canvas** — Desktop (md+) gets a persistent 48px vertical icon strip (Timeline, Media, Export, AI) on the right edge of the chat area. Clicking a tool opens a 380px context canvas; clicking the same tool again collapses it. Switching tools swaps content in place without close/open flicker.
+- **Per-chat AI threads** — AI conversations are keyed by chat ID in memory. Switching chats preserves each thread; cleared on logout.
+- **Left sidebar compact rail** — When the dock canvas is open, the left sidebar auto-compacts to 64px to maximize message column space. Restores saved width when canvas closes.
 - **Mobile chat navigation stack** — On narrow viewports, opening chats pushes `history` layers (`/`, stateful) so **system / browser back** mirrors Telegram-style navigation. Plain chats now return to chat list; forum/topic flows now step `topic-thread → topics-list → chat-list`. Permalink and post-login deep-link flows reset history then re-sync one layer so counts stay correct.
 - **Multi-folder chat filter API** — `GET /api/chats` now accepts repeated `folder_ids` parameters (union semantics) so viewers can filter chats by multiple folders at once while preserving `folder_id` backward compatibility.
 
 ### Changed
 
+- **Chat header tool buttons** — Timeline, Media, Export, and AI buttons are now `md:hidden` (mobile-only). Desktop users access all tools via the dock strip.
+- **Media panel relocation** — Moved from absolute overlay inside messages to the dock canvas panel. Same UI, better layout integration.
+- **AI panel relocation** — Moved from standalone flex sibling (`<transition>`) to dock canvas. Same chat/OCR functionality, unified with other tools.
+- **Dock FSM** — `onToolClick(mode)`: open → set mode + hydrate; switch mode → hydrate (no flicker); same tool → collapse. `selectChat` preserves dock state and rehydrates panel for new chat. Escape closes canvas. Profile open closes canvas.
+
 - **Sidebar default width (desktop)** — If `localStorage` has no valid `tg_sidebar_width`, the initial width is **viewport-based** (`≈24vw`, clamped 220–400px) instead of a fixed 260px; user-resized values in range 220–600px are still loaded and saved.
 - **Chat list & topic title rows** — Title/date flex uses `min-w-0` / `shrink-0` so names stay **one line** with ellipsis at minimum sidebar width without overlapping the date.
 - **Sidebar header controls** — Removed the duplicate top user bar, moved Settings/Logout into the main title row, and replaced username text with role icons (including crown for super admin).
 - **Folder picker UI** — Replaced horizontal folder pills with a full-width `All Chats` dropdown control that supports multi-select folders; selecting `All Chats` is exclusive and clears folder selections.
+- **Stats in settings only** — Removed the sidebar header `📊 Stats` shortcut; backup statistics remain under **Settings → Admin → Stats**. `SHOW_STATS=false` still hides that admin tab and panel.
 
 ### Fixed
 
@@ -814,10 +823,10 @@ This release introduces **real-time message sync**, **zero-footprint mass operat
 - **WebSocket real-time updates** - New messages appear instantly without refresh
 - **Infinite scroll** - Cursor/keyset pagination for large chats
 - **Album grid display** - Photo/video albums shown as grids like Telegram
-- **Compact stats dropdown** - Stats moved to dropdown next to header
+- **Stats in viewer** - Backup statistics under Settings → Admin → Stats (`SHOW_STATS` gates visibility)
 - **Per-chat stats** - Message count, media count, total size per chat
 - **"Real-time sync" indicator** - Shows when listener is active
-- **`SHOW_STATS`** - Hide stats dropdown for restricted viewers (default: true)
+- **`SHOW_STATS`** - Hide Admin → Stats tab when false (default: true)
 
 #### Web Push Notifications
 - **`PUSH_NOTIFICATIONS`** - Notification mode: `off`, `basic`, `full` (default: basic)

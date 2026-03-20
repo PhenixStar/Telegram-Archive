@@ -4,6 +4,7 @@ SQLAlchemy ORM models for Telegram Backup.
 v6.0.0 - Normalized schema with proper foreign key constraints.
 Media data is now stored only in the media table, not duplicated in messages.
 """
+from __future__ import annotations
 
 from datetime import datetime
 

@@ -153,8 +153,38 @@ All 5 fixes from plan `steady-inventing-orbit` verified as implemented:
 | 4 | Global Search — cross-chat message content search via /api/search | Done |
 | 5 | Number-normalized search (1,000.00 matches 1000) | Done |
 
+### Session: 2026-03-20 — Right Dock + Compact Rail + Settings Enhancements
+
+**Implemented (frontend):**
+- Right dock: 48px tool strip + 380px expandable canvas (Timeline/Media/AI) with FSM
+- Per-chat AI threads keyed by chat ID, cleared on logout
+- Sidebar compact rail: logo with role ring, avatar-only chat list, v-show for perf
+- Message highlight presets: Transactions/Links/Media/Mentions/Forwarded toggles
+- Backup tab: merged Stats into Backup tab, removed Stats tab, preset grid replaces raw cron
+- Listener tab: added env var documentation for configuration
+- Token chat search: filter input above chat checkboxes
+- Sidebar default width: fixed 300px (was viewport-based, could be 600px)
+- models.py: added `from __future__ import annotations` to fix forward reference errors
+
+**Reviewed by:** Claude Opus (3 reviewers), Codex GPT-5.4 (3 reviewers), Gemini 2.5 Pro (1 reviewer)
+
+## Deferred Backend Work
+
+Items that need backend changes (Python/Docker) before frontend can be fully wired:
+
+| # | Item | Why Deferred | What's Needed |
+|---|------|-------------|---------------|
+| 1 | **Backup Now button** | No `POST /api/admin/backup-now` endpoint exists | Add endpoint in `routes_admin.py` that triggers an immediate backup run in the scheduler. Frontend button is commented out in backup tab, ready to uncomment. |
+| 2 | **Listener runtime config** | Listener runs in backup container; viewer has no write endpoint | Option A: Add `PUT /api/admin/listener-config` that writes to `app_settings` table, backup container polls it. Option B: Shared config via DB. Needs `LISTENER_MODE`, `GRACE_PERIOD`, event flags (`LISTEN_EDITS`, etc.) to be writable. |
+| 3 | **AI model fallback toggle** | Backend `aiConfig` has `fallback_*` fields but no clear local/remote distinction | Add `fallback_strategy` field (none/local/remote) to AI config. When "local" selected, auto-set `fallback_api_url` to Ollama default. PUT endpoint already exists at `/api/admin/ai-config`. |
+| 4 | **Listener interval reduction** | User reported listener tab "not working at all" — likely no frontend-to-backend bridge for changing intervals | Backend `routes_admin.py` only has GET status. Need PUT endpoint for interval/grace period. The backup container's `ListenerManager` reads env vars, not DB — needs refactor to poll `app_settings`. |
+| 5 | **Next backup estimate** | No API returns "next scheduled backup time" | Add `next_run` field to `GET /api/admin/backup-config` response. Scheduler knows the next run from cron parsing — expose it. |
+
 ## Backlog
 
 - PostgreSQL tsvector FTS
 - Full AI assistant panel
 - Mega Improvements v3 phases 5-7 (PG FTS, AI panel)
+- Mobile: search icon-only with full-width expand on tap (Gemini suggestion)
+- Compact sidebar: arrow-key nav with WAI-ARIA toolbar pattern
+- Custom user-defined highlight presets (regex builder UI)
