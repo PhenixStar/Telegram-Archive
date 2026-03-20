@@ -102,6 +102,22 @@ class SyncMixin:
             await session.commit()
             return chat_data["id"]
 
+    @staticmethod
+    def _apply_folder_filter(stmt, folder_id=None, folder_ids=None):
+        """Apply folder membership filter to a query statement (DRY helper)."""
+        if folder_ids:
+            normalized = sorted({int(fid) for fid in folder_ids})
+            member_subq = select(ChatFolderMember.chat_id).where(
+                ChatFolderMember.folder_id.in_(normalized)
+            )
+            return stmt.where(Chat.id.in_(member_subq))
+        elif folder_id is not None:
+            return stmt.join(
+                ChatFolderMember,
+                and_(ChatFolderMember.chat_id == Chat.id, ChatFolderMember.folder_id == folder_id),
+            )
+        return stmt
+
     async def get_all_chats(
         self,
         limit: int = None,
@@ -176,14 +192,7 @@ class SyncMixin:
             )
 
             # Filter by folder membership
-            if folder_ids:
-                normalized_folder_ids = sorted({int(fid) for fid in folder_ids})
-                member_subq = select(ChatFolderMember.chat_id).where(ChatFolderMember.folder_id.in_(normalized_folder_ids))
-                stmt = stmt.where(Chat.id.in_(member_subq))
-            elif folder_id is not None:
-                stmt = stmt.join(
-                    ChatFolderMember, and_(ChatFolderMember.chat_id == Chat.id, ChatFolderMember.folder_id == folder_id)
-                )
+            stmt = self._apply_folder_filter(stmt, folder_id, folder_ids)
 
             # Filter by archived status
             if archived is True:
@@ -255,14 +264,7 @@ class SyncMixin:
         async with self.db_manager.async_session_factory() as session:
             stmt = select(func.count(Chat.id))
 
-            if folder_ids:
-                normalized_folder_ids = sorted({int(fid) for fid in folder_ids})
-                member_subq = select(ChatFolderMember.chat_id).where(ChatFolderMember.folder_id.in_(normalized_folder_ids))
-                stmt = stmt.where(Chat.id.in_(member_subq))
-            elif folder_id is not None:
-                stmt = stmt.join(
-                    ChatFolderMember, and_(ChatFolderMember.chat_id == Chat.id, ChatFolderMember.folder_id == folder_id)
-                )
+            stmt = self._apply_folder_filter(stmt, folder_id, folder_ids)
 
             if archived is True:
                 stmt = stmt.where(Chat.is_archived == 1)

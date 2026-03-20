@@ -2299,8 +2299,8 @@
 
                     <!-- Scroll navigation: single themed button, swaps between "go to latest" and "go to oldest" -->
                     <div class="absolute bottom-4 right-4 z-20">
-                        <!-- Go to oldest (shows after sustained upward scroll) -->
-                        <button v-if="showScrollToTop && !showScrollToBottom"
+                        <!-- Go to oldest (shows after sustained deep scroll) -->
+                        <button v-if="scrollNavState === 'top'"
                             @click="jumpToBoundary('first')"
                             class="w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105"
                             style="background: var(--tg-sidebar); border: 1px solid var(--tg-border); color: var(--tg-muted);"
@@ -2309,8 +2309,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
                             </svg>
                         </button>
-                        <!-- Go to latest (shows when scrolled up) -->
-                        <button v-else-if="showScrollToBottom"
+                        <!-- Go to latest (shows when scrolled up a bit) -->
+                        <button v-else-if="scrollNavState === 'bottom'"
                             @click="scrollToLatest"
                             class="w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105"
                             style="background: var(--tg-sidebar); border: 1px solid var(--tg-border); color: var(--tg-muted);"
@@ -3658,7 +3658,7 @@
     </div>
 
     <script>
-        const { createApp, ref, computed, onMounted, watch, nextTick } = Vue
+        const { createApp, ref, computed, onMounted, onBeforeUnmount, watch, nextTick } = Vue
 
         createApp({
             setup() {
@@ -3697,16 +3697,13 @@
                 const mediaGridLarge = ref(false)
                 // Sidebar resize state
                 const sidebarRef = ref(null)
-                const computeDefaultSidebarWidth = () => {
-                    // Fixed 300px default — matches Telegram Desktop; user can drag 220-600px
-                    return 300
-                }
+                const DEFAULT_SIDEBAR_WIDTH = 300
                 const _rawSidebarW = typeof localStorage !== 'undefined' ? localStorage.getItem('tg_sidebar_width') : null
                 const _parsedSidebarW = _rawSidebarW != null ? parseInt(_rawSidebarW, 10) : NaN
                 const sidebarWidth = ref(
                     Number.isFinite(_parsedSidebarW) && _parsedSidebarW >= 220 && _parsedSidebarW <= 600
                         ? _parsedSidebarW
-                        : computeDefaultSidebarWidth()
+                        : DEFAULT_SIDEBAR_WIDTH
                 )
                 const sidebarResizing = ref(false)
                 // PWA install
@@ -3739,8 +3736,7 @@
                     else activeHighlights.value.push(pid)
                     localStorage.setItem('tg_highlight_presets', JSON.stringify(activeHighlights.value))
                 }
-                const getMessageHighlight = (msg) => {
-                    if (!activeHighlights.value.length) return null
+                const _computeHighlight = (msg) => {
                     const text = (msg.text || '') + ' ' + (msg.ocr_text || '')
                     for (const pid of activeHighlights.value) {
                         const preset = highlightPresets.find(p => p.id === pid)
@@ -3751,6 +3747,16 @@
                     }
                     return null
                 }
+                const highlightCache = computed(() => {
+                    const map = new Map()
+                    if (!activeHighlights.value.length) return map
+                    for (const msg of messages.value) {
+                        const color = _computeHighlight(msg)
+                        if (color) map.set(msg.id, color)
+                    }
+                    return map
+                })
+                const getMessageHighlight = (msg) => highlightCache.value.get(msg.id) || null
                 // Token chat search filter
                 const tokenChatSearch = ref('')
                 const filteredTokenChats = computed(() => {
@@ -4505,8 +4511,11 @@
                 const datePickerInput = ref(null)
                 const selectedDate = ref(null)
                 let flatpickrInstance = null
-                const showScrollToBottom = ref(false)
-                const showScrollToTop = ref(false)
+                // Tri-state scroll nav: 'hidden' | 'bottom' (go to latest) | 'top' (go to oldest)
+                const scrollNavState = ref('hidden')
+                // Compat shims for existing code that reads these booleans
+                const showScrollToBottom = computed(() => scrollNavState.value === 'bottom')
+                const showScrollToTop = computed(() => scrollNavState.value === 'top')
                 let _scrollUpTimer = null
                 let _lastScrollTop = 0
 
@@ -6179,6 +6188,7 @@
                     contextMode.value = false
                     pendingTargetMsgId.value = null
                     messageSearchQuery.value = ''
+                    clearTimeout(_scrollUpTimer); _scrollUpTimer = null; scrollNavState.value = 'hidden'
                     showAdvancedSearch.value = false
                     searchDateFrom.value = ''
                     searchDateTo.value = ''
@@ -6558,17 +6568,22 @@
                         // Show/hide scroll to bottom button
                         // With flex-col-reverse: scrollTop is NEGATIVE when scrolled up from bottom
                         // scrollTop=0 is at bottom (newest), scrollTop=-1000 means scrolled up 1000px
-                        showScrollToBottom.value = scrollTop < -300
-                        // "Go to top" button: shows after 2s of sustained upward scroll
+                        // Scroll nav FSM: hidden → bottom (scrolled >300px) → top (>800px + 2s sustained)
                         const scrollingUp = scrollTop < _lastScrollTop
                         _lastScrollTop = scrollTop
-                        if (scrollingUp && scrollTop < -800) {
+                        if (scrollTop >= -300) {
+                            // Near bottom — hide everything
+                            clearTimeout(_scrollUpTimer); _scrollUpTimer = null
+                            scrollNavState.value = 'hidden'
+                        } else if (scrollingUp && scrollTop < -800) {
+                            // Deep scroll upward — start timer for "go to oldest"
                             if (!_scrollUpTimer) {
-                                _scrollUpTimer = setTimeout(() => { showScrollToTop.value = true }, 2000)
+                                _scrollUpTimer = setTimeout(() => { scrollNavState.value = 'top' }, 2000)
                             }
                         } else {
+                            // Moderate scroll — show "go to latest"
                             clearTimeout(_scrollUpTimer); _scrollUpTimer = null
-                            showScrollToTop.value = false
+                            scrollNavState.value = 'bottom'
                         }
                         // Floating date badge (Phase 1): find topmost visible date separator
                         updateFloatingDate(e.target)
@@ -6653,11 +6668,11 @@
                             setupMessagesScrollObserver()
                             startMessageRefresh()
                         })
-                        showScrollToBottom.value = false
+                        scrollNavState.value = 'hidden'
                         return
                     }
                     scrollToBottom(true)
-                    showScrollToBottom.value = false
+                    scrollNavState.value = 'hidden'
                 }
 
                 const isOwnMessage = (msg) => {
@@ -6849,6 +6864,11 @@
                     }
                     window.addEventListener('resize', onWinResize)
                     window.addEventListener('popstate', onPopState)
+                })
+
+                onBeforeUnmount(() => {
+                    window.removeEventListener('resize', onWinResize)
+                    window.removeEventListener('popstate', onPopState)
                 })
 
                 // Link preview from raw_data
@@ -7539,13 +7559,11 @@
                     const container = messagesContainer.value
                     if (!container) { console.warn('[nav] no container'); return }
                     const marks = Array.from(container.querySelectorAll(selector))
-                    console.log('[nav] dir=', dir, 'marks=', marks.length, 'idx=', searchMatchIndex.value)
                     if (marks.length === 0) return
                     marks.forEach(m => m.classList.remove('current'))
                     searchMatchIndex.value = (searchMatchIndex.value + dir + marks.length) % marks.length
                     const mark = marks[searchMatchIndex.value]
                     mark.classList.add('current')
-                    console.log('[nav] scrolling to mark', searchMatchIndex.value, mark.textContent?.substring(0, 20))
                     // Scroll the message bubble into view
                     const bubble = mark.closest('.message-bubble') || mark.closest('[data-msg-id]')
                     const target = bubble || mark
@@ -8460,7 +8478,8 @@
                     openDatePicker,
                     closeDatePicker,
                     jumpToDate,
-                    // Scroll to bottom
+                    // Scroll navigation
+                    scrollNavState,
                     showScrollToBottom,
                     showScrollToTop,
                     scrollToLatest,
