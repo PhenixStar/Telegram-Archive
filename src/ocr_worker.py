@@ -10,9 +10,13 @@ import base64
 import logging
 import mimetypes
 import os
+import re
 import time
 
 import httpx
+
+# Strip <think>...</think> blocks from LLM responses (Qwen3, etc.)
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +206,7 @@ class OcrWorker:
             )
 
         if ocr_text is not None:
+            ocr_text = _THINK_RE.sub("", ocr_text).strip()
             await self.db.update_ocr_text(item["chat_id"], item["message_id"], ocr_text)
             return True
         return False

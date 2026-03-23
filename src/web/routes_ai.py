@@ -1,11 +1,17 @@
-"""AI assistant routes: chat, OCR, annotation, embedding, semantic search, config."""
+"""AI assistant routes: chat, OCR, annotation, embedding, semantic search, config, profiles."""
 
 import asyncio
 import base64
+import json
 import os
+import re
 import time
+from datetime import datetime, timezone
 
 import httpx
+
+# Strip <think>...</think> blocks from LLM responses (Qwen3, etc.)
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from sqlalchemy import and_, select
 
@@ -69,6 +75,147 @@ def get_ai_config_defaults() -> dict:
             "analyze sentiment, search/correlate across messages, process OCR-extracted text from images."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# AI Profile helpers
+# ---------------------------------------------------------------------------
+
+
+def _snapshot_current_config(settings: dict) -> dict:
+    """Extract ai.* keys into nested profile config structure."""
+    return {
+        "vision": {
+            "provider": settings.get("ai.vision.provider", "local"),
+            "api_url": settings.get("ai.vision.api_url", ""),
+            "api_key": settings.get("ai.vision.api_key", ""),
+            "model_name": settings.get("ai.vision.model_name", ""),
+            "fallback_url": settings.get("ai.vision.fallback_url", ""),
+            "fallback_model": settings.get("ai.vision.fallback_model", ""),
+        },
+        "chat": {
+            "provider": settings.get("ai.chat.provider", "local"),
+            "api_url": settings.get("ai.chat.api_url", ""),
+            "api_key": settings.get("ai.chat.api_key", ""),
+            "model_name": settings.get("ai.chat.model_name", ""),
+            "fallback_url": settings.get("ai.chat.fallback_url", ""),
+            "fallback_model": settings.get("ai.chat.fallback_model", ""),
+        },
+        "embedding": {
+            "api_url": settings.get("ai.embedding.api_url", ""),
+            "model_name": settings.get("ai.embedding.model_name", ""),
+        },
+        "tts": {
+            "api_url": settings.get("ai.tts.api_url", ""),
+            "model_name": settings.get("ai.tts.model_name", ""),
+        },
+        "transcription": {
+            "api_url": settings.get("ai.transcription.api_url", ""),
+            "enabled": settings.get("ai.transcription.enabled", "true"),
+            "rate_limit": settings.get("ai.transcription.rate_limit", "2"),
+            "batch_size": settings.get("ai.transcription.batch_size", "50"),
+        },
+        "system_prompt": settings.get("ai.system_prompt", ""),
+    }
+
+
+async def _apply_profile_to_settings(config: dict) -> None:
+    """Write profile config back to flat ai.* keys via set_setting()."""
+    flat_map = {
+        "ai.vision.provider": config.get("vision", {}).get("provider", "local"),
+        "ai.vision.api_url": config.get("vision", {}).get("api_url", ""),
+        "ai.vision.api_key": config.get("vision", {}).get("api_key", ""),
+        "ai.vision.model_name": config.get("vision", {}).get("model_name", ""),
+        "ai.vision.fallback_url": config.get("vision", {}).get("fallback_url", ""),
+        "ai.vision.fallback_model": config.get("vision", {}).get("fallback_model", ""),
+        "ai.chat.provider": config.get("chat", {}).get("provider", "local"),
+        "ai.chat.api_url": config.get("chat", {}).get("api_url", ""),
+        "ai.chat.api_key": config.get("chat", {}).get("api_key", ""),
+        "ai.chat.model_name": config.get("chat", {}).get("model_name", ""),
+        "ai.chat.fallback_url": config.get("chat", {}).get("fallback_url", ""),
+        "ai.chat.fallback_model": config.get("chat", {}).get("fallback_model", ""),
+        "ai.embedding.api_url": config.get("embedding", {}).get("api_url", ""),
+        "ai.embedding.model_name": config.get("embedding", {}).get("model_name", ""),
+        "ai.tts.api_url": config.get("tts", {}).get("api_url", ""),
+        "ai.tts.model_name": config.get("tts", {}).get("model_name", ""),
+        "ai.transcription.api_url": config.get("transcription", {}).get("api_url", ""),
+        "ai.transcription.enabled": config.get("transcription", {}).get("enabled", "true"),
+        "ai.transcription.rate_limit": config.get("transcription", {}).get("rate_limit", "2"),
+        "ai.transcription.batch_size": config.get("transcription", {}).get("batch_size", "50"),
+    }
+    if config.get("system_prompt"):
+        flat_map["ai.system_prompt"] = config["system_prompt"]
+    for key, value in flat_map.items():
+        await deps.db.set_setting(key, str(value))
+
+
+def _get_default_profiles(ollama_v1: str) -> list:
+    """Return pre-seeded profiles. OCR profiles use pure vision models (no thinking)."""
+    now = datetime.now(timezone.utc).isoformat()
+    # Shared non-vision config fragments
+    _embed = {"api_url": ollama_v1, "model_name": "qwen3-embedding:8b"}
+    _tts = {"api_url": "http://host.docker.internal:8880/v1", "model_name": "kokoro"}
+    _trans = {"api_url": "http://host.docker.internal:8080", "enabled": "true", "rate_limit": "2", "batch_size": "50"}
+    # GLM-OCR (port 8081) when available; Gemma3:27b via Ollama as reliable default
+    _gemma3_vision = {"provider": "local", "api_url": ollama_v1, "api_key": "", "model_name": "gemma3:27b", "fallback_url": "http://host.docker.internal:8081/v1", "fallback_model": "glm-ocr"}
+    _glm_ocr_vision = {"provider": "local", "api_url": "http://host.docker.internal:8081/v1", "api_key": "", "model_name": "glm-ocr", "fallback_url": ollama_v1, "fallback_model": "gemma3:27b"}
+    return [
+        {
+            "id": "gemma3-ocr-default",
+            "name": "Gemma3 OCR (Default)",
+            "icon": "eye",
+            "created_at": now,
+            "config": {
+                "vision": {**_gemma3_vision},
+                "chat": {"provider": "local", "api_url": ollama_v1, "api_key": "", "model_name": "qwen3-next-80b", "fallback_url": "", "fallback_model": ""},
+                "embedding": {**_embed}, "tts": {**_tts}, "transcription": {**_trans}, "system_prompt": "",
+            },
+        },
+        {
+            "id": "glm-ocr-local",
+            "name": "GLM-OCR (Port 8081)",
+            "icon": "bolt",
+            "created_at": now,
+            "config": {
+                "vision": {**_glm_ocr_vision},
+                "chat": {"provider": "local", "api_url": ollama_v1, "api_key": "", "model_name": "qwen3-next-80b", "fallback_url": "", "fallback_model": ""},
+                "embedding": {**_embed}, "tts": {**_tts}, "transcription": {**_trans}, "system_prompt": "",
+            },
+        },
+        {
+            "id": "gemma3-vision",
+            "name": "Gemma3 27B Vision",
+            "icon": "gem",
+            "created_at": now,
+            "config": {
+                "vision": {"provider": "local", "api_url": ollama_v1, "api_key": "", "model_name": "gemma3:27b", "fallback_url": "", "fallback_model": ""},
+                "chat": {"provider": "local", "api_url": ollama_v1, "api_key": "", "model_name": "qwen3-next-80b", "fallback_url": "", "fallback_model": ""},
+                "embedding": {**_embed}, "tts": {**_tts}, "transcription": {**_trans}, "system_prompt": "",
+            },
+        },
+        {
+            "id": "minimax-cloud",
+            "name": "MiniMax M2.7 Highspeed",
+            "icon": "cloud",
+            "created_at": now,
+            "config": {
+                "vision": {**_gemma3_vision},
+                "chat": {"provider": "external", "api_url": "https://api.minimax.io/v1", "api_key": "", "model_name": "MiniMax-M2.7-highspeed", "fallback_url": ollama_v1, "fallback_model": "qwen3-next-80b"},
+                "embedding": {**_embed}, "tts": {**_tts}, "transcription": {**_trans}, "system_prompt": "",
+            },
+        },
+        {
+            "id": "zai-glm5",
+            "name": "Z.AI GLM-5",
+            "icon": "fire",
+            "created_at": now,
+            "config": {
+                "vision": {**_gemma3_vision},
+                "chat": {"provider": "external", "api_url": "https://api.z.ai/api/coding/paas/v4", "api_key": "", "model_name": "GLM-5", "fallback_url": ollama_v1, "fallback_model": "qwen3-next-80b"},
+                "embedding": {**_embed}, "tts": {**_tts}, "transcription": {**_trans}, "system_prompt": "",
+            },
+        },
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +484,129 @@ async def test_ai_connection(request: Request, user: UserContext = Depends(requi
 
 
 # ---------------------------------------------------------------------------
+# AI Provider Profiles
+# ---------------------------------------------------------------------------
+
+
+async def _load_profiles() -> list:
+    """Load profiles from app_settings, returning empty list on failure."""
+    try:
+        raw = await deps.db.get_setting("ai.profiles")
+        return json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+async def _save_profiles(profiles: list) -> None:
+    """Persist profiles list to app_settings."""
+    await deps.db.set_setting("ai.profiles", json.dumps(profiles))
+
+
+@router.get("/api/admin/ai-profiles")
+async def list_ai_profiles(user: UserContext = Depends(require_master)):
+    """List all AI profiles and the active profile ID."""
+    profiles = await _load_profiles()
+    active = await deps.db.get_setting("ai.active_profile") or ""
+    # Strip API keys from response
+    safe_profiles = []
+    for p in profiles:
+        sp = {**p, "config": {}}
+        cfg = p.get("config", {})
+        for section, val in cfg.items():
+            if isinstance(val, dict):
+                sp["config"][section] = {
+                    k: ("" if k == "api_key" and v else v)
+                    for k, v in val.items()
+                }
+                if "api_key" in val:
+                    sp["config"][section]["api_key_set"] = bool(val["api_key"])
+            else:
+                sp["config"][section] = val
+        safe_profiles.append(sp)
+    return {"profiles": safe_profiles, "active_profile_id": active}
+
+
+@router.post("/api/admin/ai-profiles")
+async def create_ai_profile(request: Request, user: UserContext = Depends(require_master)):
+    """Create a new profile. If config omitted, snapshots current settings."""
+    body = await request.json()
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Profile name required")
+
+    profiles = await _load_profiles()
+    profile_id = name.lower().replace(" ", "-").replace("/", "-")
+    # Ensure unique ID
+    existing_ids = {p["id"] for p in profiles}
+    base_id = profile_id
+    counter = 2
+    while profile_id in existing_ids:
+        profile_id = f"{base_id}-{counter}"
+        counter += 1
+
+    config = body.get("config")
+    if not config:
+        settings = await deps.db.get_all_settings()
+        config = _snapshot_current_config(settings)
+
+    profile = {
+        "id": profile_id,
+        "name": name,
+        "icon": body.get("icon", "sliders-h"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "config": config,
+    }
+    profiles.append(profile)
+    await _save_profiles(profiles)
+    return {"status": "ok", "profile": {**profile, "config": {**profile["config"]}}}
+
+
+@router.put("/api/admin/ai-profiles/{profile_id}")
+async def update_ai_profile(profile_id: str, request: Request, user: UserContext = Depends(require_master)):
+    """Update a profile's name, icon, or config."""
+    body = await request.json()
+    profiles = await _load_profiles()
+    for p in profiles:
+        if p["id"] == profile_id:
+            if "name" in body:
+                p["name"] = body["name"]
+            if "icon" in body:
+                p["icon"] = body["icon"]
+            if "config" in body:
+                p["config"] = body["config"]
+            await _save_profiles(profiles)
+            return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="Profile not found")
+
+
+@router.delete("/api/admin/ai-profiles/{profile_id}")
+async def delete_ai_profile(profile_id: str, user: UserContext = Depends(require_master)):
+    """Delete a profile."""
+    profiles = await _load_profiles()
+    new_profiles = [p for p in profiles if p["id"] != profile_id]
+    if len(new_profiles) == len(profiles):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    await _save_profiles(new_profiles)
+    # Clear active if deleted
+    active = await deps.db.get_setting("ai.active_profile") or ""
+    if active == profile_id:
+        await deps.db.set_setting("ai.active_profile", "")
+    return {"status": "ok"}
+
+
+@router.post("/api/admin/ai-profiles/{profile_id}/activate")
+async def activate_ai_profile(profile_id: str, user: UserContext = Depends(require_master)):
+    """Copy profile config to flat ai.* keys and mark as active."""
+    profiles = await _load_profiles()
+    target = next((p for p in profiles if p["id"] == profile_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    await _apply_profile_to_settings(target["config"])
+    await deps.db.set_setting("ai.active_profile", profile_id)
+    return {"status": "ok", "activated": profile_id}
+
+
+# ---------------------------------------------------------------------------
 # OCR endpoints
 # ---------------------------------------------------------------------------
 
@@ -410,7 +680,7 @@ async def ai_ocr_message(
             )
             resp.raise_for_status()
             data = resp.json()
-            ocr_result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            ocr_result = _THINK_RE.sub("", data.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
     except Exception as e:
         logger.error(f"OCR API error: {e}")
         raise HTTPException(status_code=502, detail="OCR service error")
@@ -480,7 +750,7 @@ async def ai_ocr_batch(
                         )
                         resp.raise_for_status()
                         data = resp.json()
-                        ocr_result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        ocr_result = _THINK_RE.sub("", data.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
                         await deps.db.update_ocr_text(item["chat_id"], item["message_id"], ocr_result)
                         processed += 1
                     except Exception as e:

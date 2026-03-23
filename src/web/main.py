@@ -123,7 +123,9 @@ async def _normalize_display_chat_ids():
 
 
 # AI config defaults (imported from routes_ai for seeding)
-from .routes_ai import get_ai_config_defaults
+from .routes_ai import get_ai_config_defaults, _get_default_profiles
+
+import json as _json
 
 
 async def _seed_ai_config_defaults():
@@ -145,6 +147,15 @@ async def _seed_ai_config_defaults():
         logger.info(f"Seeded {seeded} default AI config values")
     if migrated:
         logger.info(f"Migrated {migrated} AI config URLs from localhost to host.docker.internal")
+
+    # Seed AI profiles if not present
+    if "ai.profiles" not in existing:
+        ollama_base = config.ollama_url.rstrip("/")
+        ollama_v1 = f"{ollama_base}/v1" if not ollama_base.endswith("/v1") else ollama_base
+        profiles = _get_default_profiles(ollama_v1)
+        await db.set_setting("ai.profiles", _json.dumps(profiles))
+        await db.set_setting("ai.active_profile", "gemma3-ocr-default")
+        logger.info(f"Seeded {len(profiles)} AI profiles")
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +398,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.ocr_worker = ocr_worker
     await ocr_worker.start()
 
+    # Start background embedding worker
+    from ..embedding_worker import EmbeddingWorker
+    embedding_worker = EmbeddingWorker(db, config)
+    app.state.embedding_worker = embedding_worker
+    await embedding_worker.start()
+
     # Start background voice transcription worker
     from ..transcription_worker import TranscriptionWorker
     transcription_worker = TranscriptionWorker(db, config)
@@ -398,6 +415,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Shutdown
     if hasattr(app.state, "transcription_worker") and app.state.transcription_worker:
         await app.state.transcription_worker.stop()
+
+    if hasattr(app.state, "embedding_worker") and app.state.embedding_worker:
+        await app.state.embedding_worker.stop()
 
     if hasattr(app.state, "ocr_worker") and app.state.ocr_worker:
         await app.state.ocr_worker.stop()

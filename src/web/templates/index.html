@@ -2935,6 +2935,32 @@
                         </div>
                         <!-- AI Models Tab (admin only) -->
                         <div v-if="adminActiveTab === 'ai-models'" class="space-y-4">
+                            <!-- Profile Selector -->
+                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">AI Profile</div>
+                                    <button @click="saveCurrentAsProfile()" class="text-xs px-2.5 py-1 rounded-lg transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-plus mr-1"></i>Save Current
+                                    </button>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <button v-for="p in aiProfiles" :key="p.id"
+                                        @click="activateAiProfile(p.id)"
+                                        class="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all"
+                                        :style="aiActiveProfileId === p.id
+                                            ? 'background: var(--tg-accent); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15);'
+                                            : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
+                                        <i :class="'fas fa-' + (p.icon || 'sliders-h')" class="text-xs"></i>
+                                        <span>{{ p.name }}</span>
+                                        <span v-if="aiActiveProfileId === p.id" class="ml-1 text-[10px] opacity-70">Active</span>
+                                        <button @click.stop="deleteAiProfile(p.id, p.name)" class="ml-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 text-xs transition-opacity" title="Delete profile">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </button>
+                                    <span v-if="!aiProfiles.length" class="text-xs" style="color: var(--tg-muted);">No profiles saved</span>
+                                </div>
+                            </div>
+
                             <div class="flex items-center justify-between">
                                 <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Model Endpoints</div>
                                 <button @click="saveAiConfig" class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
@@ -3269,20 +3295,20 @@
                             </div>
                             <!-- Newly created token -->
                             <div v-if="adminNewToken" class="bg-green-900/50 border border-green-600 rounded-lg p-4 mb-4">
-                                <div class="text-sm text-green-300 mb-2">Token created! Copy it now — it won't be shown again.</div>
+                                <div class="text-sm text-green-300 mb-2"><i class="fas fa-check-circle mr-1"></i>Token created! Link auto-copied to clipboard.</div>
                                 <div class="space-y-2">
                                     <div>
                                         <div class="text-xs text-gray-400 mb-1">Token</div>
                                         <div class="flex items-center gap-2">
                                             <code class="flex-1 bg-gray-900 text-green-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewToken }}</code>
-                                            <button @click="navigator.clipboard.writeText(adminNewToken)" class="px-3 py-2 bg-green-700 hover:bg-green-600 text-white text-xs rounded shrink-0">Copy</button>
+                                            <button @click="copyToClipboard(adminNewToken, 'Token copied')" class="px-3 py-2 bg-green-700 hover:bg-green-600 text-white text-xs rounded shrink-0">Copy</button>
                                         </div>
                                     </div>
                                     <div>
                                         <div class="text-xs text-gray-400 mb-1">Shareable Link</div>
                                         <div class="flex items-center gap-2">
                                             <code class="flex-1 bg-gray-900 text-blue-400 rounded px-3 py-2 text-xs font-mono break-all select-all">{{ adminNewTokenUrl }}</code>
-                                            <button @click="navigator.clipboard.writeText(adminNewTokenUrl)" class="px-3 py-2 text-white text-xs rounded shrink-0" style="background: var(--tg-accent);">Copy Link</button>
+                                            <button @click="copyToClipboard(adminNewTokenUrl, 'Link copied')" class="px-3 py-2 text-white text-xs rounded shrink-0" style="background: var(--tg-accent);">Copy Link</button>
                                         </div>
                                     </div>
                                 </div>
@@ -3993,6 +4019,8 @@
                     system_prompt: '',
                 })
                 const aiConfigDirty = ref(false)
+                const aiProfiles = ref([])
+                const aiActiveProfileId = ref('')
                 const aiConfigStatus = Vue.reactive({ vision: 'unknown', chat: 'unknown', embedding: 'unknown', tts: 'unknown', transcription: 'unknown', vault: 'unknown' })
                 const transcriptionProgress = Vue.reactive({ processed: 0, total: 0 })
                 const vaultProfiles = ref([])
@@ -4037,7 +4065,57 @@
                             aiConfig.system_prompt = data.system_prompt || AI_DEFAULT_SYSTEM_PROMPT
                         }
                         aiConfigDirty.value = false
+                        loadAiProfiles()
                     } catch (e) { console.error('Failed to load AI config:', e) }
+                }
+
+                const loadAiProfiles = async () => {
+                    try {
+                        const res = await fetch('/api/admin/ai-profiles', { credentials: 'include' })
+                        if (!res.ok) return
+                        const data = await res.json()
+                        aiProfiles.value = data.profiles || []
+                        aiActiveProfileId.value = data.active_profile_id || ''
+                    } catch (e) { console.error('Failed to load AI profiles:', e) }
+                }
+
+                const activateAiProfile = async (id) => {
+                    try {
+                        const res = await fetch(`/api/admin/ai-profiles/${id}/activate`, { method: 'POST', credentials: 'include' })
+                        if (!res.ok) { showToast('Failed to activate profile', 'error'); return }
+                        aiActiveProfileId.value = id
+                        await loadAiConfig()
+                        const p = aiProfiles.value.find(x => x.id === id)
+                        showToast(`Profile "${p?.name || id}" activated`)
+                    } catch (e) { showToast('Failed to activate profile', 'error') }
+                }
+
+                const saveCurrentAsProfile = async (name) => {
+                    if (!name) name = prompt('Profile name:')
+                    if (!name || !name.trim()) return
+                    // Save current config first
+                    await saveAiConfig()
+                    try {
+                        const res = await fetch('/api/admin/ai-profiles', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: name.trim() })
+                        })
+                        if (!res.ok) { showToast('Failed to save profile', 'error'); return }
+                        await loadAiProfiles()
+                        showToast(`Profile "${name.trim()}" saved`)
+                    } catch (e) { showToast('Failed to save profile', 'error') }
+                }
+
+                const deleteAiProfile = async (id, name) => {
+                    if (!confirm(`Delete profile "${name}"?`)) return
+                    try {
+                        const res = await fetch(`/api/admin/ai-profiles/${id}`, { method: 'DELETE', credentials: 'include' })
+                        if (!res.ok) { showToast('Failed to delete profile', 'error'); return }
+                        if (aiActiveProfileId.value === id) aiActiveProfileId.value = ''
+                        await loadAiProfiles()
+                        showToast(`Profile "${name}" deleted`)
+                    } catch (e) { showToast('Failed to delete profile', 'error') }
                 }
 
                 const saveAiConfig = async () => {
@@ -4350,11 +4428,11 @@
 
                 // Context menu
                 const contextMenu = Vue.reactive({ visible: false, x: 0, y: 0, items: [], target: null })
-                const copyToClipboard = async (text) => {
+                const copyToClipboard = async (text, msg) => {
                     try {
                         if (navigator.clipboard) { await navigator.clipboard.writeText(text) }
                         else { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta) }
-                        showToast('Copied!')
+                        showToast(msg || 'Copied!')
                     } catch { showToast('Copy failed', 'error') }
                 }
                 const positionMenu = (e) => {
@@ -8053,6 +8131,9 @@
                         adminNewToken.value = data.token
                         adminTokenForm.value = { label: '', allowed_chat_ids: [], no_download: false, expires_at: '' }
                         await loadAdminTokens()
+                        // Auto-copy shareable link to clipboard
+                        const shareUrl = `${window.location.origin}/?token=${data.token}`
+                        copyToClipboard(shareUrl, 'Shareable link copied to clipboard')
                     } catch (e) { adminTokenError.value = 'Network error' }
                 }
 
@@ -8377,7 +8458,13 @@
                     aiConfig,
                     aiConfigDirty,
                     aiConfigStatus,
+                    aiProfiles,
+                    aiActiveProfileId,
                     loadAiConfig,
+                    loadAiProfiles,
+                    activateAiProfile,
+                    saveCurrentAsProfile,
+                    deleteAiProfile,
                     saveAiConfig,
                     testAiConnection,
                     resetAiSystemPrompt,
