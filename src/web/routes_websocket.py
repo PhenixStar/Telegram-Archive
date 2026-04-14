@@ -109,12 +109,24 @@ async def websocket_endpoint(websocket: WebSocket):
         user_ctx = UserContext(session.username, session.role, session.allowed_chat_ids)
         ws_user_chat_ids = get_user_chat_ids(user_ctx)
 
-    await deps.manager.connect(websocket, allowed_chat_ids=ws_user_chat_ids)
+    connected = await deps.manager.connect(websocket, allowed_chat_ids=ws_user_chat_ids)
+    if not connected:
+        return
     await deps.listener_mgr.on_viewer_connect(len(deps.manager.active_connections))
+
+    _MSG_RATE_INTERVAL = 0.1  # 10 msgs/sec
+    _last_msg_time = 0.0
 
     try:
         while True:
             data = await websocket.receive_json()
+
+            # Rate limit: silently drop excess messages
+            now = time.monotonic()
+            if now - _last_msg_time < _MSG_RATE_INTERVAL:
+                continue
+            _last_msg_time = now
+
             action = data.get("action")
 
             if action == "subscribe":

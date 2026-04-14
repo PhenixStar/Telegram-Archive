@@ -9,7 +9,7 @@ import secrets
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from .adapter import retry_on_locked
 from .models import UserAccount, ViewerAccount, ViewerAuditLog, ViewerSession, ViewerToken
@@ -431,3 +431,26 @@ class ViewerMixin:
             "use_count": token.use_count,
             "created_at": token.created_at.isoformat() if token.created_at else None,
         }
+
+    async def bulk_update_session_last_accessed(self, updates: dict[str, float]) -> int:
+        """Batch-update last_accessed timestamps for active sessions.
+
+        Args:
+            updates: Mapping of raw session token -> last_accessed timestamp
+
+        Returns:
+            Number of rows updated.
+        """
+        if not updates:
+            return 0
+        count = 0
+        async with self.db_manager.async_session_factory() as session:
+            for token_hash, last_accessed in updates.items():
+                result = await session.execute(
+                    update(ViewerSession)
+                    .where(ViewerSession.token == token_hash)
+                    .values(last_accessed=last_accessed)
+                )
+                count += result.rowcount
+            await session.commit()
+        return count

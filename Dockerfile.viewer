@@ -21,6 +21,7 @@ COPY src/realtime.py ./src/
 COPY src/ocr_worker.py ./src/
 COPY src/transcription_worker.py ./src/
 COPY src/embedding_worker.py ./src/
+COPY src/translation_worker.py ./src/
 COPY src/db/ ./src/db/
 COPY src/web/ ./src/web/
 
@@ -42,6 +43,10 @@ VOLUME ["/data"]
 
 # Expose web viewer port
 EXPOSE 8000
+
+# Health check — readiness probe ensures DB is reachable
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready')"]
 
 # Run web viewer
 CMD ["uvicorn", "src.web.main:app", "--host", "0.0.0.0", "--port", "8000"]

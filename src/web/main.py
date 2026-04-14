@@ -148,6 +148,25 @@ async def _seed_ai_config_defaults():
     if migrated:
         logger.info(f"Migrated {migrated} AI config URLs from localhost to host.docker.internal")
 
+    # Auto-enable feature flags for existing instances with active data
+    # (prevents losing access to AI features after upgrade)
+    _feature_migrations = {
+        "feature.ocr": lambda s: any(k.startswith("ocr_enabled:") and v == "true" for k, v in s.items()),
+        "feature.translation": lambda s: any(k.startswith("translation_enabled:") and v == "true" for k, v in s.items()),
+        "feature.embedding": lambda s: any(k.startswith("embedding_enabled:") and v == "true" for k, v in s.items()),
+        "feature.transcription": lambda s: s.get("ai.transcription.enabled") == "true",
+        "feature.ai_chat": lambda s: bool(s.get("ai.chat.api_url")),
+    }
+    refreshed = await db.get_all_settings()
+    auto_enabled = 0
+    for flag_key, detector in _feature_migrations.items():
+        if refreshed.get(flag_key) == "false" and detector(refreshed):
+            await db.set_setting(flag_key, "true")
+            auto_enabled += 1
+            logger.info("Auto-enabled %s (existing data detected)", flag_key)
+    if auto_enabled:
+        logger.info("Auto-enabled %d feature flag(s) based on existing data", auto_enabled)
+
     # Seed AI profiles if not present
     if "ai.profiles" not in existing:
         ollama_base = config.ollama_url.rstrip("/")
@@ -164,8 +183,10 @@ async def _seed_ai_config_defaults():
 
 
 async def session_cleanup_task():
-    """Periodically evict expired sessions and stale rate limit entries."""
+    """Periodically evict expired sessions, flush last_accessed, and clean stale rate limits."""
     from .dependencies import _login_attempts, _SESSION_CLEANUP_INTERVAL
+
+    _last_flush_time = 0.0
 
     while True:
         try:
@@ -183,6 +204,21 @@ async def session_cleanup_task():
                         logger.info(f"Cleaned up {db_cleaned} expired sessions from database")
                 except Exception as e:
                     logger.warning(f"DB session cleanup failed: {e}")
+
+                # Flush last_accessed timestamps to DB for sessions active since last flush
+                try:
+                    flush_updates = {}
+                    for token, sess in _sessions.items():
+                        if sess.last_accessed > _last_flush_time:
+                            flush_updates[token] = sess.last_accessed
+                    if flush_updates:
+                        flushed = await db.bulk_update_session_last_accessed(flush_updates)
+                        if flushed:
+                            logger.debug(f"Flushed last_accessed for {flushed} sessions")
+                    _last_flush_time = now
+                except Exception as e:
+                    logger.warning(f"Session last_accessed flush failed: {e}")
+
             stale_ips = [ip for ip, ts in _login_attempts.items() if all(now - t > 300 for t in ts)]
             for ip in stale_ips:
                 _login_attempts.pop(ip, None)
@@ -392,27 +428,56 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Seed default AI configuration
     await _seed_ai_config_defaults()
 
+    # Read feature flags to conditionally start workers
+    _features = {
+        "ocr": await db.get_setting("feature.ocr") == "true",
+        "translation": await db.get_setting("feature.translation") == "true",
+        "transcription": await db.get_setting("feature.transcription") == "true",
+        "embedding": await db.get_setting("feature.embedding") == "true",
+    }
+
     # Start background OCR worker
     from ..ocr_worker import OcrWorker
     ocr_worker = OcrWorker(db, config)
     app.state.ocr_worker = ocr_worker
-    await ocr_worker.start()
+    if _features["ocr"]:
+        await ocr_worker.start()
+    else:
+        logger.info("OCR worker skipped (feature.ocr disabled)")
 
     # Start background embedding worker
     from ..embedding_worker import EmbeddingWorker
     embedding_worker = EmbeddingWorker(db, config)
     app.state.embedding_worker = embedding_worker
-    await embedding_worker.start()
+    if _features["embedding"]:
+        await embedding_worker.start()
+    else:
+        logger.info("Embedding worker skipped (feature.embedding disabled)")
 
     # Start background voice transcription worker
     from ..transcription_worker import TranscriptionWorker
     transcription_worker = TranscriptionWorker(db, config)
     app.state.transcription_worker = transcription_worker
-    await transcription_worker.start()
+    if _features["transcription"]:
+        await transcription_worker.start()
+    else:
+        logger.info("Transcription worker skipped (feature.transcription disabled)")
+
+    # Start background translation worker
+    from ..translation_worker import TranslationWorker
+    translation_worker = TranslationWorker(db, config)
+    app.state.translation_worker = translation_worker
+    if _features["translation"]:
+        await translation_worker.start()
+    else:
+        logger.info("Translation worker skipped (feature.translation disabled)")
 
     yield
 
     # Shutdown
+    if hasattr(app.state, "translation_worker") and app.state.translation_worker:
+        await app.state.translation_worker.stop()
+
     if hasattr(app.state, "transcription_worker") and app.state.transcription_worker:
         await app.state.transcription_worker.stop()
 
@@ -488,17 +553,23 @@ if static_dir.exists():
 # Include routers
 # ---------------------------------------------------------------------------
 
+from .routes_health import router as health_router
 from .routes_auth import router as auth_router
 from .routes_chat import router as chat_router
 from .routes_media import router as media_router
-from .routes_admin import router as admin_router
+from .routes_admin_users import router as admin_users_router
+from .routes_admin_settings import router as admin_settings_router
+from .routes_admin_vault import router as admin_vault_router
 from .routes_ai import router as ai_router
 from .routes_websocket import router as ws_router
 
+app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(media_router)
-app.include_router(admin_router)
+app.include_router(admin_users_router)
+app.include_router(admin_settings_router)
+app.include_router(admin_vault_router)
 app.include_router(ai_router)
 app.include_router(ws_router)
 

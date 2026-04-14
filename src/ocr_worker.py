@@ -11,7 +11,6 @@ import logging
 import mimetypes
 import os
 import re
-import time
 
 import httpx
 
@@ -19,6 +18,18 @@ import httpx
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 logger = logging.getLogger(__name__)
+
+_MAX_OCR_ATTEMPTS = 3
+_BACKOFF_BASE = 2.0  # seconds
+_OCR_FAILED_SENTINEL = "[ocr_failed]"
+
+
+class _TransientOcrError(Exception):
+    """Retryable OCR API error (5xx, timeout, connection)."""
+
+
+class _PermanentOcrError(Exception):
+    """Non-retryable OCR API error (4xx, parse failure)."""
 
 
 class OcrWorker:
@@ -29,6 +40,7 @@ class OcrWorker:
         self.config = config
         self._task: asyncio.Task | None = None
         self._running = False
+        self._failure_counts: dict[tuple[int, int], int] = {}  # (chat_id, msg_id) -> count
 
     async def start(self):
         """Start the background worker loop."""
@@ -95,6 +107,9 @@ class OcrWorker:
     async def _process_cycle(self):
         """One cycle: find enabled chats, process pending images."""
         if not self.config.ocr_enabled:
+            return
+        # Check global feature flag from DB (None/missing → treat as disabled)
+        if await self.db.get_setting("feature.ocr") != "true":
             return
 
         enabled_chats = await self._get_enabled_chats()
@@ -194,32 +209,63 @@ class OcrWorker:
             "max_tokens": 2048,
         }
 
-        # Try primary endpoint
-        ocr_text = await self._call_api(client, f"{api_url}/chat/completions", headers, payload)
+        key = (item["chat_id"], item["message_id"])
 
-        # Try fallback if primary fails
-        if ocr_text is None and cfg["fallback_url"]:
+        # Build list of (url, payload) attempts: primary, then fallback
+        endpoints = [(f"{api_url}/chat/completions", payload)]
+        if cfg["fallback_url"]:
             fallback_url = cfg["fallback_url"].rstrip("/")
             fallback_payload = {**payload, "model": cfg["fallback_model"] or cfg["model_name"]}
-            ocr_text = await self._call_api(
-                client, f"{fallback_url}/chat/completions", headers, fallback_payload
-            )
+            endpoints.append((f"{fallback_url}/chat/completions", fallback_payload))
 
-        if ocr_text is not None:
-            ocr_text = _THINK_RE.sub("", ocr_text).strip()
-            await self.db.update_ocr_text(item["chat_id"], item["message_id"], ocr_text)
-            return True
+        for url, ep_payload in endpoints:
+            for attempt in range(2):  # max 2 tries per endpoint (initial + 1 retry)
+                try:
+                    ocr_text = await self._call_api(client, url, headers, ep_payload)
+                    if ocr_text is not None:
+                        ocr_text = _THINK_RE.sub("", ocr_text).strip()
+                        await self.db.update_ocr_text(item["chat_id"], item["message_id"], ocr_text)
+                        self._failure_counts.pop(key, None)
+                        return True
+                except _TransientOcrError:
+                    if attempt == 0:
+                        await asyncio.sleep(_BACKOFF_BASE * (2 ** attempt))
+                        continue
+                    break  # exhausted retries, try next endpoint
+                except _PermanentOcrError:
+                    break  # skip retries, try next endpoint
+
+        # All endpoints failed — track cumulative failures
+        self._failure_counts[key] = self._failure_counts.get(key, 0) + 1
+        if self._failure_counts[key] >= _MAX_OCR_ATTEMPTS:
+            await self.db.update_ocr_text(item["chat_id"], item["message_id"], _OCR_FAILED_SENTINEL)
+            self._failure_counts.pop(key, None)
+            logger.info(f"OCR: marked as failed after {_MAX_OCR_ATTEMPTS} attempts: chat={key[0]} msg={key[1]}")
         return False
 
     async def _call_api(
         self, client: httpx.AsyncClient, url: str, headers: dict, payload: dict
     ) -> str | None:
-        """Call an OpenAI-compatible chat/completions endpoint. Returns text or None."""
+        """Call an OpenAI-compatible chat/completions endpoint.
+
+        Returns extracted text on success.
+        Raises _TransientOcrError for retryable failures (5xx, timeout).
+        Raises _PermanentOcrError for non-retryable failures (4xx, parse).
+        """
         try:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code >= 500:
+                logger.error(f"OCR API 5xx ({url}): {e.response.status_code}")
+                raise _TransientOcrError() from e
+            logger.warning(f"OCR API {e.response.status_code} (permanent, {url})")
+            raise _PermanentOcrError() from e
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            logger.warning(f"OCR API connection/timeout ({url}): {e}")
+            raise _TransientOcrError() from e
         except Exception as e:
-            logger.warning(f"OCR API call failed ({url}): {e}")
-            return None
+            logger.warning(f"OCR API unexpected error ({url}): {e}")
+            raise _PermanentOcrError() from e

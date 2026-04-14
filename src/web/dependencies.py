@@ -78,19 +78,61 @@ from fastapi import WebSocket
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
 
+    _MAX_CONNECTIONS = 100
+    _MAX_PER_IP = 5
+
     def __init__(self):
         self.active_connections: dict[WebSocket, set[int]] = {}
         self._allowed_chats: dict[WebSocket, set[int] | None] = {}
+        self._ip_counts: dict[str, int] = {}
+        self._ws_ip: dict[WebSocket, str] = {}
 
-    async def connect(self, websocket: WebSocket, allowed_chat_ids: set[int] | None = None):
+    @staticmethod
+    def _get_client_ip(websocket: WebSocket) -> str:
+        """Extract real client IP, checking proxy headers first.
+
+        NOTE: Trusts X-Forwarded-For/CF-Connecting-IP unconditionally.
+        Only effective when deployed behind a trusted reverse proxy (nginx, Cloudflare).
+        """
+        headers = dict(websocket.headers) if hasattr(websocket, "headers") else {}
+        # Cloudflare
+        ip = headers.get("cf-connecting-ip")
+        if ip:
+            return ip.strip()
+        # Standard proxy header (take first IP in chain)
+        forwarded = headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        # Direct connection
+        if websocket.client:
+            return websocket.client.host
+        return "unknown"
+
+    async def connect(self, websocket: WebSocket, allowed_chat_ids: set[int] | None = None) -> bool:
+        """Accept a WebSocket connection. Returns False if caps exceeded."""
+        if len(self.active_connections) >= self._MAX_CONNECTIONS:
+            await websocket.close(code=4008, reason="Too many connections")
+            return False
+        ip = self._get_client_ip(websocket)
+        if self._ip_counts.get(ip, 0) >= self._MAX_PER_IP:
+            await websocket.close(code=4009, reason="Too many connections from this IP")
+            return False
         await websocket.accept()
         self.active_connections[websocket] = set()
         self._allowed_chats[websocket] = allowed_chat_ids
-        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+        self._ip_counts[ip] = self._ip_counts.get(ip, 0) + 1
+        self._ws_ip[websocket] = ip
+        logger.info(f"WebSocket connected (ip={ip}). Total connections: {len(self.active_connections)}")
+        return True
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.pop(websocket, None)
         self._allowed_chats.pop(websocket, None)
+        ip = self._ws_ip.pop(websocket, None)
+        if ip and ip in self._ip_counts:
+            self._ip_counts[ip] = max(0, self._ip_counts[ip] - 1)
+            if self._ip_counts[ip] == 0:
+                del self._ip_counts[ip]
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
 
     def subscribe(self, websocket: WebSocket, chat_id: int):

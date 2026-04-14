@@ -8,7 +8,8 @@ The adapter is composed from domain-focused mixins:
 - MessageMixin: message CRUD, pagination, export
 - MediaMixin: media files and reactions
 - ViewerMixin: viewer/user accounts, sessions, tokens, audit logs
-- SyncMixin: chat/user upserts, sync status, folders, statistics
+- SyncMixin: chat/user upserts, sync status, statistics
+- OrganizeMixin: pinned messages, forum topics, folders, backup profiles, members
 - SettingsMixin: app settings key-value store
 - SearchMixin: FTS5, AI/OCR, semantic search
 """
@@ -85,6 +86,7 @@ def retry_on_locked(
 # Import mixins (must be after _strip_tz and retry_on_locked are defined)
 from .adapter_media import MediaMixin  # noqa: E402
 from .adapter_messages import MessageMixin  # noqa: E402
+from .adapter_organize import OrganizeMixin  # noqa: E402
 from .adapter_search import SearchMixin  # noqa: E402
 from .adapter_settings import SettingsMixin  # noqa: E402
 from .adapter_sync import SyncMixin  # noqa: E402
@@ -96,6 +98,7 @@ class DatabaseAdapter(
     MediaMixin,
     ViewerMixin,
     SyncMixin,
+    OrganizeMixin,
     SettingsMixin,
     SearchMixin,
 ):

@@ -94,7 +94,7 @@ services:
 
     volumes:
       # Persistent data storage — shared with viewer via same host directory
-      - /home/phenix/projects/tele-private/database:/data
+      - /raid/projects/tele-private/database:/data
     networks:
       - telegram-network
     # Security hardening
@@ -174,9 +174,9 @@ services:
 
     volumes:
       # Mount the active database directory
-      - /home/phenix/projects/tele-private/database:/data/backups
+      - /raid/projects/tele-private/database:/data/backups
       # Mount media from backup dir
-      - /home/phenix/projects/tele-private/database/backups/media:/data/backups/media
+      - /raid/projects/tele-private/database/backups/media:/data/backups/media
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -189,6 +189,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     # Uncomment to use PostgreSQL
     # depends_on:
     #   postgres:
