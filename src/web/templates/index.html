@@ -2461,8 +2461,9 @@
                     </div>
                     <div class="flex-1 overflow-y-auto p-2">
                         <div v-if="['photo','video'].includes(mediaPanelTab)" class="grid gap-1" :class="mediaGridLarge ? 'grid-cols-2' : 'grid-cols-3'">
-                            <div v-for="item in mediaPanelItems" :key="item.id" @click="openMedia(item)" class="aspect-square cursor-pointer overflow-hidden rounded hover:opacity-80">
-                                <img :src="getMediaUrl(item)" class="w-full h-full object-cover" loading="lazy">
+                            <div v-for="item in mediaPanelItems" :key="item.id" @click="openMedia(item)" class="relative aspect-square cursor-pointer overflow-hidden rounded hover:opacity-80">
+                                <img :src="item.thumb_url || getMediaUrl(item)" class="w-full h-full object-cover" loading="lazy">
+                                <i v-if="item.media?.type === 'video'" class="fas fa-play absolute inset-0 m-auto h-fit w-fit text-white/90 text-lg drop-shadow"></i>
                             </div>
                         </div>
                         <div v-else class="space-y-1">
@@ -7584,13 +7585,31 @@
                     mediaPanelLoading.value = true
                     if (reset) { mediaPanelItems.value = []; mediaPanelHasMore.value = true }
                     const lastId = mediaPanelItems.value.length > 0 ? mediaPanelItems.value[mediaPanelItems.value.length - 1].id : null
-                    const params = new URLSearchParams({ media_type: mediaPanelTab.value, limit: '50' })
-                    if (lastId) params.set('before', lastId)
+                    const params = new URLSearchParams({ types: mediaPanelTab.value, limit: '50' })
+                    if (lastId) params.set('before_id', lastId)
                     try {
                         const res = await fetch(`/api/chats/${selectedChat.value.id}/media?${params}`, { credentials: 'include' })
                         if (res.ok) {
                             const data = await res.json()
-                            mediaPanelItems.value.push(...data.messages)
+                            // Gallery endpoint returns flat media items; map to the
+                            // message-like shape the panel/openMedia/lightbox expect.
+                            // Keep id = media id (pagination cursor + grid key);
+                            // thumb_url enables real video thumbnails in the grid.
+                            const mapped = (data.items || []).map(it => ({
+                                id: it.id,
+                                message_id: it.message_id,
+                                date: it.message_date,
+                                thumb_url: it.thumb_url,
+                                text: it.file_name,
+                                media: {
+                                    type: it.type,
+                                    file_path: it.file_path,
+                                    file_name: it.file_name,
+                                    file_size: it.file_size,
+                                    duration: it.duration,
+                                },
+                            }))
+                            mediaPanelItems.value.push(...mapped)
                             mediaPanelHasMore.value = data.has_more
                         }
                     } catch (e) { console.error('Media panel load error:', e) }

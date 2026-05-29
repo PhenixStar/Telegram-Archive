@@ -6,7 +6,7 @@ Handles insert, query, update, delete for media files and message reactions.
 import logging
 from typing import Any
 
-from sqlalchemy import and_, delete, or_, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 
 from .adapter import retry_on_locked
 from .models import Media, Message, Reaction, User
@@ -292,3 +292,112 @@ class MediaMixin:
                 "id": m.id, "message_id": m.message_id, "chat_id": m.chat_id,
                 "type": m.type, "file_path": m.file_path, "downloaded": m.downloaded,
             }
+
+    # ========== Media Gallery (cursor-paginated, per-media-item) ==========
+
+    async def get_media_paginated(
+        self,
+        chat_id: int,
+        media_types: list[str] | None = None,
+        limit: int = 50,
+        before_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Get paginated downloaded media records for a chat's media gallery.
+
+        Unlike ``get_media_messages`` (which keys results by message), this returns
+        one entry per media item, enabling album-aware galleries.
+
+        Uses a composite cursor (Message.date, Media.id) for deterministic ordering
+        so albums (multiple media sharing one message_id) paginate without overlap.
+
+        Args:
+            chat_id: Chat identifier
+            media_types: Optional list of media types to include (e.g. ["photo", "video"])
+            limit: Max items to return (caller clamps to 1..200)
+            before_id: Media-ID cursor; return items strictly older than this item
+
+        Returns:
+            Dict with "items" (list of media dicts) and "has_more" (bool)
+        """
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(Media, Message.date, User.first_name, User.last_name)
+                .join(
+                    Message,
+                    and_(
+                        Media.message_id == Message.id,
+                        Media.chat_id == Message.chat_id,
+                    ),
+                )
+                .outerjoin(User, Message.sender_id == User.id)
+            )
+            stmt = stmt.where(and_(Media.chat_id == chat_id, Media.downloaded == 1))
+
+            if media_types:
+                stmt = stmt.where(Media.type.in_(media_types))
+
+            if before_id:
+                cursor_stmt = (
+                    select(Media.id, Message.date)
+                    .join(
+                        Message,
+                        and_(Media.message_id == Message.id, Media.chat_id == Message.chat_id),
+                    )
+                    .where(Media.id == before_id)
+                )
+                cursor_result = await session.execute(cursor_stmt)
+                cursor_row = cursor_result.one_or_none()
+                if cursor_row is None:
+                    return {"items": [], "has_more": False}
+                cursor_media_id, cursor_date = cursor_row
+                stmt = stmt.where(
+                    or_(
+                        Message.date < cursor_date,
+                        and_(Message.date == cursor_date, Media.id < cursor_media_id),
+                    )
+                )
+
+            stmt = stmt.order_by(Message.date.desc(), Media.id.desc())
+            stmt = stmt.limit(limit + 1)
+            result = await session.execute(stmt)
+            rows = result.all()
+
+            has_more = len(rows) > limit
+            items = [
+                {
+                    "id": media.id,
+                    "message_id": media.message_id,
+                    "chat_id": media.chat_id,
+                    "type": media.type,
+                    "file_path": media.file_path,
+                    "file_name": media.file_name,
+                    "file_size": media.file_size,
+                    "mime_type": media.mime_type,
+                    "width": media.width,
+                    "height": media.height,
+                    "duration": media.duration,
+                    "message_date": msg_date.isoformat() if msg_date else None,
+                    "sender_name": f"{first_name or ''} {last_name or ''}".strip() or None,
+                }
+                for media, msg_date, first_name, last_name in rows[:limit]
+            ]
+
+            return {"items": items, "has_more": has_more}
+
+    async def get_media_counts(self, chat_id: int) -> dict[str, int]:
+        """Get count of downloaded media grouped by type for a chat.
+
+        Args:
+            chat_id: Chat identifier
+
+        Returns:
+            Dict mapping media type to count (only types with count > 0)
+        """
+        async with self.db_manager.async_session_factory() as session:
+            stmt = (
+                select(Media.type, func.count())
+                .where(and_(Media.chat_id == chat_id, Media.downloaded == 1))
+                .group_by(Media.type)
+            )
+            result = await session.execute(stmt)
+            return {row[0]: row[1] for row in result.all()}

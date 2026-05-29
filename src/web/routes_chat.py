@@ -18,6 +18,7 @@ from .dependencies import (
     require_auth,
     require_master,
 )
+from .media_utils import THUMBNAIL_EXTENSIONS
 
 router = APIRouter()
 
@@ -558,25 +559,91 @@ async def get_boundary_message(
 @router.get("/api/chats/{chat_id}/media")
 async def get_chat_media(
     chat_id: int,
+    types: str = Query(default=""),
+    limit: int = Query(default=50, ge=1, le=200),
+    before_id: str = Query(default=""),
     user: UserContext = Depends(require_auth),
-    media_type: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    before: int | None = Query(None),
 ):
-    """Get media messages for a chat with optional type filter and cursor pagination."""
-    user_chat_ids = get_user_chat_ids(user)
-    if user_chat_ids is not None and chat_id not in user_chat_ids:
+    """Get paginated media items for a chat's gallery, with optional type filtering.
+
+    Ported from the base monolith gallery: returns one entry per media item
+    (album-aware) with cursor pagination by media id. Adds ``thumb_url`` /
+    ``media_url`` derived from the relative ``file_path`` and enforces a
+    path-traversal guard before exposing any path to the client.
+    """
+    allowed = get_user_chat_ids(user)
+    if allowed is not None and chat_id not in allowed:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    valid_types = {"photo", "video", "voice", "document", "animation"}
-    if media_type and media_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"Invalid media_type. Must be one of: {', '.join(sorted(valid_types))}")
+    if not deps.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    media_types = [t.strip() for t in types.split(",") if t.strip()] or None
 
     try:
-        result = await deps.db.get_media_messages(chat_id, media_type=media_type, limit=limit, before=before)
+        result = await deps.db.get_media_paginated(
+            chat_id,
+            media_types=media_types,
+            limit=limit,
+            before_id=before_id or None,
+        )
+        for item in result["items"]:
+            file_path = item.get("file_path", "") or ""
+            # Strip media root prefix for absolute paths stored in DB.
+            if deps._media_root and file_path.startswith("/"):
+                media_root_str = str(deps._media_root) + "/"
+                if file_path.startswith(media_root_str):
+                    file_path = file_path[len(media_root_str):]
+                else:
+                    item["thumb_url"] = None
+                    item.pop("file_path", None)
+                    continue
+            # Path-traversal guard: reject "../" segments and absolute paths.
+            if ".." in file_path.split("/") or file_path.startswith("/"):
+                item["thumb_url"] = None
+                item.pop("file_path", None)
+                continue
+
+            parts = file_path.split("/", 1)
+            if len(parts) == 2:
+                folder, filename = parts
+                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                if ext in THUMBNAIL_EXTENSIONS:
+                    item["thumb_url"] = f"/media/thumb/200/{folder}/{filename}"
+                else:
+                    item["thumb_url"] = None
+            else:
+                item["thumb_url"] = None
+
+            if user.no_download:
+                item.pop("file_path", None)
+            else:
+                item["media_url"] = f"/media/{file_path}"
+
         return result
     except Exception as e:
-        logger.error(f"Error fetching media messages: {e}", exc_info=True)
+        logger.error(f"Error fetching chat media: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/api/chats/{chat_id}/media/counts")
+async def get_chat_media_counts(
+    chat_id: int,
+    user: UserContext = Depends(require_auth),
+):
+    """Get downloaded-media type counts for a chat (gallery tab badges)."""
+    allowed = get_user_chat_ids(user)
+    if allowed is not None and chat_id not in allowed:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not deps.db:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        counts = await deps.db.get_media_counts(chat_id)
+        return counts
+    except Exception as e:
+        logger.error(f"Error fetching media counts: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
