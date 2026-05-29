@@ -183,8 +183,12 @@ class BackupMediaMixin:
                 os.makedirs(shared_dir, exist_ok=True)
                 shared_file_path = os.path.join(shared_dir, file_name)
 
-                # Check if file already exists (either directly or in shared)
-                if not os.path.exists(file_path):
+                # Use lexists for the chat-dir gate so an already-recorded
+                # symlink short-circuits the download even when its target is
+                # unreachable (e.g. git-annex object outside the bind mount).
+                # This keeps re-runs idempotent and never rewrites the link
+                # target on a subsequent run (issue #143).
+                if not os.path.lexists(file_path):
                     if os.path.exists(shared_file_path):
                         # File exists in shared - create symlink
                         try:
@@ -193,12 +197,21 @@ class BackupMediaMixin:
                             os.symlink(rel_path, file_path)
                             logger.debug(f"Created symlink for deduplicated media: {file_name}")
                         except OSError as e:
-                            # Symlink failed (e.g., Windows), copy reference instead
-                            logger.warning(f"Symlink failed, downloading copy: {e}")
-                            await self.client.download_media(message, file_path)
+                            # Symlink failed (e.g., Windows / unsupported FS).
+                            # The shared file already exists, so copy it into
+                            # the chat dir instead of re-downloading.
+                            logger.warning(f"Symlink failed, copying shared file: {e}")
+                            import shutil
+
+                            shutil.copy2(shared_file_path, file_path)
                     else:
-                        # First time seeing this file - download to shared and create symlink
-                        await self.client.download_media(message, shared_file_path)
+                        # First time seeing this file - download to shared and create symlink.
+                        # Capture the actual path returned by download_media: Telethon may
+                        # append an extension (e.g. .bin -> .mp4), so the symlink target must
+                        # point at the returned path, not the requested one.
+                        actual_shared_path = await self.client.download_media(message, shared_file_path)
+                        if isinstance(actual_shared_path, str) and actual_shared_path:
+                            shared_file_path = actual_shared_path
                         logger.debug(f"Downloaded media to shared: {file_name}")
 
                         # Create symlink in chat directory
@@ -217,8 +230,9 @@ class BackupMediaMixin:
                 if os.path.exists(actual_path):
                     file_size = os.path.getsize(actual_path)
             else:
-                # No deduplication - download directly to chat directory
-                if not os.path.exists(file_path):
+                # No deduplication - download directly to chat directory.
+                # lexists short-circuits when a symlink is already recorded.
+                if not os.path.lexists(file_path):
                     await self.client.download_media(message, file_path)
                     logger.debug(f"Downloaded media: {file_name}")
 
