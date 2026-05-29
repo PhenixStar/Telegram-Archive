@@ -15,7 +15,10 @@ from . import dependencies as deps
 from .dependencies import (
     AUTH_COOKIE_NAME,
     AUTH_ENABLED,
+    AUTH_PROXY_HEADER,
     AUTH_SESSION_SECONDS,
+    _PROXY_AUTH_ENABLED,
+    _resolve_proxy_user,
     UserContext,
     SessionData,
     _SA_USERNAME,
@@ -85,9 +88,26 @@ async def get_profiles():
 
 
 @router.get("/api/auth/check")
-async def check_auth(auth_cookie: str | None = Cookie(default=None, alias=AUTH_COOKIE_NAME)):
+async def check_auth(request: Request, auth_cookie: str | None = Cookie(default=None, alias=AUTH_COOKIE_NAME)):
     """Check current authentication status. Returns role and username if authenticated."""
-    if not AUTH_ENABLED:
+    # Trusted proxy header — if header present, user is authenticated by the proxy (v7.9.0)
+    if deps._PROXY_AUTH_ENABLED:
+        proxy_user = request.headers.get(deps.AUTH_PROXY_HEADER, "").strip()
+        if proxy_user:
+            try:
+                user_ctx = await deps._resolve_proxy_user(proxy_user)
+                return {
+                    "authenticated": True,
+                    "auth_required": True,
+                    "role": user_ctx.role,
+                    "username": user_ctx.username,
+                    "no_download": user_ctx.no_download,
+                    "proxy_auth": True,
+                }
+            except HTTPException:
+                return {"authenticated": False, "auth_required": True}
+
+    if not deps.AUTH_ENABLED and not deps._PROXY_AUTH_ENABLED:
         return {"authenticated": True, "auth_required": False, "role": "master", "username": "anonymous"}
 
     if not auth_cookie:

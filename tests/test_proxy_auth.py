@@ -14,14 +14,18 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(autouse=True)
 def _reset_auth_module():
-    """Reset auth module state between tests."""
-    import src.web.main as main_mod
+    """Reset auth module state between tests.
 
-    main_mod._sessions.clear()
-    main_mod._login_attempts.clear()
+    In the fork, session/rate-limit state lives in src.web.dependencies, not in
+    the monolithic main module (base layout).
+    """
+    import src.web.dependencies as deps
+
+    deps._sessions.clear()
+    deps._login_attempts.clear()
     yield
-    main_mod._sessions.clear()
-    main_mod._login_attempts.clear()
+    deps._sessions.clear()
+    deps._login_attempts.clear()
 
 
 def _make_mock_db():
@@ -36,6 +40,8 @@ def _make_mock_db():
     db.get_cached_statistics = AsyncMock(return_value={"total_chats": 2, "total_messages": 50})
     db.get_metadata = AsyncMock(return_value=None)
     db.get_viewer_by_username = AsyncMock(return_value=None)
+    # Fork login flow checks user accounts (super_admin/admin) before viewers.
+    db.get_user_by_username = AsyncMock(return_value=None)
     db.get_all_viewer_accounts = AsyncMock(return_value=[])
     db.create_viewer_account = AsyncMock(
         return_value={"id": 1, "username": "testuser", "allowed_chat_ids": "[]", "is_active": 1}
@@ -101,16 +107,46 @@ def proxy_with_basic_env():
 
 
 def _get_client(mock_db=None):
-    """Create a fresh TestClient by reloading the module with current env."""
+    """Create a fresh TestClient that picks up the current env.
+
+    Fork layout: AUTH_PROXY_* consts + auth state live in src.web.dependencies.
+    The route handlers live in src.web.routes_auth and src.web.routes_chat, and
+    the app is assembled in src.web.main. To re-read the AUTH_PROXY_* env vars
+    (read at import time) we reload dependencies first, then the route modules
+    that captured names from it, then main so the app re-registers routes bound
+    to the refreshed dependencies.
+    """
     import importlib
 
+    import src.web.dependencies as deps
+    import src.web.routes_auth as routes_auth
+    import src.web.routes_chat as routes_chat
     import src.web.main as main_mod
 
+    # 1. Re-read AUTH_PROXY_* / AUTH_ENABLED env into dependencies' module globals.
+    importlib.reload(deps)
+    # 2. Re-bind route modules so their `Depends(require_auth)` and `deps.*`
+    #    references point at the reloaded dependencies module.
+    importlib.reload(routes_auth)
+    importlib.reload(routes_chat)
+    # 3. Rebuild the app so routers are re-included with the fresh dependencies.
     importlib.reload(main_mod)
+
+    # Re-import dependencies after reloads to wire the mock db into the live module.
+    import src.web.dependencies as deps  # noqa: F811
 
     if mock_db is None:
         mock_db = _make_mock_db()
+    # Inject the mock db into the shared dependency state used by all routers.
+    # TestClient is used without lifespan here, so set_app_state never runs;
+    # wire db + config manually (config is needed by get_user_chat_ids).
+    deps.db = mock_db
+    deps.config = main_mod.config
     main_mod.db = mock_db
+
+    # State dicts are recreated on reload; ensure they start clean.
+    deps._sessions.clear()
+    deps._login_attempts.clear()
 
     return TestClient(main_mod.app, raise_server_exceptions=False), main_mod, mock_db
 
@@ -256,7 +292,9 @@ class TestProxyAuthCombinedWithBasic:
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
-        assert data["role"] == "master"
+        # Fork maps env-var credentials to "super_admin" (a superset of base's
+        # "master"); intent (privileged env login still works) is unchanged.
+        assert data["role"] == "super_admin"
 
     def test_cookie_session_works_without_proxy_header(self, proxy_with_basic_env):
         client, _, _ = _get_client()
@@ -266,7 +304,8 @@ class TestProxyAuthCombinedWithBasic:
         assert resp.status_code == 200
         data = resp.json()
         assert data["authenticated"] is True
-        assert data["role"] == "master"
+        # Fork maps env-var credentials to "super_admin" (superset of "master").
+        assert data["role"] == "super_admin"
 
 
 class TestProxyAuthSecurity:
