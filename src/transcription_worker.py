@@ -67,6 +67,9 @@ class TranscriptionWorker:
 
     async def _process_cycle(self):
         """One cycle: find voice notes needing transcription, process them."""
+        # Check global feature flag from DB (None/missing → treat as disabled)
+        if await self.db.get_setting("feature.transcription") != "true":
+            return
         cfg = await self._get_config()
         if not cfg["enabled"]:
             return

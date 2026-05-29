@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-12
 **Status:** COMPLETE
-**Plan:** /home/phenix/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/
+**Plan:** /raid/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/
 
 ---
 
@@ -211,9 +211,9 @@ GET /api/chats/{id}/messages?search=text&date_from=2026-03-01&date_to=2026-03-12
 All phases complete. All todo items checked off. All success criteria verified.
 
 Plan status updated to COMPLETE across all files:
-- `/home/phenix/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/plan.md`
-- `/home/phenix/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/phase-01-backend-forward-pagination.md`
-- `/home/phenix/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/phase-02-frontend-bidirectional-loading.md`
-- `/home/phenix/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/phase-03-advanced-search-ui.md`
+- `/raid/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/plan.md`
+- `/raid/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/phase-01-backend-forward-pagination.md`
+- `/raid/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/phase-02-frontend-bidirectional-loading.md`
+- `/raid/projects/apps/tele-private/repo/dev/plans/260312-1948-bidirectional-message-loading-advanced-search/phase-03-advanced-search-ui.md`
 
 Ready for production deployment.

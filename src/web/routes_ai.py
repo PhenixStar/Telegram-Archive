@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import time
 from datetime import datetime, timezone
 
@@ -58,6 +59,14 @@ def get_ai_config_defaults() -> dict:
         "ai.transcription.enabled": "true",
         "ai.transcription.rate_limit": "2",
         "ai.transcription.batch_size": "50",
+        "ai.translation.enabled": "true",
+        "ai.translation.target_lang": deps.config.translation_target_lang,
+        "ai.translation.rate_limit": "2",
+        "ai.translation.batch_size": "20",
+        "ai.translation.api_url": ollama_v1,
+        "ai.translation.model_name": "qwen3-next-80b",
+        "ai.translation.fallback_url": "",
+        "ai.translation.fallback_model": "",
         "ai.tts.api_url": "http://host.docker.internal:8880/v1",
         "ai.tts.model_name": "kokoro",
         "ai.vault.api_url": "http://host.docker.internal:8200",
@@ -74,6 +83,17 @@ def get_ai_config_defaults() -> dict:
             "Capabilities: summarize threads, extract topics/decisions, identify participants, "
             "analyze sentiment, search/correlate across messages, process OCR-extracted text from images."
         ),
+        # Feature flags — gate entire feature visibility (disabled by default)
+        "feature.ocr": "false",
+        "feature.translation": "false",
+        "feature.transcription": "false",
+        "feature.ai_chat": "false",
+        "feature.embedding": "false",
+        # Service startup commands (admin-configurable, run on host via subprocess)
+        "service.vision.start_cmd": "cd /raid/models/vision/glm-ocr && python3.10 serve.py --port 8081 --device cuda:1",
+        "service.transcription.start_cmd": "",
+        "service.tts.start_cmd": "",
+        "service.embedding.start_cmd": "",
     }
 
 
@@ -391,10 +411,18 @@ async def ai_config_endpoint(user: UserContext = Depends(require_auth)):
     """Return AI configuration status (no secrets exposed to non-admins)."""
     all_settings = await deps.db.get_all_settings()
     ai_keys = {k: v for k, v in all_settings.items() if k.startswith("ai.")}
+    features = {
+        "ocr": all_settings.get("feature.ocr", "false") == "true",
+        "translation": all_settings.get("feature.translation", "false") == "true",
+        "transcription": all_settings.get("feature.transcription", "false") == "true",
+        "ai_chat": all_settings.get("feature.ai_chat", "false") == "true",
+        "embedding": all_settings.get("feature.embedding", "false") == "true",
+    }
     if getattr(user, "role", None) != "master":
         return {
             "enabled": bool(ai_keys.get("ai.chat.api_url") or deps.config.ai_api_key),
             "model": ai_keys.get("ai.chat.model_name", deps.config.ai_model),
+            "features": features,
         }
 
     def _section(prefix):
@@ -407,6 +435,7 @@ async def ai_config_endpoint(user: UserContext = Depends(require_auth)):
             "fallback_model": ai_keys.get(f"{prefix}.fallback_model", ""),
         }
     return {
+        "features": features,
         "vision": _section("ai.vision"),
         "chat": _section("ai.chat"),
         "embedding": {
@@ -423,12 +452,28 @@ async def ai_config_endpoint(user: UserContext = Depends(require_auth)):
             "rate_limit": ai_keys.get("ai.transcription.rate_limit", "2"),
             "batch_size": ai_keys.get("ai.transcription.batch_size", "50"),
         },
+        "translation": {
+            "api_url": ai_keys.get("ai.translation.api_url", ""),
+            "model_name": ai_keys.get("ai.translation.model_name", ""),
+            "target_lang": ai_keys.get("ai.translation.target_lang", "en"),
+            "enabled": ai_keys.get("ai.translation.enabled", "true") == "true",
+            "rate_limit": ai_keys.get("ai.translation.rate_limit", "2"),
+            "batch_size": ai_keys.get("ai.translation.batch_size", "20"),
+            "fallback_url": ai_keys.get("ai.translation.fallback_url", ""),
+            "fallback_model": ai_keys.get("ai.translation.fallback_model", ""),
+        },
         "vault": {
             "api_url": ai_keys.get("ai.vault.api_url", ""),
             "api_token_set": bool(ai_keys.get("ai.vault.api_token", "")),
             "enabled": ai_keys.get("ai.vault.enabled", "false") == "true",
         },
         "system_prompt": ai_keys.get("ai.system_prompt", ""),
+        "services": {
+            "vision": {"start_cmd": all_settings.get("service.vision.start_cmd", "")},
+            "transcription": {"start_cmd": all_settings.get("service.transcription.start_cmd", "")},
+            "tts": {"start_cmd": all_settings.get("service.tts.start_cmd", "")},
+            "embedding": {"start_cmd": all_settings.get("service.embedding.start_cmd", "")},
+        },
     }
 
 
@@ -436,11 +481,44 @@ async def ai_config_endpoint(user: UserContext = Depends(require_auth)):
 async def update_ai_config(request: Request, user: UserContext = Depends(require_master)):
     """Bulk update AI configuration settings (admin only)."""
     body = await request.json()
-    allowed_prefixes = ("ai.vision.", "ai.chat.", "ai.embedding.", "ai.tts.", "ai.transcription.", "ai.vault.", "ai.system_prompt")
+    allowed_prefixes = ("ai.vision.", "ai.chat.", "ai.embedding.", "ai.tts.", "ai.transcription.", "ai.translation.", "ai.vault.", "ai.system_prompt", "feature.", "service.")
     for key, value in body.items():
         if not any(key.startswith(p) or key == p for p in allowed_prefixes):
             continue
         await deps.db.set_setting(key, str(value))
+    return {"status": "ok"}
+
+
+FEATURE_FLAG_KEYS = ("ocr", "translation", "transcription", "ai_chat", "embedding")
+
+
+@router.put("/api/admin/features")
+async def toggle_features(request: Request, user: UserContext = Depends(require_master)):
+    """Toggle advanced feature flags (admin only). Also starts/stops workers."""
+    body = await request.json()
+    for key in FEATURE_FLAG_KEYS:
+        if key in body:
+            await deps.db.set_setting(f"feature.{key}", "true" if body[key] else "false")
+
+    # Dynamic worker start/stop (best-effort — workers also check flags each cycle)
+    worker_map = {
+        "ocr": "ocr_worker",
+        "translation": "translation_worker",
+        "transcription": "transcription_worker",
+        "embedding": "embedding_worker",
+    }
+    app = request.app
+    for key, attr in worker_map.items():
+        if key not in body:
+            continue
+        worker = getattr(app.state, attr, None)
+        if body[key] and worker and not worker._running:
+            await worker.start()
+            logger.info("Worker %s started via feature toggle", attr)
+        elif not body[key] and worker and worker._running:
+            await worker.stop()
+            logger.info("Worker %s stopped via feature toggle", attr)
+
     return {"status": "ok"}
 
 
@@ -481,6 +559,69 @@ async def test_ai_connection(request: Request, user: UserContext = Depends(requi
                 return {"status": "error", "message": "Endpoint unreachable"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:200]}
+
+
+ALLOWED_SERVICE_SECTIONS = ("vision", "transcription", "tts", "embedding")
+
+
+@router.post("/api/admin/ai-service/start")
+async def start_ai_service(request: Request, user: UserContext = Depends(require_master)):
+    """Start an AI service using its configured start_cmd (admin only).
+
+    Runs the command as a detached background process on the host.
+    """
+    body = await request.json()
+    section = body.get("section", "")
+    if section not in ALLOWED_SERVICE_SECTIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid section: {section}")
+
+    key = f"service.{section}.start_cmd"
+    cmd = await deps.db.get_setting(key)
+    if not cmd or not cmd.strip():
+        return {"status": "error", "message": f"No start command configured for {section}"}
+
+    try:
+        # Run as detached background process (nohup + disown equivalent)
+        proc = await asyncio.create_subprocess_shell(
+            f"nohup {cmd} > /tmp/service-{section}.log 2>&1 &",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        logger.info("Service %s started via admin: %s", section, cmd[:100])
+        return {"status": "ok", "message": f"Service {section} starting...", "log": f"/tmp/service-{section}.log"}
+    except Exception as e:
+        logger.error("Failed to start service %s: %s", section, e)
+        return {"status": "error", "message": str(e)[:200]}
+
+
+@router.post("/api/admin/ai-service/check")
+async def check_ai_service(request: Request, user: UserContext = Depends(require_master)):
+    """Check if an AI service process is running by testing its API URL."""
+    body = await request.json()
+    section = body.get("section", "")
+    if section not in ALLOWED_SERVICE_SECTIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid section: {section}")
+
+    # Get the API URL for this section from settings
+    all_settings = await deps.db.get_all_settings()
+    url_key = f"ai.{section}.api_url"
+    api_url = all_settings.get(url_key, "").rstrip("/")
+    if not api_url:
+        return {"status": "unknown", "message": "No API URL configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            for path in [f"{api_url}/models", f"{api_url.rsplit('/v1', 1)[0]}/health"]:
+                try:
+                    resp = await client.get(path)
+                    if resp.status_code < 500:
+                        return {"status": "running", "message": f"Service reachable ({resp.status_code})"}
+                except Exception:
+                    continue
+        return {"status": "stopped", "message": "Service not reachable"}
+    except Exception as e:
+        return {"status": "stopped", "message": str(e)[:100]}
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +715,22 @@ async def update_ai_profile(profile_id: str, request: Request, user: UserContext
                 p["icon"] = body["icon"]
             if "config" in body:
                 p["config"] = body["config"]
+            await _save_profiles(profiles)
+            return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="Profile not found")
+
+
+@router.patch("/api/admin/ai-profiles/{profile_id}")
+async def update_ai_profile(profile_id: str, request: Request, user: UserContext = Depends(require_master)):
+    """Update profile name or icon."""
+    body = await request.json()
+    profiles = await _load_profiles()
+    for p in profiles:
+        if p["id"] == profile_id:
+            if "name" in body:
+                p["name"] = body["name"]
+            if "icon" in body:
+                p["icon"] = body["icon"]
             await _save_profiles(profiles)
             return {"status": "ok"}
     raise HTTPException(status_code=404, detail="Profile not found")

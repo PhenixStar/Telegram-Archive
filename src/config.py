@@ -280,6 +280,20 @@ class Config:
         # Worker poll interval in seconds (how often to check for pending work)
         self.ocr_poll_interval = int(os.getenv("OCR_POLL_INTERVAL", "60"))
 
+        # =====================================================================
+        # TRANSLATION CONFIGURATION
+        # =====================================================================
+        # Global kill switch — overrides per-chat toggles
+        self.translation_enabled = os.getenv("TRANSLATION_ENABLED", "true").lower() == "true"
+        # Rate limit: max messages translated per second
+        self.translation_rate_limit = float(os.getenv("TRANSLATION_RATE_LIMIT", "0.5"))
+        # Batch size per worker cycle
+        self.translation_batch_size = int(os.getenv("TRANSLATION_BATCH_SIZE", "20"))
+        # Worker poll interval in seconds
+        self.translation_poll_interval = int(os.getenv("TRANSLATION_POLL_INTERVAL", "60"))
+        # Default target language
+        self.translation_target_lang = os.getenv("TRANSLATION_TARGET_LANG", "en")
+
         # Stats calculation schedule
         # Daily calculation of statistics (chat counts, message counts, etc.)
         # Default: 03:00 (3am) in the configured viewer timezone

@@ -1,0 +1,67 @@
+<!-- Telegram Web App A Version - Saved as design reference for mobile UI -->
+<!-- Source: web.telegram.org/a (dark theme, purple accent #8774e1) -->
+<!-- Key CSS Variables and Design Patterns extracted below -->
+
+<!--
+DESIGN TOKENS (from HTML root):
+- Primary: rgb(135,116,225) / #8774e1
+- Background: rgb(33,33,33) / #212121
+- Background Secondary: rgb(15,15,15) / #0f0f0f
+- Background Sidebar: rgb(15,15,15)
+- Background Own Message: rgb(118,106,200) / #766ac8
+- Chat Hover: rgb(44,44,44) / #2c2c2c
+- Chat Active: rgb(118,106,200)
+- Text: rgb(255,255,255)
+- Text Secondary: rgb(170,170,170) / #aaaaaa
+- Borders: rgb(48,48,48) / #303030
+- Dividers: rgb(59,59,61) / #3b3b3d
+- Links: rgb(135,116,225)
+- Scrollbar Width: 10px
+- Message Text Size: 16px
+
+MOBILE VIEWPORT META:
+- width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no
+- shrink-to-fit=no, viewport-fit=cover
+- apple-mobile-web-app-capable: yes
+
+LAYOUT PATTERNS:
+- Left column: 366px width (CSS var --left-column-width)
+- Chat list items: 72px height each
+- Avatar size: 54px in chat list, 40px in header
+- Online indicator: small green dot badge
+- Story circle: canvas overlay on avatar
+- Message meta (time): right-aligned
+- Unread badge: round pill with count
+- Pin icon: for pinned chats
+- Draft label: orange "Draft:" prefix
+
+UI COMPONENTS:
+- SearchInput: text input with icon containers left/right
+- TabList: horizontal scrollable tabs (All, folders)
+- ChatList: virtual-scrolled list with absolute positioning (top: Npx)
+- ListItem: 72px row with avatar + info + meta
+- DropdownMenu: slide-down menu with menu items
+- Avatar: circular with peer-color classes, letters fallback, online badge
+- Badge: unread count pill, mention badge, pinned icon
+
+TYPOGRAPHY:
+- Chat name: h3.fullName, bold, truncate
+- Last message: p.last-message, muted color
+- Time: span.time, small text
+- Sender name: span.sender-name, bold
+
+ANIMATION:
+- opacity-transition fast/slow
+- Transition_slide / Transition_slide-active
+- animated-menu-icon (hamburger)
+- AnimatedSticker (Lottie canvas)
+
+PEER COLORS (7 base + 14 extended):
+0: #D45246 (red)
+1: #F68136 (orange)
+2: #6C61DF (purple)
+3: #46BA43 (green)
+4: #5CAFFA (light blue)
+5: #408ACF (blue)
+6: #D95574 (pink)
+-->

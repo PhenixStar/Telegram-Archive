@@ -1,7 +1,7 @@
 # Project Completion Report: In-Chat Search UX Improvements
 
 **Date:** 2026-03-18
-**Plan:** `/home/phenix/projects/tele-private/repo/dev/plans/260318-1345-chat-search-ux/`
+**Plan:** `/raid/projects/tele-private/repo/dev/plans/260318-1345-chat-search-ux/`
 **Status:** ✅ COMPLETE
 
 ---

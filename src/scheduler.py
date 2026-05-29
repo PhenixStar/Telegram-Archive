@@ -83,8 +83,8 @@ class BackupScheduler:
         try:
             from .db.base import DatabaseManager
             from .db.adapter import DatabaseAdapter
-            db_manager = DatabaseManager(self.config)
-            await db_manager.initialize()
+            db_manager = DatabaseManager()
+            await db_manager.init()
             self._db = DatabaseAdapter(db_manager)
             logger.info("DB adapter initialized for settings polling")
         except Exception as e:

@@ -77,6 +77,9 @@ class EmbeddingWorker:
 
     async def _process_cycle(self):
         """One cycle: find enabled chats, embed pending messages."""
+        # Check global feature flag from DB (None/missing → treat as disabled)
+        if await self.db.get_setting("feature.embedding") != "true":
+            return
         enabled_chats = await self._get_enabled_chats()
         if not enabled_chats:
             return

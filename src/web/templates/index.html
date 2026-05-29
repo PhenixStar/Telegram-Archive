@@ -1580,11 +1580,12 @@
                                         class="bg-gray-900 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none w-[120px]"
                                         title="To date">
                                     <!-- Confirm: greyed when empty, green when dates present -->
-                                    <button @click="searchMessages"
+                                    <!-- If no search term: jump to start date. If search term: filter search results by date range -->
+                                    <button @click="applyDateFilter"
                                         :disabled="!searchDateFrom && !searchDateTo"
                                         :class="(searchDateFrom || searchDateTo) ? 'text-green-400 hover:text-green-300' : 'text-gray-600 cursor-not-allowed'"
-                                        class="p-1 rounded transition-colors" title="Apply date filter">
-                                        <i class="fas fa-check text-xs"></i>
+                                        class="p-1 rounded transition-colors" :title="messageSearchQuery ? 'Filter by date range' : 'Jump to date'">
+                                        <i :class="messageSearchQuery ? 'fas fa-check' : 'fas fa-arrow-right'" class="text-xs"></i>
                                     </button>
                                     <!-- Clear dates -->
                                     <button v-if="searchDateFrom || searchDateTo"
@@ -1638,7 +1639,7 @@
                             </div>
 
                             <!-- AI Panel Toggle (mobile only — desktop uses dock strip) -->
-                            <button @click="showAiPanel = !showAiPanel"
+                            <button v-if="advancedFeatures.ai_chat" @click="showAiPanel = !showAiPanel"
                                 class="md:hidden p-1.5 sm:p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0"
                                 :style="showAiPanel ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
                                 title="AI Assistant">
@@ -1734,7 +1735,8 @@
                     <!-- Media Panel: moved to right dock canvas -->
 
                     <!-- Profile Sidebar (Phase 6) -->
-                    <div v-if="showProfilePanel" class="absolute inset-y-0 right-0 w-80 md:w-80 z-30 flex flex-col border-l overflow-y-auto profile-sidebar-mobile" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
+                    <!-- Profile panel: now in right dock (profile mode) -->
+                    <div v-if="showProfilePanel && !rightDockOpen" class="absolute inset-y-0 right-0 w-80 md:w-80 z-30 flex flex-col border-l overflow-y-auto profile-sidebar-mobile" style="background: var(--tg-sidebar); border-color: var(--tg-border);">
                         <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
                             <button @click="showProfilePanel = false" class="text-tg-muted hover:text-white"><i class="fas fa-times"></i></button>
                             <span class="font-semibold text-white text-sm">Profile</span>
@@ -1775,8 +1777,8 @@
                                 <i class="fab fa-telegram w-5 text-center text-tg-muted"></i> Open in Telegram
                             </button>
                         </div>
-                        <!-- OCR Controls (admin or above) -->
-                        <div v-if="isMasterOrAbove && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                        <!-- OCR Controls (admin or above, gated by feature flag) -->
+                        <div v-if="isMasterOrAbove && selectedChat && advancedFeatures.ocr" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
                             <div class="text-xs text-tg-muted mb-1">AI Features</div>
                             <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
                                 <div class="flex items-center gap-2 text-sm text-gray-300">
@@ -1808,8 +1810,31 @@
                                 </div>
                             </div>
                         </div>
-                        <!-- Semantic Search Embeddings (admin or above) -->
-                        <div v-if="isMasterOrAbove && selectedChat" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                        <!-- Translation Controls (admin or above, gated by feature flag) -->
+                        <div v-if="isMasterOrAbove && selectedChat && advancedFeatures.translation" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                            <div class="text-xs text-tg-muted mb-1">Translation</div>
+                            <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
+                                <div class="flex items-center gap-2 text-sm text-gray-300">
+                                    <i class="fas fa-language w-5 text-center text-tg-muted"></i>
+                                    <span>Auto Translate</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" :checked="chatTranslationEnabled" @change="toggleChatTranslation" class="sr-only peer">
+                                    <div class="w-9 h-5 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" :style="{ background: chatTranslationEnabled ? 'var(--tg-accent)' : 'var(--tg-border)' }"></div>
+                                </label>
+                            </div>
+                            <div v-if="chatTranslationEnabled && translationProgress" class="px-3 py-1">
+                                <div class="flex justify-between text-xs text-tg-muted mb-1">
+                                    <span>Translation Progress</span>
+                                    <span>{{ translationProgress.processed }}/{{ translationProgress.total }}</span>
+                                </div>
+                                <div class="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div class="h-1.5 rounded-full transition-all" :style="{ width: (translationProgress.total > 0 ? Math.round(translationProgress.processed / translationProgress.total * 100) : 0) + '%', background: 'var(--tg-accent)' }"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Semantic Search Embeddings (admin or above, gated by feature flag) -->
+                        <div v-if="isMasterOrAbove && selectedChat && advancedFeatures.embedding" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
                             <div class="text-xs text-tg-muted mb-1">Semantic Search</div>
                             <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
                                 <div class="flex items-center gap-2 text-sm text-gray-300">
@@ -2240,12 +2265,13 @@
                                         </div>
                                     </div>
 
-                                    <!-- OCR text extracted from image -->
-                                    <div v-if="msg.ocr_text" class="mt-1.5 px-2 py-1.5 rounded text-xs" style="background: var(--tg-hover); border-left: 2px solid var(--tg-accent);">
+                                    <!-- Enrichment text: OCR / Translation -->
+                                    <div v-if="msg.ocr_text && !msg.ocr_text.startsWith('[Translation') || (msg.ocr_text && msg.ocr_text.startsWith('[Translation') && !msg.ocr_text.endsWith('≡'))" class="mt-1.5 px-2 py-1.5 rounded text-xs" style="background: var(--tg-hover); border-left: 2px solid var(--tg-accent);">
                                         <div class="flex items-center gap-1 mb-0.5" style="color: var(--tg-accent);">
-                                            <i class="fas fa-eye text-[10px]"></i><span class="font-medium">OCR</span>
+                                            <i :class="msg.ocr_text.startsWith('[Translation') ? 'fas fa-language' : 'fas fa-eye'" class="text-[10px]"></i>
+                                            <span class="font-medium">{{ msg.ocr_text.startsWith('[Translation') ? 'Translation' : 'OCR' }}</span>
                                         </div>
-                                        <div style="color: var(--tg-muted);">{{ msg.ocr_text }}</div>
+                                        <div style="color: var(--tg-muted);">{{ msg.ocr_text.replace(/^\[Translation → \w+\]\s*/, '').replace(/^\[Voice.*?\]\s*/, '') }}</div>
                                     </div>
 
                                     <!-- AI annotation -->
@@ -2328,6 +2354,13 @@
             <div v-if="selectedChat" class="hidden md:flex flex-col shrink-0 border-l items-center py-2 gap-1"
                 role="toolbar" aria-label="Tool strip"
                 style="width: 48px; background: var(--tg-sidebar); border-color: var(--tg-border);">
+                <button @click="onToolClick('profile')"
+                    class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+                    :style="rightDockOpen && rightDockMode === 'profile' ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
+                    :aria-pressed="rightDockOpen && rightDockMode === 'profile'"
+                    title="Chat Info">
+                    <i class="fas fa-info-circle"></i>
+                </button>
                 <button @click="onToolClick('timeline')"
                     class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
                     :style="rightDockOpen && rightDockMode === 'timeline' ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
@@ -2360,7 +2393,7 @@
                         </button>
                     </div>
                 </div>
-                <button @click="onToolClick('ai')"
+                <button v-if="advancedFeatures.ai_chat" @click="onToolClick('ai')"
                     class="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
                     :style="rightDockOpen && rightDockMode === 'ai' ? 'color: var(--tg-accent);' : 'color: var(--tg-muted);'"
                     :aria-pressed="rightDockOpen && rightDockMode === 'ai'"
@@ -2521,6 +2554,127 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </template>
+
+                <!-- === PROFILE MODE === -->
+                <template v-else-if="rightDockMode === 'profile'">
+                    <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--tg-border);">
+                        <button @click="rightDockOpen = false" class="text-tg-muted hover:text-white" aria-label="Close panel"><i class="fas fa-times"></i></button>
+                        <span class="font-semibold text-white text-sm flex-1">Chat Info</span>
+                    </div>
+                    <div class="flex-1 overflow-y-auto">
+                        <div class="flex flex-col items-center py-6 px-4">
+                            <div class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white"
+                                :style="{ background: PEER_COLORS[getSenderColor({sender_id: selectedChat.id})] }">
+                                {{ getInitials(selectedChat) }}
+                            </div>
+                            <div class="mt-3 text-lg font-semibold text-white">{{ getChatName(selectedChat) }}</div>
+                            <div v-if="selectedChat.username" class="text-sm text-blue-400">@{{ selectedChat.username }}</div>
+                            <div class="text-xs text-tg-muted mt-1">{{ selectedChat.type }}</div>
+                        </div>
+                        <div v-if="chatStats" class="flex justify-around px-4 py-3 border-t border-b" style="border-color: var(--tg-border);">
+                            <div class="text-center">
+                                <div class="text-lg font-bold text-white">{{ chatStats.messages?.toLocaleString() }}</div>
+                                <div class="text-xs text-tg-muted">Messages</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="text-lg font-bold text-white">{{ chatStats.media_files?.toLocaleString() }}</div>
+                                <div class="text-xs text-tg-muted">Media</div>
+                            </div>
+                            <div v-if="chatStats.total_size_mb > 0" class="text-center">
+                                <div class="text-lg font-bold text-white">{{ formatSize(chatStats.total_size_mb) }}</div>
+                                <div class="text-xs text-tg-muted">Storage</div>
+                            </div>
+                            <div v-if="selectedChat.member_count" class="text-center">
+                                <div class="text-lg font-bold text-white">{{ selectedChat.member_count }}</div>
+                                <div class="text-xs text-tg-muted">Members</div>
+                            </div>
+                        </div>
+                        <div class="px-4 py-2 space-y-1">
+                            <button @click="onToolClick('media')" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 text-sm text-gray-300">
+                                <i class="fas fa-photo-video w-5 text-center text-tg-muted"></i> Shared Media
+                            </button>
+                            <button v-if="selectedChat.username" @click="window.open(`https://t.me/${selectedChat.username}`, '_blank')"
+                                class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 text-sm text-gray-300">
+                                <i class="fab fa-telegram w-5 text-center text-tg-muted"></i> Open in Telegram
+                            </button>
+                        </div>
+                        <!-- AI Features (admin or above, gated by feature flags) -->
+                        <div v-if="isMasterOrAbove && selectedChat && (advancedFeatures.ocr || advancedFeatures.translation || advancedFeatures.embedding)" class="px-4 py-2 space-y-2 border-t" style="border-color: var(--tg-border);">
+                            <div class="text-xs text-tg-muted mb-1">AI Features</div>
+                            <template v-if="advancedFeatures.ocr">
+                            <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
+                                <div class="flex items-center gap-2 text-sm text-gray-300">
+                                    <i class="fas fa-eye w-5 text-center text-tg-muted"></i>
+                                    <span>OCR Scan</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" :checked="chatOcrEnabled" @change="toggleChatOcr" class="sr-only peer">
+                                    <div class="w-9 h-5 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" :style="{ background: chatOcrEnabled ? 'var(--tg-accent)' : 'var(--tg-border)' }"></div>
+                                </label>
+                            </div>
+                            <div v-if="chatOcrEnabled && ocrProgress" class="px-3 py-1">
+                                <div class="flex justify-between text-xs text-tg-muted mb-1">
+                                    <span>OCR Progress</span>
+                                    <span>{{ ocrProgress.processed }}/{{ ocrProgress.total }}</span>
+                                </div>
+                                <div class="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div class="h-1.5 rounded-full transition-all" :style="{ width: ocrProgressPercent + '%', background: 'var(--tg-accent)' }"></div>
+                                </div>
+                            </div>
+                            </template>
+                            <template v-if="advancedFeatures.translation">
+                            <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
+                                <div class="flex items-center gap-2 text-sm text-gray-300">
+                                    <i class="fas fa-language w-5 text-center text-tg-muted"></i>
+                                    <span>Auto Translate</span>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" :checked="chatTranslationEnabled" @change="toggleChatTranslation" class="sr-only peer">
+                                    <div class="w-9 h-5 rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" :style="{ background: chatTranslationEnabled ? 'var(--tg-accent)' : 'var(--tg-border)' }"></div>
+                                </label>
+                            </div>
+                            <div v-if="chatTranslationEnabled && translationProgress" class="px-3 py-1">
+                                <div class="flex justify-between text-xs text-tg-muted mb-1">
+                                    <span>Translation</span>
+                                    <span>{{ translationProgress.processed }}/{{ translationProgress.total }}</span>
+                                </div>
+                                <div class="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div class="h-1.5 rounded-full transition-all" :style="{ width: (translationProgress.total > 0 ? Math.round(translationProgress.processed / translationProgress.total * 100) : 0) + '%', background: 'var(--tg-accent)' }"></div>
+                                </div>
+                            </div>
+                            </template>
+                            <template v-if="advancedFeatures.embedding">
+                            <div class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5">
+                                <div class="flex items-center gap-2 text-sm text-gray-300">
+                                    <i class="fas fa-brain w-5 text-center text-tg-muted"></i>
+                                    <span>Embeddings</span>
+                                </div>
+                                <span class="text-xs" style="color: var(--tg-muted);">{{ embeddingStats.embedded }}/{{ embeddingStats.total }}</span>
+                            </div>
+                            <div v-if="embeddingStats.total > 0" class="px-3 py-1">
+                                <div class="w-full bg-gray-700 rounded-full h-1.5">
+                                    <div class="h-1.5 rounded-full transition-all" style="background: var(--tg-accent);" :style="{ width: (embeddingStats.total > 0 ? Math.round(embeddingStats.embedded / embeddingStats.total * 100) : 0) + '%' }"></div>
+                                </div>
+                            </div>
+                            </template>
+                        </div>
+                        <!-- Members -->
+                        <div v-if="isGroup && profileMembers.length > 0" class="px-4 py-3 border-t" style="border-color: var(--tg-border);">
+                            <div class="text-xs text-tg-muted mb-2">Members ({{ profileMembers.length }})</div>
+                            <div class="space-y-1 max-h-64 overflow-y-auto">
+                                <div v-for="member in profileMembers" :key="member.sender_id" class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 text-sm">
+                                    <div class="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
+                                        :style="{ background: PEER_COLORS[getSenderColor({sender_id: member.sender_id})] }">
+                                        {{ (member.name || '?')[0] }}
+                                    </div>
+                                    <div class="flex-1 min-w-0"><div class="text-white truncate">{{ member.name }}</div></div>
+                                    <div class="text-xs text-tg-muted">{{ member.message_count }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-else-if="isGroup && profileMembersLoading" class="flex justify-center py-4"><div class="loading-spinner"></div></div>
                     </div>
                 </template>
             </div>
@@ -2817,6 +2971,36 @@
                                 </label>
                             </div>
                         </div>
+                        <!-- Advanced Features (admin only) -->
+                        <div v-if="isMasterOrAbove" class="mt-4 pt-4 border-t" style="border-color: var(--tg-border);">
+                            <div class="text-xs font-medium mb-2" style="color: var(--tg-muted);">Advanced Features</div>
+                            <div class="space-y-1">
+                                <div v-for="feat in [
+                                    {id:'ocr', label:'OCR (Image Text)', icon:'fa-eye'},
+                                    {id:'translation', label:'Auto Translation', icon:'fa-language'},
+                                    {id:'transcription', label:'Voice Transcription', icon:'fa-microphone-alt'},
+                                    {id:'ai_chat', label:'AI Assistant', icon:'fa-robot'},
+                                    {id:'embedding', label:'Semantic Search', icon:'fa-search'}
+                                ]" :key="feat.id" class="flex items-center justify-between px-3 py-2 rounded-lg"
+                                    style="background: var(--tg-bg);">
+                                    <div class="flex items-center gap-2 text-sm" style="color: var(--tg-text);">
+                                        <i :class="'fas ' + feat.icon" class="w-5 text-center" style="color: var(--tg-muted);"></i>
+                                        <span>{{ feat.label }}</span>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" :checked="advancedFeatures[feat.id]"
+                                            @change="toggleAdvancedFeature(feat.id)" class="sr-only peer">
+                                        <div class="w-8 h-4 rounded-full peer transition-colors"
+                                            :style="{ background: advancedFeatures[feat.id] ? 'var(--tg-accent)' : 'var(--tg-border)' }"></div>
+                                        <div class="absolute left-0.5 top-0.5 w-3 h-3 rounded-full bg-white transition-transform"
+                                            :class="advancedFeatures[feat.id] ? 'translate-x-4' : ''"></div>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="text-[10px] mt-2" style="color: var(--tg-muted);">
+                                Enable to show admin config and start background workers. Disabling preserves all data.
+                            </div>
+                        </div>
                         <div class="text-[10px] pt-2 mt-2 border-t" style="color: var(--tg-muted); border-color: var(--tg-border);">
                             Settings saved per-browser via localStorage.
                         </div>
@@ -2917,9 +3101,8 @@
                             <button v-if="isMasterOrAbove" @click="adminActiveTab = 'ai-models'; loadAiConfig(); loadTranscriptionProgress()" :class="adminActiveTab === 'ai-models' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'ai-models' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 AI Models
                             </button>
-                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'listener'; loadListenerStatus()" :class="adminActiveTab === 'listener' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'listener' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
-                                Listener
-                            </button>
+                            <!-- Listener tab hidden — feature not yet operational -->
+                            <button v-if="false" @click="adminActiveTab = 'listener'; loadListenerStatus()" class="hidden">Listener</button>
                             <button v-if="isMasterOrAbove" @click="adminActiveTab = 'backup'; loadBackupConfig(); loadStats()" :class="adminActiveTab === 'backup' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'backup' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Backup
                             </button>
@@ -2935,30 +3118,47 @@
                         </div>
                         <!-- AI Models Tab (admin only) -->
                         <div v-if="adminActiveTab === 'ai-models'" class="space-y-4">
-                            <!-- Profile Selector -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">AI Profile</div>
-                                    <button @click="saveCurrentAsProfile()" class="text-xs px-2.5 py-1 rounded-lg transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-plus mr-1"></i>Save Current
+                            <!-- Saved Presets -->
+                            <div class="rounded-xl p-3" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="text-xs uppercase tracking-wider font-semibold" style="color: var(--tg-muted);">Saved Presets</div>
+                                    <button @click="profileCreateOpen = !profileCreateOpen" class="text-[10px] px-2 py-0.5 rounded transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
+                                        <i :class="profileCreateOpen ? 'fas fa-times' : 'fas fa-plus'" class="mr-0.5"></i>{{ profileCreateOpen ? 'Cancel' : 'New Preset' }}
                                     </button>
                                 </div>
-                                <div class="flex flex-wrap gap-2">
-                                    <button v-for="p in aiProfiles" :key="p.id"
-                                        @click="activateAiProfile(p.id)"
-                                        class="group relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all"
-                                        :style="aiActiveProfileId === p.id
-                                            ? 'background: var(--tg-accent); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15);'
-                                            : 'background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);'">
-                                        <i :class="'fas fa-' + (p.icon || 'sliders-h')" class="text-xs"></i>
-                                        <span>{{ p.name }}</span>
-                                        <span v-if="aiActiveProfileId === p.id" class="ml-1 text-[10px] opacity-70">Active</span>
-                                        <button @click.stop="deleteAiProfile(p.id, p.name)" class="ml-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 text-xs transition-opacity" title="Delete profile">
+                                <!-- Inline create form -->
+                                <div v-if="profileCreateOpen" class="mb-3 p-2 rounded-lg space-y-2" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
+                                    <div class="flex gap-2">
+                                        <select v-model="profileCreateIcon" class="text-xs rounded px-2 py-1.5 w-20 outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <option v-for="ic in profileIconOptions" :key="ic" :value="ic">{{ ic }}</option>
+                                        </select>
+                                        <input v-model="profileCreateName" @keyup.enter="saveCurrentAsProfile(profileCreateName)" placeholder="Preset name" class="flex-1 text-xs rounded px-2 py-1.5 outline-none" style="background: var(--tg-bg); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <button @click="saveCurrentAsProfile(profileCreateName)" :disabled="!profileCreateName.trim()" class="text-[10px] px-2 py-1 rounded font-medium disabled:opacity-40" style="background: var(--tg-accent); color: #fff;">
+                                            Save
+                                        </button>
+                                    </div>
+                                    <div class="flex gap-1 flex-wrap">
+                                        <button v-for="ic in profileIconOptions" :key="ic" @click="profileCreateIcon = ic"
+                                            class="w-7 h-7 rounded flex items-center justify-center text-xs transition-colors"
+                                            :style="profileCreateIcon === ic ? 'background: var(--tg-accent); color: #fff;' : 'color: var(--tg-muted); background: var(--tg-bg);'">
+                                            <i :class="'fas fa-' + ic"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <!-- Preset list -->
+                                <div class="flex flex-wrap gap-1.5">
+                                    <span v-for="p in aiProfiles" :key="p.id"
+                                        class="group relative inline-flex items-center gap-1 px-2 py-1 rounded text-xs transition-all cursor-default"
+                                        style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <i :class="'fas fa-' + (p.icon || 'sliders-h')" class="text-[10px]" style="color: var(--tg-muted);"></i>
+                                        <span @dblclick="renameAiProfile(p)" class="select-none" title="Double-click to rename">{{ p.name }}</span>
+                                        <button @click.stop="deleteAiProfile(p.id, p.name)" class="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[10px] transition-opacity" title="Delete preset">
                                             <i class="fas fa-times"></i>
                                         </button>
-                                    </button>
-                                    <span v-if="!aiProfiles.length" class="text-xs" style="color: var(--tg-muted);">No profiles saved</span>
+                                    </span>
+                                    <span v-if="!aiProfiles.length" class="text-[10px]" style="color: var(--tg-muted);">No presets yet. Click "New Preset" to save current config.</span>
                                 </div>
+                                <div class="text-[10px] mt-2" style="color: var(--tg-muted);">Select a preset per subsection below, or use Custom for manual config.</div>
                             </div>
 
                             <div class="flex items-center justify-between">
@@ -2970,108 +3170,164 @@
                                 </button>
                             </div>
 
+                            <!-- No features enabled -->
+                            <div v-if="!advancedFeatures.ocr && !advancedFeatures.translation && !advancedFeatures.transcription && !advancedFeatures.ai_chat && !advancedFeatures.embedding"
+                                class="text-center py-8">
+                                <i class="fas fa-toggle-off text-3xl mb-2" style="color: var(--tg-muted);"></i>
+                                <div class="text-sm" style="color: var(--tg-muted);">No advanced features enabled</div>
+                                <div class="text-xs mt-1" style="color: var(--tg-muted);">Enable features in Settings &rarr; General &rarr; Advanced Features</div>
+                            </div>
+
                             <!-- Vision / OCR -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                                <div class="flex items-center justify-between mb-3">
+                            <div v-if="advancedFeatures.ocr" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
                                         <i class="fas fa-eye text-blue-400 text-sm"></i>
                                         <span class="text-sm font-medium" style="color: var(--tg-text);">Vision / OCR</span>
-                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">Required for OCR</span>
                                     </div>
-                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.vision === 'ok' ? 'background:#22c55e' : aiConfigStatus.vision === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    <div class="flex items-center gap-2">
+                                        <select v-model="aiSectionProfile.vision" @change="applySectionProfile('vision'); aiConfigDirty = true" class="text-[11px] rounded px-1.5 py-0.5 outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <option value="custom">Custom</option>
+                                            <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                                        </select>
+                                        <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.vision === 'ok' ? 'background:#22c55e' : aiConfigStatus.vision === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    </div>
                                 </div>
                                 <div class="space-y-2">
                                     <select v-model="aiConfig.vision.provider" @change="aiConfigDirty = true" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                         <option value="local">Local Model</option>
                                         <option value="external">External API</option>
                                     </select>
-                                    <input v-model="aiConfig.vision.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8080/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                    <input v-if="aiConfig.vision.provider === 'external'" v-model="aiConfig.vision.api_key" @input="aiConfigDirty = true" type="password" placeholder="API Key" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.vision.api_url" @input="aiConfigDirty = true" placeholder="e.g. http://host.docker.internal:11434/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <div v-if="aiConfig.vision.provider === 'external'" class="relative">
+                                        <input v-model="aiConfig.vision.api_key" @input="aiConfigDirty = true" :type="showApiKey.vision ? 'text' : 'password'" placeholder="API Key" class="w-full rounded-lg px-3 py-2 pr-10 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <button @click="showApiKey.vision = !showApiKey.vision" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style="color: var(--tg-muted);">
+                                            <i :class="showApiKey.vision ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                                        </button>
+                                    </div>
                                     <input v-model="aiConfig.vision.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. glm-ocr)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                    <details class="mt-1">
-                                        <summary class="text-xs cursor-pointer" style="color: var(--tg-muted);">Fallback model (optional)</summary>
-                                        <div class="space-y-2 mt-2">
+                                    <div class="mt-2 pt-2 border-t" style="border-color: var(--tg-border);">
+                                        <div class="text-[10px] mb-1.5 font-medium" style="color: var(--tg-muted);">Fallback Model</div>
+                                        <div class="space-y-1.5">
                                             <input v-model="aiConfig.vision.fallback_url" @input="aiConfigDirty = true" placeholder="Fallback API URL" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                             <input v-model="aiConfig.vision.fallback_model" @input="aiConfigDirty = true" placeholder="Fallback model name" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                         </div>
-                                    </details>
-                                    <button @click="testAiConnection('vision')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-plug mr-1"></i>Test Connection
-                                    </button>
+                                    </div>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <button @click="testAiConnection('vision')" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-plug mr-1"></i>Test Connection
+                                        </button>
+                                        <button v-if="aiConfig.service_vision_cmd" @click="startAiService('vision')" :disabled="aiServiceStatus.vision === 'starting'" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
+                                            <i :class="aiServiceStatus.vision === 'starting' ? 'fas fa-spinner fa-spin' : aiServiceStatus.vision === 'running' ? 'fas fa-check-circle' : 'fas fa-play'" class="mr-1"></i>
+                                            {{ aiServiceStatus.vision === 'running' ? 'Running' : aiServiceStatus.vision === 'starting' ? 'Starting...' : 'Start Service' }}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
                             <!-- Chat / General LLM -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                                <div class="flex items-center justify-between mb-3">
+                            <div v-if="advancedFeatures.ai_chat" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
                                         <i class="fas fa-comment-dots text-purple-400 text-sm"></i>
                                         <span class="text-sm font-medium" style="color: var(--tg-text);">Chat / General LLM</span>
-                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">Required for AI Assistant</span>
                                     </div>
-                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.chat === 'ok' ? 'background:#22c55e' : aiConfigStatus.chat === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    <div class="flex items-center gap-2">
+                                        <select v-model="aiSectionProfile.chat" @change="applySectionProfile('chat'); aiConfigDirty = true" class="text-[11px] rounded px-1.5 py-0.5 outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <option value="custom">Custom</option>
+                                            <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                                        </select>
+                                        <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.chat === 'ok' ? 'background:#22c55e' : aiConfigStatus.chat === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    </div>
                                 </div>
                                 <div class="space-y-2">
                                     <select v-model="aiConfig.chat.provider" @change="aiConfigDirty = true" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                         <option value="local">Local Model</option>
                                         <option value="external">External API</option>
                                     </select>
-                                    <input v-model="aiConfig.chat.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:11434/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                    <input v-if="aiConfig.chat.provider === 'external'" v-model="aiConfig.chat.api_key" @input="aiConfigDirty = true" type="password" placeholder="API Key" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.chat.api_url" @input="aiConfigDirty = true" placeholder="e.g. http://host.docker.internal:11434/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <div v-if="aiConfig.chat.provider === 'external'" class="relative">
+                                        <input v-model="aiConfig.chat.api_key" @input="aiConfigDirty = true" :type="showApiKey.chat ? 'text' : 'password'" placeholder="API Key" class="w-full rounded-lg px-3 py-2 pr-10 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        <button @click="showApiKey.chat = !showApiKey.chat" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style="color: var(--tg-muted);">
+                                            <i :class="showApiKey.chat ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                                        </button>
+                                    </div>
                                     <input v-model="aiConfig.chat.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. qwen3-next-80b-a3b)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                    <details class="mt-1">
-                                        <summary class="text-xs cursor-pointer" style="color: var(--tg-muted);">Fallback model (optional)</summary>
-                                        <div class="space-y-2 mt-2">
+                                    <div class="mt-2 pt-2 border-t" style="border-color: var(--tg-border);">
+                                        <div class="text-[10px] mb-1.5 font-medium" style="color: var(--tg-muted);">Fallback Model</div>
+                                        <div class="space-y-1.5">
                                             <input v-model="aiConfig.chat.fallback_url" @input="aiConfigDirty = true" placeholder="Fallback API URL" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                             <input v-model="aiConfig.chat.fallback_model" @input="aiConfigDirty = true" placeholder="Fallback model name" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                         </div>
-                                    </details>
+                                    </div>
                                     <button @click="testAiConnection('chat')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
                                         <i class="fas fa-plug mr-1"></i>Test Connection
                                     </button>
                                 </div>
                             </div>
 
-                            <!-- Embedding (optional) -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                                <div class="flex items-center justify-between mb-3">
+                            <!-- Embedding -->
+                            <div v-if="advancedFeatures.embedding" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
                                         <i class="fas fa-project-diagram text-green-400 text-sm"></i>
                                         <span class="text-sm font-medium" style="color: var(--tg-text);">Embedding</span>
-                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-500/20 text-gray-400">Optional</span>
                                     </div>
-                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.embedding === 'ok' ? 'background:#22c55e' : aiConfigStatus.embedding === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    <div class="flex items-center gap-2">
+                                        <select v-model="aiSectionProfile.embedding" @change="applySectionProfile('embedding'); aiConfigDirty = true" class="text-[11px] rounded px-1.5 py-0.5 outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <option value="custom">Custom</option>
+                                            <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                                        </select>
+                                        <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.embedding === 'ok' ? 'background:#22c55e' : aiConfigStatus.embedding === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    </div>
                                 </div>
                                 <div class="space-y-2">
                                     <input v-model="aiConfig.embedding.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8886/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                     <input v-model="aiConfig.embedding.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. bge-m3)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                    <button @click="testAiConnection('embedding')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-plug mr-1"></i>Test Connection
-                                    </button>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <button @click="testAiConnection('embedding')" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-plug mr-1"></i>Test Connection
+                                        </button>
+                                        <button v-if="aiConfig.service_embedding_cmd" @click="startAiService('embedding')" :disabled="aiServiceStatus.embedding === 'starting'" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
+                                            <i :class="aiServiceStatus.embedding === 'starting' ? 'fas fa-spinner fa-spin' : aiServiceStatus.embedding === 'running' ? 'fas fa-check-circle' : 'fas fa-play'" class="mr-1"></i>
+                                            {{ aiServiceStatus.embedding === 'running' ? 'Running' : aiServiceStatus.embedding === 'starting' ? 'Starting...' : 'Start Service' }}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
-                            <!-- TTS (optional) -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
-                                <div class="flex items-center justify-between mb-3">
+                            <!-- TTS -->
+                            <div v-if="advancedFeatures.ai_chat" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
                                         <i class="fas fa-volume-up text-orange-400 text-sm"></i>
                                         <span class="text-sm font-medium" style="color: var(--tg-text);">Text-to-Speech</span>
-                                        <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-500/20 text-gray-400">Optional</span>
                                     </div>
-                                    <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.tts === 'ok' ? 'background:#22c55e' : aiConfigStatus.tts === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    <div class="flex items-center gap-2">
+                                        <select v-model="aiSectionProfile.tts" @change="applySectionProfile('tts'); aiConfigDirty = true" class="text-[11px] rounded px-1.5 py-0.5 outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <option value="custom">Custom</option>
+                                            <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                                        </select>
+                                        <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.tts === 'ok' ? 'background:#22c55e' : aiConfigStatus.tts === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    </div>
                                 </div>
                                 <div class="space-y-2">
                                     <input v-model="aiConfig.tts.api_url" @input="aiConfigDirty = true" placeholder="http://localhost:8880/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                     <input v-model="aiConfig.tts.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. kokoro)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
-                                    <button @click="testAiConnection('tts')" class="mt-1 text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
-                                        <i class="fas fa-plug mr-1"></i>Test Connection
-                                    </button>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <button @click="testAiConnection('tts')" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                            <i class="fas fa-plug mr-1"></i>Test Connection
+                                        </button>
+                                        <button v-if="aiConfig.service_tts_cmd" @click="startAiService('tts')" :disabled="aiServiceStatus.tts === 'starting'" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
+                                            <i :class="aiServiceStatus.tts === 'starting' ? 'fas fa-spinner fa-spin' : aiServiceStatus.tts === 'running' ? 'fas fa-check-circle' : 'fas fa-play'" class="mr-1"></i>
+                                            {{ aiServiceStatus.tts === 'running' ? 'Running' : aiServiceStatus.tts === 'starting' ? 'Starting...' : 'Start Service' }}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
                             <!-- Voice Transcription (Whisper) -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div v-if="advancedFeatures.transcription" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
                                         <i class="fas fa-microphone-alt text-cyan-400 text-sm"></i>
@@ -3106,12 +3362,16 @@
                                             <input v-model="aiConfig.transcription.batch_size" @input="aiConfigDirty = true" type="number" min="1" max="200" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
                                         </div>
                                     </div>
-                                    <div class="flex items-center gap-2">
+                                    <div class="flex items-center gap-2 flex-wrap">
                                         <button @click="testAiConnection('transcription')" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
                                             <i class="fas fa-plug mr-1"></i>Test Connection
                                         </button>
                                         <button @click="loadTranscriptionProgress" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
                                             <i class="fas fa-sync-alt mr-1"></i>Refresh Progress
+                                        </button>
+                                        <button v-if="aiConfig.service_transcription_cmd" @click="startAiService('transcription')" :disabled="aiServiceStatus.transcription === 'starting'" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
+                                            <i :class="aiServiceStatus.transcription === 'starting' ? 'fas fa-spinner fa-spin' : aiServiceStatus.transcription === 'running' ? 'fas fa-check-circle' : 'fas fa-play'" class="mr-1"></i>
+                                            {{ aiServiceStatus.transcription === 'running' ? 'Running' : aiServiceStatus.transcription === 'starting' ? 'Starting...' : 'Start Service' }}
                                         </button>
                                     </div>
                                     <!-- Progress bar -->
@@ -3124,8 +3384,78 @@
                                 </div>
                             </div>
 
+                            <!-- Auto Translation -->
+                            <div v-if="advancedFeatures.translation" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fas fa-language text-blue-400 text-sm"></i>
+                                        <span class="text-sm font-medium" style="color: var(--tg-text);">Auto Translation</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <select v-model="aiSectionProfile.translation" @change="applySectionProfile('translation'); aiConfigDirty = true" class="text-[11px] rounded px-1.5 py-0.5 outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <option value="custom">Custom</option>
+                                            <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                                        </select>
+                                        <span class="w-2 h-2 rounded-full" :style="aiConfigStatus.translation === 'ok' ? 'background:#22c55e' : aiConfigStatus.translation === 'error' ? 'background:#ef4444' : 'background:var(--tg-border)'"></span>
+                                    </div>
+                                </div>
+                                <div class="space-y-2">
+                                    <div class="flex items-center gap-2">
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="aiConfig.translation.enabled" @change="aiConfigDirty = true" class="sr-only peer">
+                                            <div class="w-9 h-5 rounded-full relative transition-colors" :style="aiConfig.translation.enabled ? 'background: var(--tg-accent);' : 'background: var(--tg-border);'">
+                                                <div class="absolute top-[2px] left-[2px] rounded-full h-4 w-4 transition-transform bg-white" :style="aiConfig.translation.enabled ? 'transform: translateX(16px);' : ''"></div>
+                                            </div>
+                                        </label>
+                                        <span class="text-xs" style="color: var(--tg-muted);">Enable auto-translation</span>
+                                    </div>
+                                    <div>
+                                        <label class="text-[10px] block mb-0.5" style="color: var(--tg-muted);">Target Language</label>
+                                        <select v-model="aiConfig.translation.target_lang" @change="aiConfigDirty = true" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <option value="en">English</option>
+                                            <option value="zh">Chinese</option>
+                                            <option value="es">Spanish</option>
+                                            <option value="ar">Arabic</option>
+                                            <option value="ru">Russian</option>
+                                            <option value="ja">Japanese</option>
+                                            <option value="ko">Korean</option>
+                                            <option value="fr">French</option>
+                                            <option value="de">German</option>
+                                            <option value="pt">Portuguese</option>
+                                            <option value="vi">Vietnamese</option>
+                                            <option value="tl">Filipino</option>
+                                        </select>
+                                    </div>
+                                    <input v-model="aiConfig.translation.api_url" @input="aiConfigDirty = true" placeholder="http://host.docker.internal:11434/v1" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <input v-model="aiConfig.translation.model_name" @input="aiConfigDirty = true" placeholder="Model name (e.g. qwen3-next-80b)" class="w-full rounded-lg px-3 py-2 text-sm outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label class="text-[10px] block mb-0.5" style="color: var(--tg-muted);">Rate limit/sec</label>
+                                            <input v-model="aiConfig.translation.rate_limit" @input="aiConfigDirty = true" type="number" min="0.1" max="10" step="0.1" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        </div>
+                                        <div>
+                                            <label class="text-[10px] block mb-0.5" style="color: var(--tg-muted);">Batch size</label>
+                                            <input v-model="aiConfig.translation.batch_size" @input="aiConfigDirty = true" type="number" min="1" max="100" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        </div>
+                                    </div>
+                                    <div class="mt-2 pt-2 border-t" style="border-color: var(--tg-border);">
+                                        <div class="text-[10px] mb-1.5 font-medium" style="color: var(--tg-muted);">Fallback Model</div>
+                                        <div class="space-y-1.5">
+                                            <input v-model="aiConfig.translation.fallback_url" @input="aiConfigDirty = true" placeholder="Fallback API URL" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                            <input v-model="aiConfig.translation.fallback_model" @input="aiConfigDirty = true" placeholder="Fallback model name" class="w-full rounded-lg px-3 py-1.5 text-xs outline-none" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                        </div>
+                                    </div>
+                                    <button @click="testAiConnection('translation')" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-muted); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-plug mr-1"></i>Test Connection
+                                    </button>
+                                    <button @click="bulkEnableTranslation()" class="text-xs px-3 py-1 rounded transition-colors hover:opacity-80" style="color: var(--tg-accent); border: 1px solid var(--tg-border);">
+                                        <i class="fas fa-globe mr-1"></i>Enable All Chats
+                                    </button>
+                                </div>
+                            </div>
+
                             <!-- Telegram Vault -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div v-if="advancedFeatures.transcription" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
                                         <i class="fas fa-vault text-purple-400 text-sm"></i>
@@ -3173,7 +3503,7 @@
                             </div>
 
                             <!-- System Prompt -->
-                            <div class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
+                            <div v-if="advancedFeatures.ai_chat" class="rounded-xl p-4" style="background: var(--tg-bg); border: 1px solid var(--tg-border);">
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center gap-2">
                                         <i class="fas fa-terminal text-yellow-400 text-sm"></i>
@@ -3344,8 +3674,21 @@
                                             <input v-model="editTokenForm.label" placeholder="Label" class="w-full rounded px-3 py-1.5 text-sm" style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);" />
                                             <div>
                                                 <label class="text-xs block mb-1" style="color: var(--tg-muted);">Allowed Chats</label>
+                                                <!-- Chat search filter (same as create form) -->
+                                                <div class="relative mb-1.5">
+                                                    <input v-model="tokenChatSearch" type="text" placeholder="Search chats..."
+                                                        class="w-full rounded pl-7 pr-7 py-1.5 text-xs"
+                                                        style="background: var(--tg-sidebar); color: var(--tg-text); border: 1px solid var(--tg-border);">
+                                                    <svg class="w-3 h-3 absolute left-2.5 top-2 text-tg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                                    </svg>
+                                                    <button v-if="tokenChatSearch" @click="tokenChatSearch = ''" class="absolute right-2 top-1.5 text-tg-muted hover:text-white">
+                                                        <i class="fas fa-times text-[9px]"></i>
+                                                    </button>
+                                                </div>
+                                                <div class="text-[9px] mb-1" style="color: var(--tg-muted);">{{ filteredTokenChats.length }} of {{ adminChats.length }} chats · {{ editTokenForm.allowed_chat_ids.length }} selected</div>
                                                 <div class="flex flex-wrap gap-1 rounded p-2 max-h-32 overflow-y-auto" style="background: var(--tg-sidebar); border: 1px solid var(--tg-border);">
-                                                    <label v-for="chat in adminChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
+                                                    <label v-for="chat in filteredTokenChats" :key="chat.id" class="flex items-center gap-1 text-xs rounded px-2 py-1 cursor-pointer hover:opacity-80" style="color: var(--tg-text); background: var(--tg-bg);">
                                                         <input type="checkbox" :value="chat.id" v-model="editTokenForm.allowed_chat_ids" class="rounded" />
                                                         {{ chat.title || chat.id }}
                                                     </label>
@@ -4015,13 +4358,36 @@
                     embedding: { api_url: '', model_name: '' },
                     tts: { api_url: '', model_name: '' },
                     transcription: { api_url: '', enabled: true, rate_limit: '2', batch_size: '50' },
+                    translation: { api_url: '', model_name: '', target_lang: 'en', enabled: true, rate_limit: '2', batch_size: '20', fallback_url: '', fallback_model: '' },
                     vault: { api_url: '', api_token: '', api_token_set: false, enabled: false },
                     system_prompt: '',
                 })
                 const aiConfigDirty = ref(false)
+                // Advanced feature flags (global toggles, server-persisted)
+                const advancedFeatures = Vue.reactive({
+                    ocr: false, translation: false, transcription: false,
+                    ai_chat: false, embedding: false
+                })
+                const showApiKey = Vue.reactive({ vision: false, chat: false })
                 const aiProfiles = ref([])
                 const aiActiveProfileId = ref('')
-                const aiConfigStatus = Vue.reactive({ vision: 'unknown', chat: 'unknown', embedding: 'unknown', tts: 'unknown', transcription: 'unknown', vault: 'unknown' })
+                // Per-subsection profile assignment
+                const aiSectionProfile = Vue.reactive({
+                    vision: 'custom', chat: 'custom', embedding: 'custom',
+                    translation: 'custom', tts: 'custom', transcription: 'custom'
+                })
+                const applySectionProfile = (section) => {
+                    const profileId = aiSectionProfile[section]
+                    if (profileId === 'custom') return
+                    const profile = aiProfiles.value.find(p => p.id === profileId)
+                    if (!profile?.config?.[section]) return
+                    const src = profile.config[section]
+                    const dst = aiConfig[section]
+                    for (const key of Object.keys(dst)) {
+                        if (key in src) dst[key] = src[key]
+                    }
+                }
+                const aiConfigStatus = Vue.reactive({ vision: 'unknown', chat: 'unknown', embedding: 'unknown', tts: 'unknown', transcription: 'unknown', translation: 'unknown', vault: 'unknown' })
                 const transcriptionProgress = Vue.reactive({ processed: 0, total: 0 })
                 const vaultProfiles = ref([])
                 const vaultProfilesLoading = ref(false)
@@ -4032,6 +4398,14 @@
                         const res = await fetch('/api/ai/config', { credentials: 'include' })
                         if (!res.ok) return
                         const data = await res.json()
+                        // Load feature flags (present in both admin and non-admin responses)
+                        if (data.features) {
+                            advancedFeatures.ocr = !!data.features.ocr
+                            advancedFeatures.translation = !!data.features.translation
+                            advancedFeatures.transcription = !!data.features.transcription
+                            advancedFeatures.ai_chat = !!data.features.ai_chat
+                            advancedFeatures.embedding = !!data.features.embedding
+                        }
                         if (data.vision) {
                             // Admin response — full config
                             for (const section of ['vision', 'chat']) {
@@ -4056,6 +4430,16 @@
                                 aiConfig.transcription.rate_limit = data.transcription.rate_limit || '2'
                                 aiConfig.transcription.batch_size = data.transcription.batch_size || '50'
                             }
+                            if (data.translation) {
+                                aiConfig.translation.api_url = data.translation.api_url || ''
+                                aiConfig.translation.model_name = data.translation.model_name || ''
+                                aiConfig.translation.target_lang = data.translation.target_lang || 'en'
+                                aiConfig.translation.enabled = data.translation.enabled !== false
+                                aiConfig.translation.rate_limit = data.translation.rate_limit || '2'
+                                aiConfig.translation.batch_size = data.translation.batch_size || '20'
+                                aiConfig.translation.fallback_url = data.translation.fallback_url || ''
+                                aiConfig.translation.fallback_model = data.translation.fallback_model || ''
+                            }
                             if (data.vault) {
                                 aiConfig.vault.api_url = data.vault.api_url || ''
                                 aiConfig.vault.api_token_set = !!data.vault.api_token_set
@@ -4063,10 +4447,89 @@
                                 // Don't clear api_token — only sent on save
                             }
                             aiConfig.system_prompt = data.system_prompt || AI_DEFAULT_SYSTEM_PROMPT
+                            // Load service startup commands
+                            if (data.services) {
+                                for (const s of ['vision', 'transcription', 'tts', 'embedding']) {
+                                    if (data.services[s]) aiConfig[`service_${s}_cmd`] = data.services[s].start_cmd || ''
+                                }
+                            }
                         }
                         aiConfigDirty.value = false
                         loadAiProfiles()
                     } catch (e) { console.error('Failed to load AI config:', e) }
+                }
+
+                const toggleAdvancedFeature = async (feature) => {
+                    const newVal = !advancedFeatures[feature]
+                    try {
+                        const res = await fetch('/api/admin/features', {
+                            method: 'PUT', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ [feature]: newVal })
+                        })
+                        if (res.ok) {
+                            advancedFeatures[feature] = newVal
+                            // Fall back dock from AI mode when ai_chat disabled
+                            if (feature === 'ai_chat' && !newVal && rightDockMode.value === 'ai') {
+                                rightDockMode.value = 'media'
+                            }
+                            showToast(`${feature.replace('_', ' ')} ${newVal ? 'enabled' : 'disabled'}`)
+                        }
+                    } catch { showToast('Failed to toggle feature', 'error') }
+                }
+
+                // AI service start/check commands (admin-configurable)
+                const aiServiceStatus = Vue.reactive({ vision: 'unknown', transcription: 'unknown', tts: 'unknown', embedding: 'unknown' })
+                const startAiService = async (section) => {
+                    aiServiceStatus[section] = 'starting'
+                    try {
+                        const res = await fetch('/api/admin/ai-service/start', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ section })
+                        })
+                        const data = await res.json()
+                        if (data.status === 'ok') {
+                            showToast(`${section} service starting...`)
+                            // Poll for readiness
+                            setTimeout(() => checkAiService(section), 5000)
+                            setTimeout(() => checkAiService(section), 15000)
+                        } else {
+                            showToast(data.message || 'Failed to start', 'error')
+                            aiServiceStatus[section] = 'stopped'
+                        }
+                    } catch { showToast('Failed to start service', 'error'); aiServiceStatus[section] = 'stopped' }
+                }
+                const checkAiService = async (section) => {
+                    try {
+                        const res = await fetch('/api/admin/ai-service/check', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ section })
+                        })
+                        const data = await res.json()
+                        aiServiceStatus[section] = data.status || 'unknown'
+                    } catch { aiServiceStatus[section] = 'unknown' }
+                }
+
+                // Profile create/edit UI state
+                const profileCreateOpen = ref(false)
+                const profileCreateName = ref('')
+                const profileCreateIcon = ref('sliders-h')
+                const profileIconOptions = ['sliders-h', 'eye', 'bolt', 'gem', 'cloud', 'fire', 'brain', 'rocket', 'star', 'cog', 'magic', 'globe']
+
+                const renameAiProfile = async (profile) => {
+                    const newName = prompt('Rename preset:', profile.name)
+                    if (!newName || !newName.trim() || newName.trim() === profile.name) return
+                    try {
+                        const res = await fetch(`/api/admin/ai-profiles/${profile.id}`, {
+                            method: 'PATCH', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: newName.trim() })
+                        })
+                        if (res.ok) { await loadAiProfiles(); showToast(`Renamed to "${newName.trim()}"`) }
+                        else showToast('Rename failed', 'error')
+                    } catch { showToast('Rename failed', 'error') }
                 }
 
                 const loadAiProfiles = async () => {
@@ -4093,17 +4556,21 @@
                 const saveCurrentAsProfile = async (name) => {
                     if (!name) name = prompt('Profile name:')
                     if (!name || !name.trim()) return
+                    const icon = profileCreateIcon.value || 'sliders-h'
                     // Save current config first
                     await saveAiConfig()
                     try {
                         const res = await fetch('/api/admin/ai-profiles', {
                             method: 'POST', credentials: 'include',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name: name.trim() })
+                            body: JSON.stringify({ name: name.trim(), icon })
                         })
                         if (!res.ok) { showToast('Failed to save profile', 'error'); return }
                         await loadAiProfiles()
-                        showToast(`Profile "${name.trim()}" saved`)
+                        profileCreateOpen.value = false
+                        profileCreateName.value = ''
+                        profileCreateIcon.value = 'sliders-h'
+                        showToast(`Preset "${name.trim()}" saved`)
                     } catch (e) { showToast('Failed to save profile', 'error') }
                 }
 
@@ -4365,6 +4832,57 @@
                 }
                 const stopOcrPolling = () => {
                     if (_ocrPollTimer) { clearInterval(_ocrPollTimer); _ocrPollTimer = null }
+                }
+
+                // Translation per-chat state
+                const chatTranslationEnabled = ref(false)
+                const translationProgress = ref(null)
+                let _translationPollTimer = null
+
+                const loadTranslationStatus = async () => {
+                    if (!selectedChat.value || !isMasterOrAbove.value) return
+                    try {
+                        const res = await fetch(`/api/admin/chats/${selectedChat.value.id}/translation/status`, { credentials: 'include' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            chatTranslationEnabled.value = data.enabled
+                            translationProgress.value = { processed: data.processed, total: data.total }
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                const toggleChatTranslation = async () => {
+                    if (!selectedChat.value) return
+                    try {
+                        const res = await fetch(`/api/admin/chats/${selectedChat.value.id}/translation`, {
+                            method: 'PUT', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: !chatTranslationEnabled.value }),
+                        })
+                        if (res.ok) {
+                            chatTranslationEnabled.value = !chatTranslationEnabled.value
+                            if (chatTranslationEnabled.value) startTranslationPolling()
+                            else stopTranslationPolling()
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                const startTranslationPolling = () => {
+                    stopTranslationPolling()
+                    _translationPollTimer = setInterval(loadTranslationStatus, 10000)
+                }
+                const stopTranslationPolling = () => {
+                    if (_translationPollTimer) { clearInterval(_translationPollTimer); _translationPollTimer = null }
+                }
+
+                const bulkEnableTranslation = async () => {
+                    try {
+                        const res = await fetch('/api/admin/translation/enable-all', { method: 'POST', credentials: 'include' })
+                        if (res.ok) {
+                            const data = await res.json()
+                            showToast(`Translation enabled for ${data.enabled_count} chats`)
+                        } else showToast('Failed to enable translation', 'error')
+                    } catch { showToast('Network error', 'error') }
                 }
 
                 const aiOcrRunning = ref(false)
@@ -5402,6 +5920,8 @@
                                 await loadArchivedCount()
                                 setupInfiniteScroll()
                                 startViewerHeartbeat()  // Notify backup scheduler of active viewer
+                                // Load feature flags early (gates UI for all roles)
+                                loadAiConfig()
 
                                 // Handle deep link from push notification or permalink
                                 const urlParams = new URLSearchParams(window.location.search)
@@ -6285,6 +6805,7 @@
                         nextTick(() => hydratePanel(rightDockMode.value))
                     }
                     stopOcrPolling()
+                    stopTranslationPolling()
                     // Clear overlay search state on chat switch (without reloading — selectChat handles that)
                     searchBarVisible.value = false
                     msgSearchQuery.value = ''
@@ -6296,6 +6817,8 @@
                     chatOcrEnabled.value = false
                     chatOcrVisible.value = false
                     ocrProgress.value = null
+                    chatTranslationEnabled.value = false
+                    translationProgress.value = null
                     showTimeline.value = false
                     timelineDensity.value = []
                     profileMembers.value = []
@@ -6597,6 +7120,21 @@
                     if (searchMatchIndex.value >= 0 && marks[searchMatchIndex.value]) {
                         marks.forEach(m => m.classList.remove('current'))
                         marks[searchMatchIndex.value].classList.add('current')
+                    }
+                }
+
+                const applyDateFilter = () => {
+                    if (messageSearchQuery.value.trim()) {
+                        // Has search term → use date range as search filter
+                        searchMessages()
+                    } else if (searchDateFrom.value) {
+                        // No search term, has start date → jump to that date
+                        selectedDate.value = searchDateFrom.value
+                        jumpToDate()
+                    } else if (searchDateTo.value) {
+                        // Only end date → jump to end date
+                        selectedDate.value = searchDateTo.value
+                        jumpToDate()
                     }
                 }
 
@@ -7067,13 +7605,19 @@
                 // Phase 6: Profile panel functions
                 const openProfile = async () => {
                     if (!selectedChat.value) return
-                    showProfilePanel.value = true
+                    // Desktop: use dock tab. Mobile: use overlay fallback
+                    if (window.innerWidth >= 768) {
+                        onToolClick('profile')
+                    } else {
+                        showProfilePanel.value = true
+                    }
                     showMediaPanel.value = false
-                    rightDockOpen.value = false  // Close dock canvas to avoid clutter
-                    // Load OCR + embedding status for admin
+                    // Load OCR + embedding + translation status for admin
                     loadOcrStatus()
                     loadEmbeddingStats()
+                    loadTranslationStatus()
                     if (chatOcrEnabled.value) startOcrPolling()
+                    if (chatTranslationEnabled.value) startTranslationPolling()
                     if (isGroup.value) {
                         profileMembersLoading.value = true
                         try {
@@ -7145,6 +7689,19 @@
                         const cid = selectedChat.value.id
                         if (!aiMessagesByChatId[cid]) aiMessagesByChatId[cid] = Vue.reactive([])
                         aiMessages.value = aiMessagesByChatId[cid]
+                    }
+                    else if (mode === 'profile') {
+                        loadOcrStatus()
+                        loadEmbeddingStats()
+                        loadTranslationStatus()
+                        if (isGroup.value && !profileMembers.value.length) {
+                            profileMembersLoading.value = true
+                            fetch(`/api/chats/${selectedChat.value.id}/members`, { credentials: 'include' })
+                                .then(r => r.ok ? r.json() : { members: [] })
+                                .then(data => { profileMembers.value = data.members })
+                                .catch(() => {})
+                                .finally(() => { profileMembersLoading.value = false })
+                        }
                     }
                 }
                 const onToolClick = (mode) => {
@@ -8141,6 +8698,7 @@
                 const editTokenForm = ref({ label: '', allowed_chat_ids: [], no_download: false })
                 const startEditToken = (token) => {
                     editingTokenId.value = token.id
+                    tokenChatSearch.value = ''  // Reset search when entering edit mode
                     editTokenForm.value = {
                         label: token.label || '',
                         allowed_chat_ids: token.allowed_chat_ids ? [...token.allowed_chat_ids] : [],
@@ -8220,6 +8778,7 @@
                     openPinnedView,
                     closePinnedView,
                     searchMessages,
+                    applyDateFilter,
                     clearHeaderSearch,
                     isOwnMessage,
                     getSenderName,
@@ -8457,9 +9016,22 @@
                     applyAiSort,
                     aiConfig,
                     aiConfigDirty,
+                    advancedFeatures,
+                    toggleAdvancedFeature,
+                    aiServiceStatus,
+                    startAiService,
+                    checkAiService,
+                    showApiKey,
                     aiConfigStatus,
                     aiProfiles,
                     aiActiveProfileId,
+                    aiSectionProfile,
+                    applySectionProfile,
+                    profileCreateOpen,
+                    profileCreateName,
+                    profileCreateIcon,
+                    profileIconOptions,
+                    renameAiProfile,
                     loadAiConfig,
                     loadAiProfiles,
                     activateAiProfile,
@@ -8487,6 +9059,11 @@
                     toggleChatOcrVisibility,
                     aiOcrRunning,
                     runBatchOcr,
+                    chatTranslationEnabled,
+                    translationProgress,
+                    loadTranslationStatus,
+                    toggleChatTranslation,
+                    bulkEnableTranslation,
                     aiAutoReplyEnabled,
                     aiAutoReplyMode,
                     aiAutoReplyDelay,

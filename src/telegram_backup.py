@@ -186,6 +186,11 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 is_group = isinstance(entity, Chat) or (isinstance(entity, Channel) and entity.megagroup)
                 is_channel = isinstance(entity, Channel) and not entity.megagroup
 
+                # Skip channels where user is NOT admin/creator (broadcast channels only)
+                # Groups (megagroups) are always backed up regardless of admin status
+                if is_channel and not getattr(entity, "creator", False) and not getattr(entity, "admin_rights", None):
+                    continue
+
                 # Check if chat is explicitly in an exclude list (not just filtered out)
                 is_explicitly_excluded = (
                     chat_id in self.config.global_exclude_ids
@@ -366,6 +371,10 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 is_user = isinstance(entity, User) and not entity.bot
                 is_group = isinstance(entity, Chat) or (isinstance(entity, Channel) and entity.megagroup)
                 is_channel = isinstance(entity, Channel) and not entity.megagroup
+
+                # Skip channels where user is NOT admin/creator
+                if is_channel and not getattr(entity, "creator", False) and not getattr(entity, "admin_rights", None):
+                    continue
 
                 if self.config.should_backup_chat(chat_id, is_user, is_group, is_channel, is_bot):
                     archived_to_backup.append(dialog)

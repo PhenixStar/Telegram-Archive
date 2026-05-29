@@ -62,3 +62,6 @@ logs/
 docker_logs.txt
 error.log
 .env.bak
+
+# Claude-flow session artifacts (tooling noise)
+.claude-flow/sessions/

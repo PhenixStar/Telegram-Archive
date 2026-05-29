@@ -116,8 +116,8 @@ Cross-chat ILIKE is **explicitly blocked** (returns empty) because it would be t
 The backend **already returns match counts for FTS search** via `count_fts_matches()`. The ILIKE fallback does NOT have a count query. If accurate counts are needed for the ILIKE path, a new `COUNT(*)` query with the same ILIKE filter would need to be added. However, since ILIKE is only used as a degraded fallback (FTS not built yet), this may not be worth the effort -- the `has_more` heuristic (`len(results) == limit`) is sufficient for pagination UX.
 
 ## Relevant Files
-- `/home/phenix/projects/tele-private/repo/dev/src/web/routes_chat.py` -- search endpoint (lines 241-284)
-- `/home/phenix/projects/tele-private/repo/dev/src/db/adapter_search.py` -- FTS search + count (lines 90-176)
-- `/home/phenix/projects/tele-private/repo/dev/src/db/fts.py` -- FTS5 setup, query sanitization
-- `/home/phenix/projects/tele-private/repo/dev/src/db/adapter_messages.py` -- ILIKE search in `get_messages_paginated` (lines 169-177)
-- `/home/phenix/projects/tele-private/repo/dev/src/web/routes_ai.py` -- semantic search endpoint (lines 624-648)
+- `/raid/projects/tele-private/repo/dev/src/web/routes_chat.py` -- search endpoint (lines 241-284)
+- `/raid/projects/tele-private/repo/dev/src/db/adapter_search.py` -- FTS search + count (lines 90-176)
+- `/raid/projects/tele-private/repo/dev/src/db/fts.py` -- FTS5 setup, query sanitization
+- `/raid/projects/tele-private/repo/dev/src/db/adapter_messages.py` -- ILIKE search in `get_messages_paginated` (lines 169-177)
+- `/raid/projects/tele-private/repo/dev/src/web/routes_ai.py` -- semantic search endpoint (lines 624-648)

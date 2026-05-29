@@ -2,14 +2,14 @@
 
 **Date:** 2026-03-20  
 **Thoroughness:** Medium  
-**Repository:** /home/phenix/projects/tele-private/repo/dev
+**Repository:** /raid/projects/tele-private/repo/dev
 
 ---
 
 ## 1. LISTENER ENDPOINTS & STATUS
 
 ### Endpoint: `/api/admin/listener-status`
-**File:** `/home/phenix/projects/tele-private/repo/dev/src/web/routes_admin.py` (lines 34-46)  
+**File:** `/raid/projects/tele-private/repo/dev/src/web/routes_admin.py` (lines 34-46)  
 **Method:** GET  
 **Auth:** Master role required  
 **Response:**
@@ -97,7 +97,7 @@ Zero-footprint buffering — if burst detected, operations discarded WITHOUT wri
 ## 3. BACKUP CONFIGURATION ENDPOINTS
 
 ### Endpoint: `/api/admin/backup-config`
-**File:** `/home/phenix/projects/tele-private/repo/dev/src/web/routes_admin.py`
+**File:** `/raid/projects/tele-private/repo/dev/src/web/routes_admin.py`
 
 #### GET (lines 621-632)
 **Method:** GET  
@@ -131,7 +131,7 @@ Zero-footprint buffering — if burst detected, operations discarded WITHOUT wri
 - Returns updated keys
 
 ### Endpoint: `/api/admin/backup-heartbeat`
-**File:** `/home/phenix/projects/tele-private/repo/dev/src/web/routes_admin.py` (lines 668-673)
+**File:** `/raid/projects/tele-private/repo/dev/src/web/routes_admin.py` (lines 668-673)
 
 **Method:** POST  
 **Auth:** Any authenticated user  
@@ -152,7 +152,7 @@ Zero-footprint buffering — if burst detected, operations discarded WITHOUT wri
 ## 4. AI MODEL CONFIGURATION
 
 ### Endpoint: `/api/ai/config`
-**File:** `/home/phenix/projects/tele-private/repo/dev/src/web/routes_ai.py` (lines 242-285)
+**File:** `/raid/projects/tele-private/repo/dev/src/web/routes_ai.py` (lines 242-285)
 
 **Method:** GET  
 **Auth:** Any authenticated user  
@@ -206,7 +206,7 @@ Zero-footprint buffering — if burst detected, operations discarded WITHOUT wri
 ```
 
 ### Endpoint: `/api/admin/ai-config`
-**File:** `/home/phenix/projects/tele-private/repo/dev/src/web/routes_ai.py` (lines 288-297)
+**File:** `/raid/projects/tele-private/repo/dev/src/web/routes_ai.py` (lines 288-297)
 
 **Method:** PUT  
 **Auth:** Master role required  
@@ -222,7 +222,7 @@ Zero-footprint buffering — if burst detected, operations discarded WITHOUT wri
 **Behavior:** Bulk updates all matching keys to `app_settings` table. Non-matching keys ignored.
 
 ### Endpoint: `/api/admin/ai-config/test`
-**File:** `/home/phenix/projects/tele-private/repo/dev/src/web/routes_ai.py` (lines 300-336)
+**File:** `/raid/projects/tele-private/repo/dev/src/web/routes_ai.py` (lines 300-336)
 
 **Method:** POST  
 **Auth:** Master role required  
@@ -289,7 +289,7 @@ from organizational channels..."
 
 ## 6. CONFIG FILE ENVIRONMENT VARIABLES
 
-### File: `/home/phenix/projects/tele-private/repo/dev/src/config.py`
+### File: `/raid/projects/tele-private/repo/dev/src/config.py`
 
 **Listener Vars:**
 ```bash
@@ -329,7 +329,7 @@ OLLAMA_EMBED_BATCH=50               # Batch size (line 269)
 
 ## 7. REAL-TIME NOTIFICATIONS
 
-### Module: `/home/phenix/projects/tele-private/repo/dev/src/realtime.py`
+### Module: `/raid/projects/tele-private/repo/dev/src/realtime.py`
 
 **RealtimeNotifier (lines 40-153):**
 - Detects database type (PostgreSQL vs SQLite)

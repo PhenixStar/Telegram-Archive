@@ -272,6 +272,77 @@ class SearchMixin:
                 for r in result
             ]
 
+    async def get_messages_needing_translation(
+        self, chat_id: int, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Get text messages that haven't been translated yet.
+
+        Selects messages with non-empty text, no existing ocr_text enrichment,
+        and no photo/voice media (those get OCR or transcription instead).
+        """
+        async with self.db_manager.async_session_factory() as session:
+            # Subquery: message IDs that have photo or voice media
+            has_media_sub = (
+                select(Media.message_id)
+                .where(
+                    and_(
+                        Media.chat_id == chat_id,
+                        Media.type.in_(["photo", "voice"]),
+                    )
+                )
+            )
+            stmt = (
+                select(Message.id, Message.chat_id, Message.text)
+                .where(
+                    and_(
+                        Message.chat_id == chat_id,
+                        Message.ocr_text.is_(None),
+                        Message.text.isnot(None),
+                        Message.text != "",
+                        ~Message.id.in_(has_media_sub),
+                    )
+                )
+                .order_by(Message.date.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [
+                {"message_id": r[0], "chat_id": r[1], "text": r[2]}
+                for r in result
+            ]
+
+    async def get_translation_progress(self, chat_id: int) -> dict[str, int]:
+        """Get translation progress: text messages translated vs total needing translation."""
+        async with self.db_manager.async_session_factory() as session:
+            # Subquery: exclude photo/voice messages
+            has_media_sub = (
+                select(Media.message_id)
+                .where(
+                    and_(
+                        Media.chat_id == chat_id,
+                        Media.type.in_(["photo", "voice"]),
+                    )
+                )
+            )
+            base_filter = and_(
+                Message.chat_id == chat_id,
+                Message.text.isnot(None),
+                Message.text != "",
+                ~Message.id.in_(has_media_sub),
+            )
+            total_result = await session.execute(
+                select(func.count(Message.id)).where(base_filter)
+            )
+            total = total_result.scalar() or 0
+
+            processed_result = await session.execute(
+                select(func.count(Message.id)).where(
+                    and_(base_filter, Message.ocr_text.isnot(None))
+                )
+            )
+            processed = processed_result.scalar() or 0
+            return {"total": total, "processed": processed}
+
     async def get_ocr_progress(self, chat_id: int) -> dict[str, int]:
         """Get OCR processing progress for a chat: how many photos processed vs total."""
         async with self.db_manager.async_session_factory() as session:

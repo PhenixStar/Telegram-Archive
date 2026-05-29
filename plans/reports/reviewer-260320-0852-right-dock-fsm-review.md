@@ -1,6 +1,6 @@
 # Code Review: Right Dock FSM (index.html)
 
-**File:** `/home/phenix/projects/tele-private/repo/dev/src/web/templates/index.html`
+**File:** `/raid/projects/tele-private/repo/dev/src/web/templates/index.html`
 **Scope:** New right-dock state machine (strip + canvas UI), sidebar compact logic, escape cascade, logout cleanup
 
 ---

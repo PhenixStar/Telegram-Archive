@@ -118,12 +118,12 @@ FILES READY FOR REVIEW
 ─────────────────────────────────────────────────────────────────────────────
 
 Full assessment report:
-  → /home/phenix/projects/apps/tele-private/repo/dev/plans/reports/
+  → /raid/projects/apps/tele-private/repo/dev/plans/reports/
      docs-manager-260311-1902-viewer-advanced-features-assessment.md
 
 Updated documentation:
-  → /home/phenix/projects/apps/tele-private/repo/dev/docs/CHANGELOG.md
-  → /home/phenix/projects/apps/tele-private/repo/dev/docs/ROADMAP.md
-  → /home/phenix/projects/apps/tele-private/repo/dev/README.md
+  → /raid/projects/apps/tele-private/repo/dev/docs/CHANGELOG.md
+  → /raid/projects/apps/tele-private/repo/dev/docs/ROADMAP.md
+  → /raid/projects/apps/tele-private/repo/dev/README.md
 
 ================================================================================
