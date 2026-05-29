@@ -162,9 +162,13 @@ class MessageMixin:
                 .where(Message.chat_id == chat_id)
             )
 
-            # v6.2.0: Filter by forum topic
+            # v6.2.0: Filter by forum topic.
+            # General topic (topic_id=1) must include pre-forum messages that have
+            # NULL reply_to_top_id as well as messages with an explicit value of 1.
+            # coalesce(reply_to_top_id, 1) == topic_id keeps non-General topics
+            # strict (NULL coalesces to 1, which only matches topic_id=1).
             if topic_id is not None:
-                stmt = stmt.where(Message.reply_to_top_id == topic_id)
+                stmt = stmt.where(func.coalesce(Message.reply_to_top_id, 1) == topic_id)
 
             if search:
                 digits_only = re.sub(r'[^\d]', '', search)

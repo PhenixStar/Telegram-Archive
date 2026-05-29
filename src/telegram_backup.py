@@ -188,8 +188,15 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             logger.debug("Using shared Telegram client")
             return
 
-        # Create new client
-        self.client = TelegramClient(self.config.session_path, self.config.api_id, self.config.api_hash)
+        # Create new client (pass shared kwargs so proxy + flood settings apply,
+        # matching listener/setup_auth/restore client creation).
+        logger.info(f"Using Telethon session database: {self.config.session_path}.session")
+        self.client = TelegramClient(
+            self.config.session_path,
+            self.config.api_id,
+            self.config.api_hash,
+            **self.config.get_telegram_client_kwargs(),
+        )
         self._owns_client = True
 
         # Fix for database locked errors: Enable WAL mode for session DB
