@@ -28,6 +28,18 @@ def _json_serializer(obj):
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def _database_url_uses_postgres(database_url: str) -> bool:
+    return database_url.startswith(("postgresql://", "postgresql+asyncpg://", "postgres://"))
+
+
+def _env_uses_postgres() -> bool:
+    database_url = os.getenv("DATABASE_URL", "").lower()
+    if database_url:
+        return _database_url_uses_postgres(database_url)
+    db_type = os.getenv("DB_TYPE", "sqlite").lower()
+    return db_type in ("postgresql", "postgres")
+
+
 class NotificationType(str, Enum):
     """Types of real-time notifications."""
 
@@ -35,6 +47,33 @@ class NotificationType(str, Enum):
     EDIT = "edit"
     DELETE = "delete"
     CHAT_UPDATE = "chat_update"
+    PIN = "pin"
+
+
+def _truncate_notify_data(data: dict, max_text: int = 500) -> dict:
+    """Truncate large string fields in notification data to stay under PostgreSQL's 8KB NOTIFY limit.
+
+    Handles both ``data["message"]["text"]`` (new_message) and ``data["new_text"]`` (edit)
+    paths. Returns a shallow-copied dict so the caller's original is not mutated.
+    """
+    truncated = False
+
+    # new_message path: data["message"]["text"]
+    if "message" in data and isinstance(data["message"], dict):
+        msg = data["message"]
+        if "text" in msg and msg.get("text") and len(msg["text"]) > max_text:
+            data = data.copy()
+            data["message"] = msg.copy()
+            data["message"]["text"] = msg["text"][:max_text] + "…"
+            truncated = True
+
+    # edit path: data["new_text"]
+    if "new_text" in data and data.get("new_text") and len(data["new_text"]) > max_text:
+        if not truncated:
+            data = data.copy()
+        data["new_text"] = data["new_text"][:max_text] + "…"
+
+    return data
 
 
 class RealtimeNotifier:
@@ -66,8 +105,7 @@ class RealtimeNotifier:
         if self._db_manager:
             self._is_postgresql = not self._db_manager._is_sqlite
         else:
-            db_type = os.getenv("DB_TYPE", "sqlite").lower()
-            self._is_postgresql = db_type in ("postgresql", "postgres")
+            self._is_postgresql = _env_uses_postgres()
 
         if self._is_postgresql:
             logger.info("Realtime notifier: Using PostgreSQL LISTEN/NOTIFY")
@@ -92,14 +130,10 @@ class RealtimeNotifier:
         if not self._initialized:
             await self.init()
 
-        # Truncate message text to avoid PostgreSQL NOTIFY 8KB limit
-        # The viewer fetches full content via API, so truncation is fine
-        if "message" in data and isinstance(data["message"], dict):
-            msg = data["message"]
-            if "text" in msg and msg.get("text") and len(msg["text"]) > 500:
-                data = data.copy()
-                data["message"] = msg.copy()
-                data["message"]["text"] = msg["text"][:500] + "…"
+        # Truncate large string fields to stay under PostgreSQL's 8KB NOTIFY limit.
+        # The viewer fetches full content via API, so truncation is fine.
+        _MAX_NOTIFY_TEXT = 500
+        data = _truncate_notify_data(data, _MAX_NOTIFY_TEXT)
 
         payload = {"type": notification_type.value, "chat_id": chat_id, "data": data}
 
@@ -113,16 +147,25 @@ class RealtimeNotifier:
             logger.warning(f"Failed to send realtime notification: {e}")
 
     async def _notify_postgres(self, payload: dict):
-        """Send notification via PostgreSQL NOTIFY."""
+        """Send notification via PostgreSQL NOTIFY.
+
+        Uses ``pg_notify(channel, payload)`` with bound parameters so the
+        payload never becomes part of the SQL text. The previous
+        ``NOTIFY telegram_updates, '<json>'`` form broke whenever the JSON
+        contained tokens like ``$1`` or ``$D`` — asyncpg parses those as
+        positional placeholders in the raw SQL string.
+        """
         if not self._db_manager:
             return
 
         async with self._db_manager.async_session_factory() as session:
             from sqlalchemy import text
 
-            # Escape the JSON payload (handle datetime objects)
-            payload_json = json.dumps(payload, default=_json_serializer).replace("'", "''")
-            await session.execute(text(f"NOTIFY telegram_updates, '{payload_json}'"))
+            payload_json = json.dumps(payload, default=_json_serializer)
+            await session.execute(
+                text("SELECT pg_notify(:channel, :payload)"),
+                {"channel": "telegram_updates", "payload": payload_json},
+            )
             await session.commit()
 
     async def _notify_http(self, payload: dict):
@@ -130,12 +173,19 @@ class RealtimeNotifier:
         if not self._http_endpoint:
             return
 
+        headers: dict[str, str] = {}
+        push_secret = os.getenv("INTERNAL_PUSH_SECRET")
+        if push_secret:
+            headers["Authorization"] = f"Bearer {push_secret}"
+
         try:
             import aiohttp
 
             async with (
                 aiohttp.ClientSession() as session,
-                session.post(self._http_endpoint, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as response,
+                session.post(
+                    self._http_endpoint, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)
+                ) as response,
             ):
                 if response.status != 200:
                     logger.warning(f"HTTP notification returned {response.status}")
@@ -145,7 +195,7 @@ class RealtimeNotifier:
                 import httpx
 
                 async with httpx.AsyncClient() as client:
-                    await client.post(self._http_endpoint, json=payload, timeout=5)
+                    await client.post(self._http_endpoint, json=payload, headers=headers, timeout=5)
             except ImportError:
                 logger.warning("Neither aiohttp nor httpx available for HTTP notifications")
         except Exception as e:
@@ -177,8 +227,7 @@ class RealtimeListener:
         if self._db_manager:
             self._is_postgresql = not self._db_manager._is_sqlite
         else:
-            db_type = os.getenv("DB_TYPE", "sqlite").lower()
-            self._is_postgresql = db_type in ("postgresql", "postgres")
+            self._is_postgresql = _env_uses_postgres()
 
         if self._is_postgresql:
             logger.info("Realtime listener: Using PostgreSQL LISTEN")

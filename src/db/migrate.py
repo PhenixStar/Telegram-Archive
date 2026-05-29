@@ -12,17 +12,45 @@ from sqlalchemy import func, select
 
 from .base import DatabaseManager
 from .models import (
+    AppSettings,
     Base,
     Chat,
+    ChatFolder,
+    ChatFolderMember,
+    ForumTopic,
     Media,
     Message,
     Metadata,
+    PushSubscription,
     Reaction,
     SyncStatus,
     User,
+    ViewerAccount,
+    ViewerAuditLog,
+    ViewerSession,
+    ViewerToken,
 )
 
 logger = logging.getLogger(__name__)
+
+MIGRATION_MODELS = [
+    User,
+    Chat,
+    Message,
+    Media,
+    Reaction,
+    SyncStatus,
+    Metadata,
+    PushSubscription,
+    ForumTopic,
+    ChatFolder,
+    ChatFolderMember,
+    ViewerAccount,
+    ViewerAuditLog,
+    ViewerSession,
+    ViewerToken,
+    AppSettings,
+]
 
 
 async def migrate_sqlite_to_postgres(
@@ -60,6 +88,7 @@ async def migrate_sqlite_to_postgres(
         if not sqlite_path:
             backup_path = os.getenv("BACKUP_PATH", "/data/backups")
             sqlite_path = os.path.join(backup_path, "telegram_backup.db")
+        sqlite_path = os.path.abspath(sqlite_path)
 
     if not os.path.exists(sqlite_path):
         raise FileNotFoundError(f"SQLite database not found: {sqlite_path}")
@@ -91,22 +120,9 @@ async def migrate_sqlite_to_postgres(
     counts = {}
 
     try:
-        # Migration order matters due to foreign key relationships
-        # 1. Users (no dependencies)
-        # 2. Chats (no dependencies)
-        # 3. Messages (depends on chats, users)
-        # 4. Media (depends on messages)
-        # 5. Reactions (depends on messages, users)
-        # 6. SyncStatus (depends on chats)
-        # 7. Metadata (no dependencies)
-
-        counts["users"] = await _migrate_table(source, target, User, batch_size)
-        counts["chats"] = await _migrate_table(source, target, Chat, batch_size)
-        counts["messages"] = await _migrate_table(source, target, Message, batch_size)
-        counts["media"] = await _migrate_table(source, target, Media, batch_size)
-        counts["reactions"] = await _migrate_table(source, target, Reaction, batch_size)
-        counts["sync_status"] = await _migrate_table(source, target, SyncStatus, batch_size)
-        counts["metadata"] = await _migrate_table(source, target, Metadata, batch_size)
+        # Migration order matters due to foreign key relationships.
+        for model in MIGRATION_MODELS:
+            counts[model.__tablename__] = await _migrate_table(source, target, model, batch_size)
 
         logger.info(f"Migration complete: {counts}")
 
@@ -180,6 +196,7 @@ async def verify_migration(sqlite_path: str = None, postgres_url: str = None) ->
         if not sqlite_path:
             backup_path = os.getenv("BACKUP_PATH", "/data/backups")
             sqlite_path = os.path.join(backup_path, "telegram_backup.db")
+        sqlite_path = os.path.abspath(sqlite_path)
 
     if postgres_url is None:
         host = os.getenv("POSTGRES_HOST", "localhost")
@@ -198,7 +215,7 @@ async def verify_migration(sqlite_path: str = None, postgres_url: str = None) ->
     await target.init()
 
     results = {}
-    models = [User, Chat, Message, Media, Reaction, SyncStatus, Metadata]
+    models = MIGRATION_MODELS
 
     try:
         for model in models:

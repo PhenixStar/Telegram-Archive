@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telegram-archive"
-version = "7.2.0"
+version = "7.11.2"
 description = "Automated Telegram backup with Docker. Performs incremental backups of messages and media on a configurable schedule."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -25,13 +25,14 @@ classifiers = [
 
 dependencies = [
     "telethon>=1.37.0",
+    "python-socks[asyncio]>=2.7.1",
     "APScheduler>=3.10.4",
     "python-dotenv>=1.0.1",
     "cryptg>=0.4.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
     "jinja2>=3.1.4",
-    "httpx>=0.28.0",
+    "httpx>=0.28.1",
     "websockets>=12.0",
     "sqlalchemy[asyncio]>=2.0.36",
     "aiosqlite>=0.20.0",
@@ -40,31 +41,35 @@ dependencies = [
     "alembic>=1.14.0",
     "greenlet>=3.1.0",
     "beautifulsoup4>=4.12.0",
+    "pywebpush>=2.3.0",
+    "py-vapid>=1.9.4",
+    "cryptography>=42.0.8",
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
 viewer = [
-    "Pillow>=10.0.0",  # v7.2.0: thumbnail generation
+    "Pillow>=10.4.0",  # v7.2.0: thumbnail generation
 ]
 dev = [
     "pytest>=7.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0",
-    "ruff>=0.9.0",
-    "pre-commit>=4.0.0",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.10",
+    "pre-commit>=4.5.1",
 ]
 
 [project.urls]
 Homepage = "https://github.com/GeiserX/Telegram-Archive"
 Repository = "https://github.com/GeiserX/Telegram-Archive"
 Issues = "https://github.com/GeiserX/Telegram-Archive/issues"
-Changelog = "https://github.com/GeiserX/Telegram-Archive/blob/master/docs/CHANGELOG.md"
+Changelog = "https://github.com/GeiserX/Telegram-Archive/blob/main/docs/CHANGELOG.md"
 
 [project.scripts]
 telegram-archive = "src.__main__:main"
 
-[tool.setuptools]
-packages = ["src"]
+[tool.setuptools.packages.find]
+include = ["src", "src.*"]
 
 [tool.setuptools.package-data]
 src = ["web/templates/**/*", "web/static/**/*"]

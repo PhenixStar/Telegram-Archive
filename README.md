@@ -13,11 +13,14 @@
   <a href="https://github.com/GeiserX/Telegram-Archive/stargazers"><img src="https://img.shields.io/github/stars/GeiserX/Telegram-Archive?style=flat-square&logo=github" alt="GitHub Stars"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/GeiserX/Telegram-Archive?style=flat-square" alt="License"></a>
   <a href="https://github.com/GeiserX/Telegram-Archive/releases"><img src="https://img.shields.io/github/v/release/GeiserX/Telegram-Archive?style=flat-square" alt="Release"></a>
+  <a href="https://codecov.io/gh/GeiserX/Telegram-Archive"><img src="https://codecov.io/gh/GeiserX/Telegram-Archive/graph/badge.svg" alt="codecov"></a>
 </p>
 
 <p align="center">
   <strong>Automated Telegram backup with Docker. Performs incremental backups of messages and media on a configurable schedule.</strong>
 </p>
+
+<p align="center"><em>This project is developed with AI assistance (Claude Code).</em></p>
 
 ## Features
 
@@ -126,6 +129,18 @@ cp .env.example .env
 TELEGRAM_API_ID=12345678          # Your API ID
 TELEGRAM_API_HASH=abcdef123456    # Your API Hash  
 TELEGRAM_PHONE=+1234567890        # Your phone (with country code)
+VIEWER_USERNAME=admin             # Required for web access
+VIEWER_PASSWORD=change-this       # Required for web access
+```
+
+**Optional: enable a SOCKS5 proxy for all Telegram connections** (useful in regions where Telegram is blocked or behind corporate firewalls)
+```bash
+TELEGRAM_PROXY_TYPE=socks5
+TELEGRAM_PROXY_ADDR=127.0.0.1
+TELEGRAM_PROXY_PORT=1080
+TELEGRAM_PROXY_USERNAME=
+TELEGRAM_PROXY_PASSWORD=
+TELEGRAM_PROXY_RDNS=false
 ```
 
 ### 3. Authenticate with Telegram
@@ -150,7 +165,7 @@ docker run -it --rm \
   -e TELEGRAM_PHONE=+YOUR_PHONE_NUMBER \
   -e SESSION_NAME=telegram_backup \
   -v /path/to/your/session:/data/session \
-  drumsergio/telegram-archive:latest \
+  drumsergio/telegram-archive:7.7.0 \
   python -m src auth
 ```
 
@@ -160,8 +175,8 @@ docker run -it --rm \
 # If using docker compose with a session volume
 docker run -it --rm \
   --env-file .env \
-  -v telegram-archive_session:/data/session \
-  drumsergio/telegram-archive:latest \
+  -v ./data:/data \
+  drumsergio/telegram-archive:7.7.0 \
   python -m src auth
 
 # Then restart the backup container
@@ -183,6 +198,8 @@ docker compose up -d
 
 **View your backup** at http://localhost:8000
 
+The default compose binds the viewer to `127.0.0.1`. Put it behind a reverse proxy only after setting `VIEWER_USERNAME` and `VIEWER_PASSWORD`. To deliberately run without auth for a local-only viewer, set `ALLOW_ANONYMOUS_VIEWER=true`.
+
 ### Common Issues
 
 | Problem | Solution |
@@ -200,9 +217,9 @@ The standalone viewer image (`drumsergio/telegram-archive-viewer`) lets you brow
 # Example: Viewer-only deployment
 services:
   telegram-viewer:
-    image: drumsergio/telegram-archive-viewer:latest
+    image: drumsergio/telegram-archive-viewer:7.7.0
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       BACKUP_PATH: /data/backups
       DATABASE_DIR: /data/db
@@ -210,8 +227,9 @@ services:
       VIEWER_PASSWORD: your-secure-password
       VIEWER_TIMEZONE: Europe/Madrid
     volumes:
-      - /path/to/backups:/data/backups:ro
-      - /path/to/db:/data/db:ro
+      # SQLite needs write access for WAL files, sessions, audit logs, and thumbnails.
+      # Use :ro only when the database is PostgreSQL and media is mounted separately.
+      - /path/to/data:/data
 ```
 
 Browse your backups at **http://localhost:8000**
@@ -232,6 +250,12 @@ The **Scope** column shows whether each variable applies to the backup scheduler
 | `TELEGRAM_API_ID` | *required* | B | API ID from [my.telegram.org](https://my.telegram.org/apps) |
 | `TELEGRAM_API_HASH` | *required* | B | API Hash from [my.telegram.org](https://my.telegram.org/apps) |
 | `TELEGRAM_PHONE` | *required* | B | Phone number with country code (e.g., `+1234567890`) |
+| `TELEGRAM_PROXY_TYPE` | - | B | Optional proxy type for all Telegram clients. Currently supports `socks5` |
+| `TELEGRAM_PROXY_ADDR` | - | B | SOCKS5 proxy host or IP address |
+| `TELEGRAM_PROXY_PORT` | - | B | SOCKS5 proxy port |
+| `TELEGRAM_PROXY_USERNAME` | - | B | Optional SOCKS5 username |
+| `TELEGRAM_PROXY_PASSWORD` | - | B | Optional SOCKS5 password |
+| `TELEGRAM_PROXY_RDNS` | `false` | B | Use remote DNS resolution through the SOCKS5 proxy |
 | **Backup Schedule & Storage** | | | |
 | `SCHEDULE` | `0 */6 * * *` | B | Cron expression for backup frequency |
 | `BACKUP_PATH` | `/data/backups` | B/V | Base path for backup data and media |
@@ -248,6 +272,7 @@ The **Scope** column shows whether each variable applies to the backup scheduler
 | `PRIORITY_CHAT_IDS` | - | B | Comma-separated chat IDs to process first in all operations |
 | `SKIP_MEDIA_CHAT_IDS` | - | B | Skip media downloads for specific chats (messages still backed up with text) |
 | `SKIP_MEDIA_DELETE_EXISTING` | `true` | B | Delete existing media files and DB records for chats in skip list to reclaim storage |
+| `SKIP_TOPIC_IDS` | - | B | Skip specific topics in forum supergroups (format: `chat_id:topic_id,...`) |
 | `LOG_LEVEL` | `INFO` | B/V | Logging verbosity: `DEBUG`, `INFO`, `WARNING`/`WARN`, `ERROR` |
 | **Chat Filtering** | | | See [Chat Filtering](#chat-filtering) below |
 | `CHAT_IDS` | - | B | **Whitelist mode**: backup ONLY these chats (ignores all other filters) |
@@ -263,13 +288,13 @@ The **Scope** column shows whether each variable applies to the backup scheduler
 | **Real-time Listener** | | | See [Real-time Listener](#real-time-listener) below |
 | `ENABLE_LISTENER` | `false` | B | **Master switch** — enables all `LISTEN_*` features below |
 | `LISTEN_EDITS` | `true` | B | Apply text edits in real-time |
-| `LISTEN_DELETIONS` | `true` | B | Mirror deletions (protected by [mass operation rate limiting](#mass-operation-protection)) |
+| `LISTEN_DELETIONS` | `false` | B | Mirror deletions from Telegram. Opt-in only; enabling this can delete archived messages |
 | `LISTEN_NEW_MESSAGES` | `true` | B | Save new messages in real-time between scheduled backups |
 | `LISTEN_NEW_MESSAGES_MEDIA` | `false` | B | Also download media immediately (vs. next scheduled backup) |
 | `LISTEN_CHAT_ACTIONS` | `true` | B | Track chat photo, title, and member changes |
 | `MASS_OPERATION_THRESHOLD` | `10` | B | Max operations per chat before rate limiting triggers |
 | `MASS_OPERATION_WINDOW_SECONDS` | `30` | B | Sliding window for counting operations (seconds) |
-| `MASS_OPERATION_BUFFER_DELAY` | `2.0` | B | Seconds to buffer operations before applying |
+| `MASS_OPERATION_BUFFER_DELAY` | `2.0` | B | Deprecated compatibility setting; operations are rate-limited, not buffered |
 | **Database** | | | See [Database Configuration](#database-configuration) below |
 | `DATABASE_URL` | - | B/V | Full database URL (highest priority, overrides all below) |
 | `DB_TYPE` | `sqlite` | B/V | Database engine: `sqlite` or `postgresql` |
@@ -282,10 +307,15 @@ The **Scope** column shows whether each variable applies to the backup scheduler
 | `POSTGRES_PASSWORD` | - | B/V | PostgreSQL password (required when using PostgreSQL) |
 | `POSTGRES_DB` | `telegram_backup` | B/V | PostgreSQL database name |
 | **Viewer & Authentication** | | | |
-| `VIEWER_USERNAME` | - | V | Web viewer username (both username and password required to enable auth) |
-| `VIEWER_PASSWORD` | - | V | Web viewer password |
+| `VIEWER_USERNAME` | - | V | Master web viewer username |
+| `VIEWER_PASSWORD` | - | V | Master web viewer password |
+| `ALLOW_ANONYMOUS_VIEWER` | `false` | V | Explicitly allow unauthenticated local viewer mode |
 | `AUTH_SESSION_DAYS` | `30` | V | Days before re-authentication is required |
 | `DISPLAY_CHAT_IDS` | - | V | Restrict viewer to specific chats (comma-separated IDs) |
+| `TRUST_PROXY_HEADERS` | `false` | V | Trust `X-Forwarded-For` / `X-Real-IP` only when your reverse proxy overwrites them |
+| `INTERNAL_PUSH_SECRET` | - | B/V | Shared secret for SQLite backup-to-viewer realtime push over Docker/private networks |
+| `VIEWER_HOST` | `localhost` | B | Viewer host for SQLite realtime push from backup/listener |
+| `VIEWER_PORT` | `8080` | B | Viewer port for SQLite realtime push from backup/listener |
 | `VIEWER_TIMEZONE` | `Europe/Madrid` | V | Timezone for displayed timestamps ([tz database names](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)) |
 | `SHOW_STATS` | `true` | V | Show **Admin → Stats** tab and backup statistics panel in the viewer (when `false`, the tab is hidden) |
 | **Security** | | | |
@@ -317,12 +347,12 @@ CHAT_TYPES=private,groups
 CHAT_TYPES=channels
 CHANNELS_EXCLUDE_CHAT_IDS=-1001234567890
 
-# Backup all groups plus one specific channel
-CHAT_TYPES=groups
+# Backup groups plus one specific channel
+CHAT_TYPES=groups,channels
 CHANNELS_INCLUDE_CHAT_IDS=-1001234567890
 ```
 
-> `*_INCLUDE_*` variables are **additive** — they add chats to what `CHAT_TYPES` already selects. For exclusive selection, use `CHAT_IDS` instead.
+> Include variables are **allow-lists**, not additive overrides. `GLOBAL_INCLUDE_CHAT_IDS` limits all selected types to those IDs; type-specific include variables limit only that type. For the simplest exclusive selection, use `CHAT_IDS`.
 
 **Chat ID format** — Telegram uses "marked" IDs:
 - **Users**: positive numbers (`123456789`)
@@ -331,6 +361,15 @@ CHANNELS_INCLUDE_CHAT_IDS=-1001234567890
 
 Find a chat's ID by forwarding a message to [@userinfobot](https://t.me/userinfobot).
 
+**Topic filtering** — For forum-enabled supergroups, you can exclude specific topics without excluding the entire chat using `SKIP_TOPIC_IDS`:
+
+```bash
+# Skip topics 42 and 1337 in one chat, and topic 7 in another
+SKIP_TOPIC_IDS=-1001234567890:42,-1001234567890:1337,-1009876543210:7
+```
+
+> Note: The topic-creating service message (1 per topic) may still be backed up since it lacks `reply_to` metadata. This does not affect user-generated content.
+
 ### Real-time Listener
 
 The scheduled backup only captures new messages. To also track edits and deletions between backups, enable the real-time listener:
@@ -338,23 +377,23 @@ The scheduled backup only captures new messages. To also track edits and deletio
 ```yaml
 ENABLE_LISTENER: "true"        # Master switch — required
 LISTEN_EDITS: "true"           # Track text edits (safe, default: true)
-LISTEN_DELETIONS: "true"       # Mirror deletions (default: true, protected by rate limiting)
+LISTEN_DELETIONS: "false"      # Keep archive entries when Telegram messages are deleted
 LISTEN_NEW_MESSAGES: "true"    # Save new messages instantly (default: true)
 ```
 
 **How it works:** stays connected to Telegram between scheduled backups, captures changes as they happen, and automatically reconnects if disconnected.
 
-**Backup protection:** when `LISTEN_DELETIONS=true`, deletions are protected by the [mass operation rate limiter](#mass-operation-protection). Set `LISTEN_DELETIONS=false` to never delete anything from your backup.
+**Backup protection:** `LISTEN_DELETIONS=false` is the safe default. Set `LISTEN_DELETIONS=true` only if you explicitly want mirror behavior where Telegram deletions also remove archived messages.
 
 **Alternative — batch sync:** set `SYNC_DELETIONS_EDITS=true` to check ALL backed-up messages on each scheduled run. This is expensive and slow — only use for a one-time catch-up, then switch to the real-time listener.
 
 ### Mass Operation Protection
 
-When the listener is enabled and `LISTEN_DELETIONS=true`, a sliding-window rate limiter protects against mass deletion attacks:
+When the listener is enabled and `LISTEN_DELETIONS=true`, a sliding-window rate limiter limits mass deletion damage:
 
-1. Operations are **buffered** for `MASS_OPERATION_BUFFER_DELAY` seconds before being applied
+1. Operations under the threshold are applied immediately
 2. A sliding window tracks operations per chat over `MASS_OPERATION_WINDOW_SECONDS`
-3. When `MASS_OPERATION_THRESHOLD` is exceeded, the **entire buffer is discarded** — zero changes written
+3. When `MASS_OPERATION_THRESHOLD` is exceeded, remaining operations are blocked for that window
 
 **Example:** someone deletes 50 messages in 10 seconds with default settings (threshold=10, window=30s) — the first 10 are applied, remaining 40 are blocked. For **zero** deletions from your backup, set `LISTEN_DELETIONS=false`.
 
@@ -369,7 +408,7 @@ Telegram Archive supports **SQLite** (default, zero-config) and **PostgreSQL** (
 **Using PostgreSQL:**
 
 1. Uncomment the `postgres` service in `docker-compose.yml`
-2. Set `DB_TYPE=postgresql` and `POSTGRES_PASSWORD` in your `.env`
+2. Set `DB_TYPE=postgresql` and `POSTGRES_PASSWORD` in your `.env`, or use a full `DATABASE_URL`
 3. Uncomment `depends_on` in both backup and viewer services
 4. Run `docker compose up -d`
 
@@ -410,7 +449,7 @@ For production stability, pin to specific versions instead of `latest`:
 ```yaml
 services:
   telegram-backup:
-    image: drumsergio/telegram-archive:v7.1.7  # Pin to specific version
+    image: drumsergio/telegram-archive:7.7.0  # Pin to a reviewed release
 ```
 
 Check [Releases](https://github.com/GeiserX/Telegram-Archive/releases) for available versions.
@@ -507,7 +546,24 @@ data/
 | "Permission denied" | `chmod -R 755 data/` |
 | Media files missing/corrupted | Set `VERIFY_MEDIA=true` to re-download them |
 | Backup interrupted | Set `VERIFY_MEDIA=true` once to recover missing files |
+| Re-run touches every media file in a git-annex / DataLad backup | See [git-annex / DataLad layouts](#git-annex--datalad-layouts) below |
 | "duplicate key value violates unique constraint reactions_pkey" | See [Reactions Sequence Fix](#reactions-sequence-fix-postgresql) below |
+
+### git-annex / DataLad layouts
+
+When the media tree is committed to git-annex (or DataLad), files appear
+as symlinks pointing into the repository's annex object store. The
+backup process treats an existing symlink as authoritative and never
+overwrites it on re-run -- but content-hash deduplication only
+recognizes existing `_shared/` blobs when their symlink targets are
+reachable from the running process. If you mount only the working tree
+into a container, the annex object store sits outside the mount and is
+invisible to the backup.
+
+For fully idempotent re-runs against an annex-managed archive, ensure
+the annex object store is reachable -- typically by mounting the
+repository root (not just the per-session subdirectory) and pointing
+the data path at the session subdirectory inside it.
 
 ### Reactions Sequence Fix (PostgreSQL)
 
@@ -531,7 +587,7 @@ DETAIL: Key (id)=(XXXX) already exists
 
    Or use the provided script:
    ```bash
-   curl -O https://raw.githubusercontent.com/GeiserX/Telegram-Archive/master/scripts/fix_reactions_sequence.sql
+   curl -O https://raw.githubusercontent.com/GeiserX/Telegram-Archive/main/scripts/fix_reactions_sequence.sql
    docker exec -i <postgres-container> psql -U telegram -d telegram_backup < fix_reactions_sequence.sql
    ```
 
@@ -540,6 +596,26 @@ DETAIL: Key (id)=(XXXX) already exists
 - Secret chats not supported (API limitation)
 - Edit history not tracked (only latest version stored; enable `ENABLE_LISTENER=true` to track edits in real-time)
 - Deleted messages before first backup cannot be recovered
+
+## Ecosystem
+
+| Project | Type | Description |
+|---------|------|-------------|
+| [telegram-archive-mcp](https://github.com/GeiserX/telegram-archive-mcp) | MCP Server | Query archived messages from AI assistants |
+| [n8n-nodes-telegram-archive](https://github.com/GeiserX/n8n-nodes-telegram-archive) | n8n Node | Workflow automation for Telegram Archive |
+
+## Other Telegram Projects by GeiserX
+
+- [paperless-telegram-bot](https://github.com/GeiserX/paperless-telegram-bot) — Manage Paperless-NGX documents through Telegram
+- [AskePub](https://github.com/GeiserX/AskePub) — Telegram bot for ePub annotation with GPT-4
+- [telegram-delay-channel-cloner](https://github.com/GeiserX/telegram-delay-channel-cloner) — Relay messages between channels with configurable delay
+- [jellyfin-telegram-channel-sync](https://github.com/GeiserX/jellyfin-telegram-channel-sync) — Sync Jellyfin access with Telegram channel membership
+- [telegram-slskd-local-bot](https://github.com/GeiserX/telegram-slskd-local-bot) — Automated music discovery and download via Telegram
+
+## Supporters
+
+> This project is made possible by generous supporters:
+> **Calvin**
 
 ## License
 

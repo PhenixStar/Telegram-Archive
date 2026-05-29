@@ -14,6 +14,88 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def _parse_bool(value: str | None, default: bool = False) -> bool:
+    """Parse a boolean-like environment variable value."""
+    if value is None or value == "":
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    raise ValueError(f"Invalid boolean value: {value}")
+
+
+def build_telegram_proxy_from_env() -> dict | None:
+    """Build Telethon proxy configuration from environment variables."""
+    proxy_type = os.getenv("TELEGRAM_PROXY_TYPE", "").strip().lower()
+    proxy_addr = os.getenv("TELEGRAM_PROXY_ADDR", "").strip()
+    proxy_port = os.getenv("TELEGRAM_PROXY_PORT", "").strip()
+    proxy_username = os.getenv("TELEGRAM_PROXY_USERNAME", "").strip()
+    proxy_password = os.getenv("TELEGRAM_PROXY_PASSWORD", "").strip()
+    proxy_rdns = os.getenv("TELEGRAM_PROXY_RDNS")
+
+    has_proxy_config = any([proxy_type, proxy_addr, proxy_port, proxy_username, proxy_password, proxy_rdns])
+    if not has_proxy_config:
+        return None
+
+    missing_fields = []
+    if not proxy_type:
+        missing_fields.append("TELEGRAM_PROXY_TYPE")
+    if not proxy_addr:
+        missing_fields.append("TELEGRAM_PROXY_ADDR")
+    if not proxy_port:
+        missing_fields.append("TELEGRAM_PROXY_PORT")
+    if missing_fields:
+        missing = ", ".join(missing_fields)
+        raise ValueError(f"Telegram proxy configuration is incomplete. Missing required settings: {missing}")
+
+    if proxy_type != "socks5":
+        raise ValueError("TELEGRAM_PROXY_TYPE must be 'socks5'")
+
+    try:
+        parsed_port = int(proxy_port)
+    except ValueError as e:
+        raise ValueError(f"TELEGRAM_PROXY_PORT must be a valid integer: {e}") from e
+
+    if not 1 <= parsed_port <= 65535:
+        raise ValueError(f"TELEGRAM_PROXY_PORT must be between 1 and 65535, got {parsed_port}")
+
+    try:
+        parsed_rdns = _parse_bool(proxy_rdns, default=False)
+    except ValueError as e:
+        raise ValueError(f"TELEGRAM_PROXY_RDNS must be a boolean value: {e}") from e
+
+    if bool(proxy_username) != bool(proxy_password):
+        raise ValueError(
+            "TELEGRAM_PROXY_USERNAME and TELEGRAM_PROXY_PASSWORD must both be set together for SOCKS5 auth"
+        )
+
+    proxy = {
+        "proxy_type": proxy_type,
+        "addr": proxy_addr,
+        "port": parsed_port,
+        "rdns": parsed_rdns,
+    }
+    if proxy_username:
+        proxy["username"] = proxy_username
+    if proxy_password:
+        proxy["password"] = proxy_password
+
+    return proxy
+
+
+def build_telegram_client_kwargs() -> dict:
+    """Build common Telethon client keyword arguments from environment configuration."""
+    kwargs: dict = {"flood_sleep_threshold": 0}
+    proxy = build_telegram_proxy_from_env()
+    if proxy is not None:
+        kwargs["proxy"] = dict(proxy)
+    return kwargs
+
+
 class Config:
     """Configuration settings loaded from environment variables."""
 
@@ -28,7 +110,7 @@ class Config:
         self.schedule = os.getenv("SCHEDULE", "0 */6 * * *")
 
         # Backup options
-        self.backup_path = os.getenv("BACKUP_PATH", "/data/backups")
+        self.backup_path = os.path.abspath(os.getenv("BACKUP_PATH", "/data/backups"))
         self.download_media = os.getenv("DOWNLOAD_MEDIA", "true").lower() == "true"
         self.max_media_size_mb = int(os.getenv("MAX_MEDIA_SIZE_MB", "100"))
 
@@ -103,8 +185,14 @@ class Config:
         # Delete existing media files and records for chats in skip list (reclaim storage)
         self.skip_media_delete_existing = os.getenv("SKIP_MEDIA_DELETE_EXISTING", "true").lower() == "true"
 
+        # Skip specific topics inside forum supergroups
+        # Format: SKIP_TOPIC_IDS=-1001234567890:42,-1001234567890:1337
+        # Each entry is chat_id:topic_id — skips that topic but keeps the rest of the chat
+        self.skip_topic_ids = self._parse_topic_skip_list(os.getenv("SKIP_TOPIC_IDS", ""))
+
         # Session configuration
         self.session_name = os.getenv("SESSION_NAME", "telegram_backup")
+        self.telegram_proxy = build_telegram_proxy_from_env()
 
         # Logging
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -117,7 +205,7 @@ class Config:
         # Store session in a separate directory from backups
         # If BACKUP_PATH is /data/backups, session goes to /data/session
         backup_parent = os.path.dirname(self.backup_path.rstrip("/\\"))
-        self.session_dir = os.getenv("SESSION_DIR", os.path.join(backup_parent, "session"))
+        self.session_dir = os.path.abspath(os.getenv("SESSION_DIR", os.path.join(backup_parent, "session")))
         self.session_path = os.path.join(self.session_dir, self.session_name)
 
         # Database path configuration
@@ -127,11 +215,15 @@ class Config:
         db_dir_env = os.getenv("DATABASE_DIR")
 
         if db_path_env:
-            self.database_path = db_path_env
+            self.database_path = os.path.abspath(db_path_env)
         elif db_dir_env:
-            self.database_path = os.path.join(db_dir_env, "telegram_backup.db")
+            self.database_path = os.path.abspath(os.path.join(db_dir_env, "telegram_backup.db"))
         else:
-            self.database_path = os.path.join(self.backup_path, "telegram_backup.db")
+            db_path_v3 = os.getenv("DB_PATH")
+            if db_path_v3:
+                self.database_path = os.path.abspath(db_path_v3)
+            else:
+                self.database_path = os.path.join(self.backup_path, "telegram_backup.db")
 
         self.media_path = os.path.join(self.backup_path, "media")
 
@@ -185,7 +277,7 @@ class Config:
         # LISTEN_DELETIONS: Delete messages from backup when deleted on Telegram
         # ⚠️ DEFAULT FALSE - Enabling defeats the purpose of having a backup!
         # Only enable if you explicitly want to mirror Telegram exactly
-        self.listen_deletions = os.getenv("LISTEN_DELETIONS", "true").lower() == "true"
+        self.listen_deletions = _parse_bool(os.getenv("LISTEN_DELETIONS"), default=False)
 
         # LISTEN_NEW_MESSAGES: Save new messages to backup in real-time
         # When enabled, new messages are saved immediately instead of waiting for scheduled backup
@@ -349,12 +441,65 @@ class Config:
         if self.skip_media_chat_ids:
             cleanup_status = "will delete existing media" if self.skip_media_delete_existing else "keeps existing media"
             logger.info(f"Media downloads skipped for chat IDs: {self.skip_media_chat_ids} ({cleanup_status})")
+        if self.skip_topic_ids:
+            total_topics = sum(len(t) for t in self.skip_topic_ids.values())
+            logger.info(f"Topic filtering: skipping {total_topics} topic(s) across {len(self.skip_topic_ids)} chat(s)")
+        if self.telegram_proxy:
+            logger.info("Telegram proxy enabled (type=socks5, rdns=%s)", self.telegram_proxy["rdns"])
+            logger.debug(
+                "Telegram proxy endpoint: %s:%s",
+                self.telegram_proxy["addr"],
+                self.telegram_proxy["port"],
+            )
 
     def _parse_id_list(self, id_str: str) -> set:
         """Parse comma-separated ID string into a set of integers."""
         if not id_str or not id_str.strip():
             return set()
         return {int(id.strip()) for id in id_str.split(",") if id.strip()}
+
+    def _parse_topic_skip_list(self, skip_str: str) -> dict[int, set[int]]:
+        """Parse SKIP_TOPIC_IDS into {chat_id: {topic_id, ...}}.
+
+        Format: chat_id:topic_id,chat_id:topic_id,...
+        Example: -1001234567890:42,-1001234567890:1337,-1009876543210:7
+        """
+        result: dict[int, set[int]] = {}
+        if not skip_str or not skip_str.strip():
+            return result
+        for entry in skip_str.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if ":" not in entry:
+                raise ValueError(f"Invalid SKIP_TOPIC_IDS entry '{entry}': expected format chat_id:topic_id")
+            chat_part, topic_part = entry.split(":", 1)
+            try:
+                chat_id = int(chat_part.strip())
+                topic_id = int(topic_part.strip())
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid SKIP_TOPIC_IDS entry '{entry}': chat_id and topic_id must be integers"
+                ) from e
+            result.setdefault(chat_id, set()).add(topic_id)
+        return result
+
+    def should_skip_topic(self, chat_id: int, topic_id: int | None) -> bool:
+        """Check if a specific topic in a chat should be skipped.
+
+        Args:
+            chat_id: Telegram chat ID (marked format)
+            topic_id: Forum topic ID (reply_to_top_id), or None for non-topic messages
+
+        Returns:
+            True if this topic should be skipped, False otherwise
+        """
+        if topic_id is None or not self.skip_topic_ids:
+            return False
+        skip_set = self.skip_topic_ids.get(chat_id)
+        if skip_set is None:
+            return False
+        return topic_id in skip_set
 
     def _get_required_env(self, key: str, value_type: type):
         """
@@ -528,6 +673,18 @@ class Config:
                 "Missing required Telegram credentials (TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE). "
                 "Please set them in your .env file."
             )
+
+    def get_telegram_client_kwargs(self) -> dict:
+        """Get shared TelegramClient keyword arguments.
+
+        ``flood_sleep_threshold=0`` forces Telethon to raise FloodWaitError
+        instead of silently sleeping, so long waits become visible in the log
+        via ``iter_messages_with_flood_retry``.
+        """
+        kwargs: dict = {"flood_sleep_threshold": 0}
+        if self.telegram_proxy is not None:
+            kwargs["proxy"] = dict(self.telegram_proxy)
+        return kwargs
 
 
 def setup_logging(config: Config):

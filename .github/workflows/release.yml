@@ -11,7 +11,7 @@ permissions:
 jobs:
   release:
     name: Create GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
               echo "" >> /tmp/release_notes.md
               echo "---" >> /tmp/release_notes.md
               echo "" >> /tmp/release_notes.md
-              echo "📋 **Full changelog:** [docs/CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/docs/CHANGELOG.md)" >> /tmp/release_notes.md
+              echo "📋 **Full changelog:** [docs/CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/docs/CHANGELOG.md)" >> /tmp/release_notes.md
               echo "has_notes=true" >> $GITHUB_OUTPUT
             else
               echo "No changelog notes found for $VERSION"

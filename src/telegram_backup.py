@@ -11,6 +11,7 @@ from telethon import TelegramClient
 from telethon.errors import (
     ChannelPrivateError,
     ChatForbiddenError,
+    FloodWaitError,
     UserBannedInChannelError,
 )
 from telethon.tl.types import (
@@ -23,6 +24,13 @@ from .backup_extraction import BackupExtractionMixin
 from .backup_media import BackupMediaMixin
 from .config import Config
 from .db import DatabaseAdapter, create_adapter
+from .message_utils import (
+    compute_file_hash,
+    download_and_shard_media,
+    extract_topic_id,
+    finalize_atomic_download,
+    resolve_shared_file_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +87,13 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             return
 
         # Create new client
-        self.client = TelegramClient(self.config.session_path, self.config.api_id, self.config.api_hash)
+        logger.info(f"Using Telethon session database: {self.config.session_path}.session")
+        self.client = TelegramClient(
+            self.config.session_path,
+            self.config.api_id,
+            self.config.api_hash,
+            **self.config.get_telegram_client_kwargs(),
+        )
         self._owns_client = True
 
         # Fix for database locked errors: Enable WAL mode for session DB
@@ -224,29 +238,114 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 for include_id in missing_include_ids:
                     is_in_archive = include_id in archived_chat_ids
                     try:
-                        entity = await self.client.get_entity(include_id)
+                        entity = await call_with_flood_retry(self.client.get_entity, cid)
 
-                        # Create a simple dialog-like wrapper
                         class SimpleDialog:
                             def __init__(self, entity):
                                 self.entity = entity
                                 self.date = datetime.now()
 
                         filtered_dialogs.append(SimpleDialog(entity))
-                        logger.info(
-                            f"  → Added: {self._get_chat_name(entity)} (ID: {include_id}){' [in archive]' if is_in_archive else ' [not in any dialog list]'}"
-                        )
+                        seen_chat_ids.add(cid)
+                        logger.info(f"  → Fetched: {self._get_chat_name(entity)} (ID: {cid})")
                     except Exception as e:
-                        logger.warning(f"  → Could not fetch included chat {include_id}: {e}")
+                        logger.warning(f"  → Could not fetch chat {cid}: {e}")
 
-            # Delete only explicitly excluded chats from database
-            if explicitly_excluded_chat_ids:
-                logger.info(f"Deleting {len(explicitly_excluded_chat_ids)} explicitly excluded chats from database...")
-                for chat_id in explicitly_excluded_chat_ids:
-                    try:
-                        await self.db.delete_chat_and_related_data(chat_id, self.config.media_path)
-                    except Exception as e:
-                        logger.error(f"Error deleting chat {chat_id}: {e}", exc_info=True)
+            else:
+                # Type-based mode: fetch full dialog list and filter
+                logger.info("Fetching dialog list...")
+                dialogs = await self._get_dialogs()
+                logger.info(f"Found {len(dialogs)} total dialogs")
+
+                # v6.2.0: Fetch archived dialogs
+                logger.info("Fetching archived dialogs...")
+                archived_dialogs = await self._get_dialogs(archived=True)
+                logger.info(f"Found {len(archived_dialogs)} archived dialogs")
+
+                # Build set of archived chat IDs for fast lookup.
+                # Only trust this for chats NOT found in the regular dialog list,
+                # since Telegram's API may occasionally return a chat in both lists.
+                archived_chat_ids = set()
+                for dialog in archived_dialogs:
+                    archived_chat_ids.add(self._get_marked_id(dialog.entity))
+                logger.info(
+                    f"Archived chat IDs from Telegram: {archived_chat_ids & (self.config.global_include_ids | self.config.private_include_ids | self.config.groups_include_ids | self.config.channels_include_ids) if archived_chat_ids else 'none matching includes'}"
+                )
+
+                # Filter dialogs based on chat type and ID filters
+                # Also delete explicitly excluded chats from database
+                filtered_dialogs = []
+                explicitly_excluded_chat_ids = set()
+                seen_chat_ids = set()  # Track which IDs we've processed from dialogs
+
+                for dialog in dialogs:
+                    entity = dialog.entity
+                    # Use marked ID (with -100 prefix for channels/supergroups) to match user config
+                    chat_id = self._get_marked_id(entity)
+                    seen_chat_ids.add(chat_id)
+
+                    is_bot = isinstance(entity, User) and entity.bot
+                    is_user = isinstance(entity, User) and not entity.bot
+                    is_group = isinstance(entity, Chat) or (isinstance(entity, Channel) and entity.megagroup)
+                    is_channel = isinstance(entity, Channel) and not entity.megagroup
+
+                    # Check if chat is explicitly in an exclude list (not just filtered out)
+                    is_explicitly_excluded = (
+                        chat_id in self.config.global_exclude_ids
+                        or ((is_user or is_bot) and chat_id in self.config.private_exclude_ids)
+                        or (is_group and chat_id in self.config.groups_exclude_ids)
+                        or (is_channel and chat_id in self.config.channels_exclude_ids)
+                    )
+
+                    if is_explicitly_excluded:
+                        # Chat is explicitly excluded - mark for deletion
+                        explicitly_excluded_chat_ids.add(chat_id)
+                    elif self.config.should_backup_chat(chat_id, is_user, is_group, is_channel, is_bot):
+                        # Chat should be backed up
+                        filtered_dialogs.append(dialog)
+
+                # Fetch explicitly included chats that weren't in dialogs
+                # This handles cases where chats don't appear in the dialog list
+                # (newly created, archived, or not recently messaged)
+                all_include_ids = (
+                    self.config.global_include_ids
+                    | self.config.private_include_ids
+                    | self.config.groups_include_ids
+                    | self.config.channels_include_ids
+                )
+                missing_include_ids = all_include_ids - seen_chat_ids - explicitly_excluded_chat_ids
+
+                if missing_include_ids:
+                    logger.info(
+                        f"Fetching {len(missing_include_ids)} explicitly included chats not in regular dialogs: {missing_include_ids}"
+                    )
+                    for include_id in missing_include_ids:
+                        is_in_archive = include_id in archived_chat_ids
+                        try:
+                            entity = await call_with_flood_retry(self.client.get_entity, include_id)
+
+                            class SimpleDialog:
+                                def __init__(self, entity):
+                                    self.entity = entity
+                                    self.date = datetime.now()
+
+                            filtered_dialogs.append(SimpleDialog(entity))
+                            logger.info(
+                                f"  → Added: {self._get_chat_name(entity)} (ID: {include_id}){' [in archive]' if is_in_archive else ' [not in any dialog list]'}"
+                            )
+                        except Exception as e:
+                            logger.warning(f"  → Could not fetch included chat {include_id}: {e}")
+
+                # Delete only explicitly excluded chats from database
+                if explicitly_excluded_chat_ids:
+                    logger.info(
+                        f"Deleting {len(explicitly_excluded_chat_ids)} explicitly excluded chats from database..."
+                    )
+                    for chat_id in explicitly_excluded_chat_ids:
+                        try:
+                            await self.db.delete_chat_and_related_data(chat_id, self.config.media_path)
+                        except Exception as e:
+                            logger.error(f"Error deleting chat {chat_id}: {e}", exc_info=True)
 
             logger.info(f"Backing up {len(filtered_dialogs)} dialogs after filtering")
 
@@ -431,6 +530,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             logger.info(f"Total storage: {stats['total_size_mb']} MB")
             logger.info("=" * 60)
 
+            # Retry previously failed media downloads
+            await self._retry_pending_media_downloads()
+
             # Run media verification if enabled
             if self.config.verify_media:
                 await self._verify_and_redownload_media()
@@ -454,9 +556,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         archived ones, which causes overlap with the folder=1 results.
         """
         if archived:
-            dialogs = await self.client.get_dialogs(folder=1)
+            dialogs = await call_with_flood_retry(self.client.get_dialogs, folder=1)
         else:
-            dialogs = await self.client.get_dialogs(folder=0)
+            dialogs = await call_with_flood_retry(self.client.get_dialogs, folder=0)
         return dialogs
 
     async def _verify_and_redownload_media(self) -> None:
@@ -485,6 +587,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
         missing_files = []
         corrupted_files = []
+        skipped_symlinks = 0
 
         # Phase 1: Check which files need re-downloading
         for record in media_records:
@@ -492,9 +595,20 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             if not file_path:
                 continue
 
-            # Check if file exists
-            if not os.path.exists(file_path):
+            # Detect "truly missing" via lexists so an existing symlink
+            # whose ultimate target is unreachable (e.g. git-annex object
+            # outside the bind mount) is not flagged for re-download.
+            # Re-downloading it would atomic-rename a regular file on top
+            # of the symlink, mutating an archived working tree (issue #143).
+            if not os.path.lexists(file_path):
                 missing_files.append(record)
+                continue
+
+            # Trust symlinks: their content is managed externally and may
+            # be unreachable from this process. We cannot meaningfully
+            # check size or emptiness without following the link.
+            if os.path.islink(file_path):
+                skipped_symlinks += 1
                 continue
 
             # Check if file is empty (interrupted download)
@@ -512,7 +626,10 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
         total_issues = len(missing_files) + len(corrupted_files)
         if total_issues == 0:
-            logger.info("✓ All media files verified - no issues found")
+            msg = "✓ All media files verified - no issues found"
+            if skipped_symlinks:
+                msg += f" ({skipped_symlinks} symlink entries skipped)"
+            logger.info(msg)
             logger.info("=" * 60)
             return
 
@@ -546,7 +663,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
                 # Fetch messages from Telegram in batch
                 try:
-                    messages = await self.client.get_messages(chat_id, ids=message_ids)
+                    messages = await call_with_flood_retry(self.client.get_messages, chat_id, ids=message_ids)
                 except Exception as e:
                     logger.warning(f"Cannot access chat {chat_id} for media verification: {e}")
                     failed += len(records)
@@ -574,9 +691,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         continue
 
                     try:
-                        # Delete corrupted file if exists
+                        # Delete corrupted file if exists (lexists catches dangling symlinks)
                         file_path = record.get("file_path")
-                        if file_path and os.path.exists(file_path):
+                        if file_path and os.path.lexists(file_path):
                             os.remove(file_path)
 
                         # Re-download using existing method
@@ -601,6 +718,88 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         logger.info("Media verification completed!")
         logger.info(f"Re-downloaded: {redownloaded} files")
         logger.info(f"Failed/Unrecoverable: {failed} files")
+        logger.info("=" * 60)
+
+    async def _retry_pending_media_downloads(self) -> None:
+        """Retry downloading media that previously failed.
+
+        Picks up records with downloaded=0 (excluding metadata-only types
+        like contact/geo/poll) and re-attempts the download from Telegram.
+        Respects MAX_MEDIA_SIZE_BYTES — files that still exceed the limit
+        are skipped silently.
+        """
+        pending = await self.db.get_pending_media_downloads(self.config.get_max_media_size_bytes())
+        if not pending:
+            return
+
+        logger.info("=" * 60)
+        logger.info(f"Retrying {len(pending)} pending media downloads...")
+
+        # Group by chat_id for efficient batch fetching
+        by_chat: dict[int, list[dict]] = {}
+        for record in pending:
+            chat_id = record.get("chat_id")
+            if chat_id:
+                by_chat.setdefault(chat_id, []).append(record)
+
+        downloaded = 0
+        skipped = 0
+        failed = 0
+
+        for chat_id, records in by_chat.items():
+            if chat_id in self.config.skip_media_chat_ids:
+                skipped += len(records)
+                continue
+
+            try:
+                message_ids = [r["message_id"] for r in records if r.get("message_id")]
+                if not message_ids:
+                    continue
+
+                try:
+                    messages = await call_with_flood_retry(self.client.get_messages, chat_id, ids=message_ids)
+                except Exception as e:
+                    logger.warning(f"Cannot access chat for pending media retry: {e}")
+                    failed += len(records)
+                    continue
+
+                msg_map = {}
+                for msg in messages:
+                    if msg:
+                        msg_map[msg.id] = msg
+
+                for record in records:
+                    msg_id = record.get("message_id")
+                    msg = msg_map.get(msg_id)
+
+                    if not msg:
+                        skipped += 1
+                        continue
+
+                    if not msg.media:
+                        skipped += 1
+                        continue
+
+                    # Re-attempt _process_media (which handles size checks internally)
+                    try:
+                        result = await self._process_media(msg, chat_id)
+                        if result and result.get("downloaded"):
+                            await self.db.insert_media(result)
+                            downloaded += 1
+                        else:
+                            skipped += 1
+                    except Exception as e:
+                        logger.debug(f"Retry failed for pending media: {e}")
+                        failed += 1
+
+            except Exception as e:
+                logger.error(f"Error retrying pending media for chat: {e}")
+                failed += len(records)
+
+        if downloaded > 0 or failed > 0:
+            logger.info(f"Pending media retry: {downloaded} downloaded, {skipped} skipped, {failed} failed")
+        else:
+            logger.info("Pending media retry: no actionable items")
         logger.info("=" * 60)
 
     async def _backup_dialog(self, dialog, is_archived: bool = False) -> int:
@@ -858,7 +1057,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
             try:
                 # Fetch current state from Telegram
-                remote_messages = await self.client.get_messages(entity, ids=batch_ids)
+                remote_messages = await call_with_flood_retry(self.client.get_messages, entity, ids=batch_ids)
 
                 for msg_id, remote_msg in zip(batch_ids, remote_messages):
                     # Check for deletion
@@ -914,7 +1113,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             from telethon.tl.types import InputMessagesFilterPinned
 
             # Fetch all pinned messages from Telegram (up to 100)
-            pinned_messages = await self.client.get_messages(entity, filter=InputMessagesFilterPinned(), limit=100)
+            pinned_messages = await call_with_flood_retry(
+                self.client.get_messages, entity, filter=InputMessagesFilterPinned(), limit=100
+            )
 
             if pinned_messages:
                 pinned_ids = [msg.id for msg in pinned_messages]
@@ -990,6 +1191,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         "is_hidden": 1 if getattr(topic, "hidden", False) else 0,
                         "date": getattr(topic, "date", None),
                     }
+                    if self.config.should_skip_topic(chat_id, topic.id):
+                        logger.debug(f"  → Skipping excluded topic {topic.id}")
+                        continue
                     await self.db.upsert_forum_topic(topic_data)
                     topics_count += 1
 
@@ -1023,9 +1227,12 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
             topics_count = 0
             for topic_id in topic_ids:
+                if self.config.should_skip_topic(chat_id, topic_id):
+                    logger.debug(f"  → Skipping excluded topic {topic_id}")
+                    continue
                 # Try to get the topic's first message for metadata
                 try:
-                    msgs = await self.client.get_messages(entity, ids=[topic_id])
+                    msgs = await call_with_flood_retry(self.client.get_messages, entity, ids=[topic_id])
                     if msgs and msgs[0]:
                         msg = msgs[0]
                         topic_data = {
@@ -1164,9 +1371,12 @@ def main():
     import asyncio
 
     from .config import Config, setup_logging
+    from .migrate_shared_media import migrate_shared_media
 
     config = Config()
     setup_logging(config)
+
+    migrate_shared_media(config.media_path)
 
     return asyncio.run(run_backup(config))
 

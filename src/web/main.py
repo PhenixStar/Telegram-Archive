@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from ..config import Config
 from ..db import DatabaseAdapter, close_database, get_db_manager, init_database
 from ..realtime import RealtimeListener
+from .media_utils import THUMBNAIL_EXTENSIONS, legacy_folder_alternates, legacy_marked_chat_ids
 
 if TYPE_CHECKING:
     from .push import PushNotificationManager
@@ -239,7 +240,7 @@ async def stats_calculation_scheduler():
             next_run = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
 
             if now.hour >= target_hour:
-                next_run = next_run.replace(day=now.day + 1)
+                next_run = next_run + timedelta(days=1)
 
             wait_seconds = (next_run - now).total_seconds()
             logger.info(

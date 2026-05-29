@@ -226,6 +226,35 @@ async def run_list_chats(args) -> int:
         return 1
 
 
+async def run_fill_gaps_cmd(args) -> int:
+    """Run fill-gaps command."""
+    from .config import Config, setup_logging
+    from .telegram_backup import run_fill_gaps
+
+    try:
+        config = Config()
+        if args.threshold is not None:
+            config.gap_threshold = args.threshold
+        setup_logging(config)
+
+        summary = await run_fill_gaps(config, chat_id=args.chat_id)
+        print("\nGap-fill complete:")
+        print(f"  Chats scanned: {summary['chats_scanned']}")
+        print(f"  Chats with gaps: {summary['chats_with_gaps']}")
+        print(f"  Total gaps found: {summary['total_gaps']}")
+        print(f"  Messages recovered: {summary['total_recovered']}")
+        if summary["details"]:
+            for detail in summary["details"]:
+                print(
+                    f"  - {detail['chat_name']} (ID {detail['chat_id']}): "
+                    f"{detail['gaps']} gaps, {detail['recovered']} recovered"
+                )
+        return 0
+    except Exception as e:
+        print(f"Gap-fill failed: {e}", file=sys.stderr)
+        return 1
+
+
 async def run_import(args) -> int:
     """Run import command."""
     from .config import Config, setup_logging

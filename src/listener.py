@@ -4,13 +4,12 @@ Catches events as they happen and updates the local database immediately.
 
 Safety features:
 - LISTEN_EDITS: Apply text edits (default: true, safe)
-- LISTEN_DELETIONS: Delete messages (default: true, protected by zero-footprint)
+- LISTEN_DELETIONS: Delete messages (default: false, opt-in mirror mode)
 - Mass operation detection: Blocks bulk edits/deletions to protect data
 
-ZERO-FOOTPRINT PROTECTION:
-When mass operations are detected, NO changes are written to the database.
-Operations are buffered and only applied after a safety delay, ensuring
-that burst attacks are caught BEFORE any data is modified.
+Mass operation protection is rate limiting, not buffering. Operations under
+the threshold are applied immediately; disable LISTEN_DELETIONS to guarantee
+Telegram deletions never remove archived messages.
 """
 
 import asyncio
@@ -36,7 +35,14 @@ from telethon.utils import get_peer_id
 from .avatar_utils import get_avatar_paths
 from .config import Config
 from .db import DatabaseAdapter, create_adapter
+from .message_utils import (
+    compute_file_hash,
+    download_and_shard_media,
+    extract_topic_id,
+    finalize_atomic_download,
+)
 from .realtime import NotificationType, RealtimeNotifier
+from .telegram_backup import call_with_flood_retry
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +294,9 @@ class TelegramListener:
                 logger.info("  LISTEN_NEW_MESSAGES_MEDIA: false (media on scheduled backup)")
         else:
             logger.info("  LISTEN_NEW_MESSAGES: false (saved on scheduled backup)")
+        if config.skip_topic_ids:
+            total = sum(len(t) for t in config.skip_topic_ids.values())
+            logger.info(f"  SKIP_TOPIC_IDS: {total} topic(s) excluded across {len(config.skip_topic_ids)} chat(s)")
         logger.info(f"  Protection threshold: {config.mass_operation_threshold} ops triggers block")
         logger.info(f"  Protection window: {config.mass_operation_window_seconds}s")
         logger.info(f"  Buffer delay: {config.mass_operation_buffer_delay}s (operations held before applying)")
@@ -323,7 +332,13 @@ class TelegramListener:
             logger.info(f"Connected as {me.first_name} ({me.phone})")
         else:
             # Create new client
-            self.client = TelegramClient(self.config.session_path, self.config.api_id, self.config.api_hash)
+            logger.info(f"Using Telethon session database: {self.config.session_path}.session")
+            self.client = TelegramClient(
+                self.config.session_path,
+                self.config.api_id,
+                self.config.api_hash,
+                **self.config.get_telegram_client_kwargs(),
+            )
             self._owns_client = True
 
             # Connect and authenticate
@@ -394,6 +409,7 @@ class TelegramListener:
                 "edit": NotificationType.EDIT,
                 "delete": NotificationType.DELETE,
                 "new_message": NotificationType.NEW_MESSAGE,
+                "pin": NotificationType.PIN,
             }
 
             nt = type_map.get(notification_type)
@@ -471,10 +487,13 @@ class TelegramListener:
                 logger.debug(f"No avatar set for {chat_id}")
                 return
 
-            needs_download = not os.path.exists(avatar_path) or os.path.getsize(avatar_path) == 0
-
-            if not needs_download:
-                return
+            # lexists short-circuits when an avatar (even a symlink whose
+            # target is unreachable from this process) is already on disk,
+            # so we don't try to overwrite an archive entry. Mirrors the
+            # backup-flow guard in src/telegram_backup.py (issue #143).
+            if os.path.lexists(avatar_path):
+                if os.path.islink(avatar_path) or os.path.getsize(avatar_path) > 0:
+                    return
 
             result = await self.client.download_profile_photo(entity, file=avatar_path, download_big=False)
             if result:
@@ -506,7 +525,8 @@ class TelegramListener:
                         return "sticker"
                 if is_animated:
                     return "animation"
-            return "document"
+                return "document"
+            return None  # document reference unavailable (e.g., forwarded from private channel)
         elif isinstance(media, MessageMediaContact):
             return "contact"
         elif isinstance(media, MessageMediaGeo):
@@ -542,11 +562,11 @@ class TelegramListener:
             return f"{telegram_file_id}{ext}"
         return f"{message.id}_{media_type}{ext}"
 
-    async def _download_media(self, message, chat_id: int) -> str | None:
+    async def _download_media(self, message, chat_id: int) -> tuple[str, str, str | None] | None:
         """
         Download media from a message.
 
-        Returns the file path if successful, None otherwise.
+        Returns (file_path, file_name, content_hash) if successful, None otherwise.
         """
         media = message.media
         media_type = self._get_media_type(media)
@@ -561,6 +581,10 @@ class TelegramListener:
                 telegram_file_id = str(getattr(media.photo, "id", None))
             elif hasattr(media, "document"):
                 telegram_file_id = str(getattr(media.document, "id", None))
+
+            # Guard against inaccessible media producing "None" string IDs
+            if telegram_file_id == "None":
+                telegram_file_id = None
 
             # Check file size
             file_size = 0
@@ -586,42 +610,54 @@ class TelegramListener:
             file_path = os.path.join(chat_media_dir, file_name)
 
             # Download with deduplication if enabled
+            content_hash = None
             if getattr(self.config, "deduplicate_media", True):
                 # Global deduplication: use _shared directory for actual files
                 shared_dir = os.path.join(self.config.media_path, "_shared")
                 os.makedirs(shared_dir, exist_ok=True)
-                shared_file_path = os.path.join(shared_dir, file_name)
 
-                if not os.path.exists(file_path):
-                    if os.path.exists(shared_file_path):
-                        # File exists in shared - create symlink
-                        try:
-                            rel_path = os.path.relpath(shared_file_path, chat_media_dir)
-                            os.symlink(rel_path, file_path)
-                            logger.debug(f"🔗 Created symlink for deduplicated media: {file_name}")
-                        except OSError as e:
-                            logger.warning(f"Symlink failed, downloading copy: {e}")
-                            await self.client.download_media(message, file_path)
-                    else:
-                        # First time seeing this file - download to shared and create symlink
-                        await self.client.download_media(message, shared_file_path)
-                        logger.debug(f"📥 Downloaded media to shared: {file_name}")
+                async def _download_fn(tmp_path):
+                    return await call_with_flood_retry(self.client.download_media, message, tmp_path)
 
-                        try:
-                            rel_path = os.path.relpath(shared_file_path, chat_media_dir)
-                            os.symlink(rel_path, file_path)
-                        except OSError as e:
-                            logger.warning(f"Symlink failed, using direct path: {e}")
-                            import shutil
-
-                            shutil.move(shared_file_path, file_path)
+                shared_file_path, content_hash = await download_and_shard_media(
+                    db=self.db,
+                    download_coro=_download_fn,
+                    shared_dir=shared_dir,
+                    chat_media_dir=chat_media_dir,
+                    file_name=file_name,
+                    file_path=file_path,
+                    logger=logger,
+                )
+                if not shared_file_path and not os.path.lexists(file_path):
+                    return None
             else:
-                # No deduplication - download directly
-                if not os.path.exists(file_path):
-                    await self.client.download_media(message, file_path)
+                # No deduplication - download directly. lexists short-circuits
+                # the download when a symlink is already recorded, even if its
+                # target is unreachable.
+                if not os.path.lexists(file_path):
+                    task_id = id(asyncio.current_task()) if asyncio.current_task() else 0
+                    tmp_file_path = f"{file_path}.{os.getpid()}.{task_id}.part"
+                    if os.path.exists(tmp_file_path):
+                        os.remove(tmp_file_path)
+                    actual_path = await call_with_flood_retry(self.client.download_media, message, tmp_file_path)
+                    file_path = finalize_atomic_download(
+                        actual_path if isinstance(actual_path, str) else None,
+                        tmp_file_path,
+                        file_path,
+                    )
+                    if not file_path or not os.path.exists(file_path):
+                        logger.warning("Media download did not produce a file")
+                        return None
+
+            # Compute content hash only if not already obtained during dedup
+            if not content_hash:
+                resolved = file_path
+                if os.path.islink(file_path):
+                    resolved = os.path.realpath(file_path)
+                content_hash = compute_file_hash(resolved) if os.path.exists(resolved) else None
 
             # Return the path as stored in DB (relative to media root)
-            return f"{self.config.media_path}/{chat_id}/{file_name}"
+            return f"{self.config.media_path}/{chat_id}/{file_name}", file_name, content_hash
 
         except Exception as e:
             logger.error(f"Error downloading media: {e}")
@@ -649,9 +685,12 @@ class TelegramListener:
                 if not self._should_process_chat(chat_id):
                     return
 
-                self.stats["edits_received"] += 1
-
+                # Skip edits in excluded forum topics
                 message = event.message
+                if self.config.should_skip_topic(chat_id, extract_topic_id(message)):
+                    return
+
+                self.stats["edits_received"] += 1
                 new_text = message.text or ""
                 edit_date = message.edit_date
 
@@ -692,7 +731,7 @@ class TelegramListener:
             Rate-limited: if too many deletions occur in a short time,
             further deletions are blocked to protect the backup.
             """
-            # Check if deletions are enabled (DEFAULT: TRUE with rate limiting)
+            # Check if deletions are enabled (DEFAULT: FALSE; opt-in mirror mode)
             if not self.config.listen_deletions:
                 if event.deleted_ids:
                     self.stats["deletions_skipped"] += len(event.deleted_ids)
@@ -712,36 +751,52 @@ class TelegramListener:
                 for msg_id in event.deleted_ids:
                     self.stats["deletions_received"] += 1
 
-                    # If chat_id is unknown, try to look it up from the database
+                    # If chat_id is unknown, resolve it from DB first
+                    # Message IDs are only unique within a chat — skip ambiguous cases
                     effective_chat_id = chat_id
                     if effective_chat_id is None:
                         try:
-                            effective_chat_id = await self.db.get_chat_id_for_message(msg_id)
-                            if effective_chat_id:
-                                logger.debug(f"🔍 Resolved chat_id={effective_chat_id} for msg={msg_id} from database")
+                            resolved = await self.db.resolve_message_chat_id(msg_id)
+                            if resolved is None:
+                                logger.debug(f"⚠️ Deletion skipped (not found or ambiguous): msg={msg_id}")
+                                continue
+
+                            if not self._should_process_chat(resolved):
+                                continue
+
+                            # Apply rate limit like the normal path
+                            allowed, reason = self._protector.check_operation(resolved, "deletion")
+                            if not allowed:
+                                self.stats["operations_discarded"] += 1
+                                continue
+
+                            await self.db.delete_message(resolved, msg_id)
+                            self.stats["deletions_applied"] += 1
+                            logger.debug(f"🗑️ Deletion applied (resolved chat): chat={resolved} msg={msg_id}")
+
+                            # Notify viewer
+                            await self._notify_update("delete", {"chat_id": resolved, "message_id": msg_id})
                         except Exception as e:
-                            logger.debug(f"Could not look up chat for msg {msg_id}: {e}")
+                            logger.debug(f"Could not delete msg {msg_id}: {e}")
+                        continue
 
-                    if effective_chat_id is not None:
-                        if not self._should_process_chat(effective_chat_id):
-                            continue
+                    if not self._should_process_chat(effective_chat_id):
+                        continue
 
-                        # Check rate limit before applying
-                        allowed, reason = self._protector.check_operation(effective_chat_id, "deletion")
+                    # Check rate limit before applying
+                    allowed, reason = self._protector.check_operation(effective_chat_id, "deletion")
 
-                        if not allowed:
-                            self.stats["operations_discarded"] += 1
-                            continue
+                    if not allowed:
+                        self.stats["operations_discarded"] += 1
+                        continue
 
-                        # Apply the deletion immediately
-                        await self.db.delete_message(effective_chat_id, msg_id)
-                        self.stats["deletions_applied"] += 1
-                        logger.debug(f"🗑️ Deletion applied: chat={effective_chat_id} msg={msg_id}")
+                    # Apply the deletion immediately
+                    await self.db.delete_message(effective_chat_id, msg_id)
+                    self.stats["deletions_applied"] += 1
+                    logger.debug(f"🗑️ Deletion applied: chat={effective_chat_id} msg={msg_id}")
 
-                        # Notify viewer of the deletion
-                        await self._notify_update("delete", {"chat_id": effective_chat_id, "message_id": msg_id})
-                    else:
-                        logger.debug(f"⚠️ Deletion skipped (unknown chat): msg={msg_id}")
+                    # Notify viewer of the deletion
+                    await self._notify_update("delete", {"chat_id": effective_chat_id, "message_id": msg_id})
 
             except Exception as e:
                 self.stats["errors"] += 1
@@ -768,14 +823,23 @@ class TelegramListener:
                 if not self._should_process_chat(chat_id):
                     return
 
-                self.stats["new_messages_received"] += 1
-
-                # If LISTEN_NEW_MESSAGES is disabled, we're done
-                if not self.config.listen_new_messages:
-                    return
-
                 # Save the message to database
                 message = event.message
+
+                # Extract topic ID early for filtering and message_data
+                # v6.2.0: reply_to_top_id added for forum topic threading
+                reply_to_top_id = extract_topic_id(message)
+
+                # Skip messages in excluded forum topics
+                if self.config.should_skip_topic(chat_id, reply_to_top_id):
+                    logger.debug(f"⏭️ Skipping message in excluded topic {reply_to_top_id}: chat={chat_id}")
+                    return
+
+                self.stats["new_messages_received"] += 1
+
+                # If LISTEN_NEW_MESSAGES is disabled, just track for edits/deletions
+                if not self.config.listen_new_messages:
+                    return
 
                 # Ensure chat exists in database (prevents FK violation for new chats)
                 chat_entity = await event.get_chat()
@@ -801,15 +865,6 @@ class TelegramListener:
                         "is_bot": message.sender.bot,
                     }
                     await self.db.upsert_user(user_data)
-
-                # Extract message data
-                # v6.0.0: media_type, media_id, media_path removed - stored in media table
-                # v6.2.0: reply_to_top_id added for forum topic threading
-                reply_to_top_id = None
-                if message.reply_to and getattr(message.reply_to, "forum_topic", False):
-                    reply_to_top_id = getattr(message.reply_to, "reply_to_top_id", None)
-                    if reply_to_top_id is None:
-                        reply_to_top_id = getattr(message.reply_to, "reply_to_msg_id", None)
 
                 message_data = {
                     "id": message.id,
@@ -844,8 +899,9 @@ class TelegramListener:
                     # Download media immediately if enabled
                     if self.config.listen_new_messages_media and self.config.should_download_media_for_chat(chat_id):
                         try:
-                            media_path = await self._download_media(message, chat_id)
-                            if media_path:
+                            download_result = await self._download_media(message, chat_id)
+                            if download_result:
+                                media_path, media_file_name, content_hash = download_result
                                 # Create media record (FK to messages now satisfied)
                                 media_id = f"{chat_id}_{message.id}_{media_type}"
                                 await self.db.insert_media(
@@ -855,6 +911,8 @@ class TelegramListener:
                                         "chat_id": chat_id,
                                         "type": media_type,
                                         "file_path": media_path,
+                                        "file_name": media_file_name,
+                                        "content_hash": content_hash,
                                         "downloaded": True,
                                         "download_date": datetime.utcnow(),
                                     }
@@ -935,7 +993,7 @@ class TelegramListener:
                         if hasattr(event, "user_id") and event.user_id:
                             actor_id = event.user_id
                             try:
-                                actor = await self.client.get_entity(event.user_id)
+                                actor = await call_with_flood_retry(self.client.get_entity, event.user_id)
                                 actor_name = getattr(actor, "first_name", "") or getattr(actor, "title", "")
                                 if hasattr(actor, "last_name") and actor.last_name:
                                     actor_name += f" {actor.last_name}"
@@ -1001,7 +1059,7 @@ class TelegramListener:
                 if action_type in ("photo_changed", "title_changed"):
                     # Get full entity for update
                     try:
-                        entity = await self.client.get_entity(chat_id)
+                        entity = await call_with_flood_retry(self.client.get_entity, chat_id)
                         if entity:
                             # Update chat in database
                             chat_data = {
@@ -1185,9 +1243,9 @@ class TelegramListener:
             logger.info(f"      Saved:    {self.stats['new_messages_saved']}")
             logger.info("")
             logger.info("   🛡️ Protection:")
-            logger.info(f"      Bursts intercepted: {protector_stats['bursts_detected']}")
-            logger.info(f"      Operations discarded: {protector_stats['operations_discarded']}")
-            logger.info(f"      Chats protected: {protector_stats['chats_protected']}")
+            logger.info(f"      Rate limits triggered: {protector_stats['rate_limits_triggered']}")
+            logger.info(f"      Operations blocked: {protector_stats['operations_blocked']}")
+            logger.info(f"      Chats rate-limited: {protector_stats['chats_rate_limited']}")
 
             if self.stats["errors"]:
                 logger.warning(f"   ⚠️ Errors: {self.stats['errors']}")

@@ -80,6 +80,10 @@ class DatabaseManager:
             backup_path = os.getenv("BACKUP_PATH", "/data/backups")
             db_path = os.path.join(backup_path, "telegram_backup.db")
 
+        # Resolve to absolute path so relative paths don't silently resolve
+        # against WORKDIR (/app) in Docker containers (fixes #144)
+        db_path = os.path.abspath(db_path)
+
         # Ensure directory exists
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         return f"sqlite+aiosqlite:///{db_path}"
@@ -217,6 +221,7 @@ class DatabaseManager:
             if not db_path:
                 backup_path = os.getenv("BACKUP_PATH", "/data/backups")
                 db_path = os.path.join(backup_path, "telegram_backup.db")
+            db_path = os.path.abspath(db_path)
             return f"sqlite+aiosqlite:///{db_path}"
         # PostgreSQL — build from non-sensitive env vars, mask password
         host = os.getenv("POSTGRES_HOST", "localhost")

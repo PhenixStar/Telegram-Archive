@@ -1,0 +1,342 @@
+"""Tests for thumbnail generation (src/web/thumbnails.py)."""
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from src.web.thumbnails import (
+    _IMAGE_EXTENSIONS,
+    _MAX_SOURCE_BYTES,
+    ALLOWED_SIZES,
+    WEBP_QUALITY,
+    _check_ffmpeg,
+    _generate_sync,
+    _generate_video_sync,
+    _is_image,
+    _is_video,
+    _thumb_path,
+    ensure_thumbnail,
+)
+
+
+class TestIsImage(unittest.TestCase):
+    """Test _is_image file extension detection."""
+
+    def test_recognizes_jpg(self):
+        """_is_image returns True for .jpg files."""
+        self.assertTrue(_is_image("photo.jpg"))
+
+    def test_recognizes_jpeg(self):
+        """_is_image returns True for .jpeg files."""
+        self.assertTrue(_is_image("photo.jpeg"))
+
+    def test_recognizes_png(self):
+        """_is_image returns True for .png files."""
+        self.assertTrue(_is_image("image.png"))
+
+    def test_recognizes_gif(self):
+        """_is_image returns True for .gif files."""
+        self.assertTrue(_is_image("anim.gif"))
+
+    def test_recognizes_webp(self):
+        """_is_image returns True for .webp files."""
+        self.assertTrue(_is_image("thumb.webp"))
+
+    def test_recognizes_bmp(self):
+        """_is_image returns True for .bmp files."""
+        self.assertTrue(_is_image("old.bmp"))
+
+    def test_recognizes_tiff(self):
+        """_is_image returns True for .tiff files."""
+        self.assertTrue(_is_image("scan.tiff"))
+
+    def test_rejects_mp4(self):
+        """_is_image returns False for video files."""
+        self.assertFalse(_is_image("video.mp4"))
+
+    def test_rejects_txt(self):
+        """_is_image returns False for text files."""
+        self.assertFalse(_is_image("readme.txt"))
+
+    def test_rejects_pdf(self):
+        """_is_image returns False for pdf files."""
+        self.assertFalse(_is_image("doc.pdf"))
+
+    def test_case_insensitive(self):
+        """_is_image is case-insensitive for extensions."""
+        self.assertTrue(_is_image("PHOTO.JPG"))
+        self.assertTrue(_is_image("Image.PNG"))
+
+    def test_no_extension_returns_false(self):
+        """_is_image returns False for files without extension."""
+        self.assertFalse(_is_image("noext"))
+
+
+class TestIsVideo(unittest.TestCase):
+    """Test _is_video file extension detection."""
+
+    def test_recognizes_mp4(self):
+        self.assertTrue(_is_video("clip.mp4"))
+
+    def test_recognizes_mkv(self):
+        self.assertTrue(_is_video("movie.mkv"))
+
+    def test_recognizes_webm(self):
+        self.assertTrue(_is_video("anim.webm"))
+
+    def test_recognizes_mov(self):
+        self.assertTrue(_is_video("video.mov"))
+
+    def test_rejects_jpg(self):
+        self.assertFalse(_is_video("photo.jpg"))
+
+    def test_rejects_txt(self):
+        self.assertFalse(_is_video("readme.txt"))
+
+    def test_case_insensitive(self):
+        self.assertTrue(_is_video("CLIP.MP4"))
+        self.assertTrue(_is_video("Video.MKV"))
+
+    def test_no_extension_returns_false(self):
+        self.assertFalse(_is_video("noext"))
+
+
+class TestCheckFfmpeg(unittest.TestCase):
+    """Test _check_ffmpeg detection."""
+
+    @patch("src.web.thumbnails.shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_returns_true_when_available(self, _mock):
+        import src.web.thumbnails as mod
+
+        mod._FFMPEG_AVAILABLE = None
+        self.assertTrue(_check_ffmpeg())
+
+    @patch("src.web.thumbnails.shutil.which", return_value=None)
+    def test_returns_false_when_missing(self, _mock):
+        import src.web.thumbnails as mod
+
+        mod._FFMPEG_AVAILABLE = None
+        self.assertFalse(_check_ffmpeg())
+
+
+class TestGenerateVideoSync(unittest.TestCase):
+    """Test _generate_video_sync."""
+
+    def test_returns_false_when_source_too_large(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as src:
+            source = Path(src.name)
+            dest = Path(tempfile.mkdtemp()) / "out.webp"
+            with patch.object(Path, "stat") as mock_stat:
+                mock_stat.return_value = MagicMock(st_size=_MAX_SOURCE_BYTES * 4 + 1)
+                result = _generate_video_sync(source, dest, 200)
+            self.assertFalse(result)
+
+    @patch("src.web.thumbnails._check_ffmpeg", return_value=False)
+    def test_returns_false_when_ffmpeg_missing(self, _mock):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "clip.mp4"
+            source.write_bytes(b"\x00" * 100)
+            dest = Path(tmpdir) / "out.webp"
+            result = _generate_video_sync(source, dest, 200)
+            self.assertFalse(result)
+
+    def test_returns_false_on_invalid_video(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "corrupt.mp4"
+            source.write_text("not a video")
+            dest = Path(tmpdir) / "out.webp"
+            result = _generate_video_sync(source, dest, 200)
+            self.assertFalse(result)
+
+
+class TestThumbPath(unittest.TestCase):
+    """Test _thumb_path output format."""
+
+    def test_returns_webp_in_thumbs_directory(self):
+        """_thumb_path returns .webp file under .thumbs/{size}/{folder}/."""
+        media = Path("/media")
+        result = _thumb_path(media, 200, "chat123", "photo.jpg")
+        self.assertEqual(result, Path("/media/.thumbs/200/chat123/photo.webp"))
+
+    def test_preserves_folder_structure(self):
+        """_thumb_path preserves the folder subpath."""
+        media = Path("/data/media")
+        result = _thumb_path(media, 400, "avatars/users", "avatar_123.png")
+        self.assertEqual(result, Path("/data/media/.thumbs/400/avatars/users/avatar_123.webp"))
+
+    def test_strips_original_extension(self):
+        """_thumb_path uses stem of original filename, not full name."""
+        media = Path("/m")
+        result = _thumb_path(media, 200, "f", "image.with.dots.jpeg")
+        # stem = "image.with.dots" (everything before last .)
+        self.assertEqual(result.name, "image.with.dots.webp")
+
+
+class TestConstants(unittest.TestCase):
+    """Test module-level constants are sane."""
+
+    def test_allowed_sizes_contains_200_and_400(self):
+        """ALLOWED_SIZES contains exactly 200 and 400."""
+        self.assertEqual(ALLOWED_SIZES, {200, 400})
+
+    def test_webp_quality_is_reasonable(self):
+        """WEBP_QUALITY is between 1 and 100."""
+        self.assertGreaterEqual(WEBP_QUALITY, 1)
+        self.assertLessEqual(WEBP_QUALITY, 100)
+
+    def test_max_source_bytes_is_50mb(self):
+        """_MAX_SOURCE_BYTES is 50 MB."""
+        self.assertEqual(_MAX_SOURCE_BYTES, 50 * 1024 * 1024)
+
+    def test_image_extensions_include_common_formats(self):
+        """_IMAGE_EXTENSIONS includes jpg, png, gif, webp."""
+        for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+            self.assertIn(ext, _IMAGE_EXTENSIONS)
+
+
+class TestGenerateSync(unittest.TestCase):
+    """Test _generate_sync blocking thumbnail generation."""
+
+    def test_returns_false_when_source_too_large(self):
+        """_generate_sync returns False when source exceeds size limit."""
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as src:
+            source = Path(src.name)
+            dest = Path(tempfile.mkdtemp()) / "out.webp"
+
+            with patch.object(Path, "stat") as mock_stat:
+                mock_stat.return_value = MagicMock(st_size=_MAX_SOURCE_BYTES + 1)
+                result = _generate_sync(source, dest, 200)
+
+            self.assertFalse(result)
+
+    def test_creates_destination_directory(self):
+        """_generate_sync creates parent directories for destination."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a tiny valid image using Pillow
+            from PIL import Image as PILImage
+
+            source = Path(tmpdir) / "source.png"
+            img = PILImage.new("RGB", (10, 10), "red")
+            img.save(source)
+
+            dest = Path(tmpdir) / "sub" / "dir" / "thumb.webp"
+            result = _generate_sync(source, dest, 200)
+
+            self.assertTrue(result)
+            self.assertTrue(dest.exists())
+            self.assertTrue(dest.parent.exists())
+
+    def test_output_is_valid_webp(self):
+        """_generate_sync produces a valid WebP file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from PIL import Image as PILImage
+
+            source = Path(tmpdir) / "source.png"
+            img = PILImage.new("RGB", (500, 500), "blue")
+            img.save(source)
+
+            dest = Path(tmpdir) / "thumb.webp"
+            result = _generate_sync(source, dest, 200)
+
+            self.assertTrue(result)
+            with PILImage.open(dest) as thumb:
+                self.assertEqual(thumb.format, "WEBP")
+                self.assertLessEqual(thumb.width, 200)
+                self.assertLessEqual(thumb.height, 200)
+
+    def test_returns_false_on_corrupt_source(self):
+        """_generate_sync returns False when source is not a valid image."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "corrupt.jpg"
+            source.write_text("not an image")
+            dest = Path(tmpdir) / "thumb.webp"
+
+            result = _generate_sync(source, dest, 200)
+            self.assertFalse(result)
+
+
+class TestEnsureThumbnail(unittest.IsolatedAsyncioTestCase):
+    """Test ensure_thumbnail async entry point."""
+
+    async def test_rejects_disallowed_size(self):
+        """ensure_thumbnail returns None for sizes not in ALLOWED_SIZES."""
+        result = await ensure_thumbnail(Path("/tmp"), 999, "folder", "img.jpg")
+        self.assertIsNone(result)
+
+    async def test_rejects_unsupported_file(self):
+        """ensure_thumbnail returns None for unsupported file types."""
+        result = await ensure_thumbnail(Path("/tmp"), 200, "folder", "doc.pdf")
+        self.assertIsNone(result)
+
+    async def test_accepts_video_file_extension(self):
+        """ensure_thumbnail does not reject video files by extension."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_root = Path(tmpdir)
+            folder = "chat1"
+            (media_root / folder).mkdir()
+            source = media_root / folder / "clip.mp4"
+            source.write_bytes(b"\x00" * 100)
+            result = await ensure_thumbnail(media_root, 200, folder, "clip.mp4")
+            # Returns None because ffmpeg can't decode garbage, but doesn't reject on extension
+            self.assertIsNone(result)
+
+    async def test_rejects_path_traversal_in_source(self):
+        """ensure_thumbnail returns None when source escapes media_root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_root = Path(tmpdir) / "media"
+            media_root.mkdir()
+            result = await ensure_thumbnail(media_root, 200, "../..", "etc_passwd.jpg")
+            self.assertIsNone(result)
+
+    async def test_returns_cached_thumbnail_if_exists(self):
+        """ensure_thumbnail returns existing thumbnail without regenerating."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_root = Path(tmpdir)
+            # Create source
+            folder = "chat1"
+            (media_root / folder).mkdir()
+            source = media_root / folder / "img.jpg"
+            source.write_text("placeholder")
+
+            # Pre-create the thumbnail
+            thumb = _thumb_path(media_root, 200, folder, "img.jpg")
+            thumb.parent.mkdir(parents=True, exist_ok=True)
+            thumb.write_text("cached")
+
+            result = await ensure_thumbnail(media_root, 200, folder, "img.jpg")
+            self.assertIsNotNone(result)
+            thumb_path, resolved_folder = result
+            self.assertEqual(thumb_path, thumb.resolve())
+            self.assertEqual(resolved_folder, folder)
+
+    async def test_returns_none_when_source_does_not_exist(self):
+        """ensure_thumbnail returns None when source file is missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_root = Path(tmpdir)
+            (media_root / "chat1").mkdir()
+            result = await ensure_thumbnail(media_root, 200, "chat1", "missing.jpg")
+            self.assertIsNone(result)
+
+    async def test_generates_thumbnail_for_valid_source(self):
+        """ensure_thumbnail generates a new thumbnail for a valid image source."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from PIL import Image as PILImage
+
+            media_root = Path(tmpdir)
+            folder = "chat1"
+            (media_root / folder).mkdir()
+            source = media_root / folder / "photo.png"
+            img = PILImage.new("RGB", (300, 300), "green")
+            img.save(source)
+
+            result = await ensure_thumbnail(media_root, 200, folder, "photo.png")
+            self.assertIsNotNone(result)
+            thumb_path, resolved_folder = result
+            self.assertTrue(thumb_path.exists())
+            self.assertEqual(thumb_path.suffix, ".webp")
+            self.assertEqual(resolved_folder, folder)
+
+
+if __name__ == "__main__":
+    unittest.main()

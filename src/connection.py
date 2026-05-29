@@ -18,10 +18,58 @@ import shutil
 import sqlite3
 
 from telethon import TelegramClient
+from telethon.errors import FloodWaitError
 
 from .config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def _get_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r, using default=%d", name, raw, default)
+        return default
+
+
+MAX_FLOOD_RETRIES = _get_int_env("MAX_FLOOD_RETRIES", 5)
+MAX_FLOOD_WAIT_SECONDS = _get_int_env("MAX_FLOOD_WAIT_SECONDS", 3600)
+
+
+async def _call_with_flood_retry(coro_fn, *args, **kwargs):
+    """Retry a single async call on FloodWaitError with bounded sleep."""
+    retries = 0
+    while True:
+        try:
+            return await coro_fn(*args, **kwargs)
+        except FloodWaitError as e:
+            retries += 1
+            if retries > MAX_FLOOD_RETRIES:
+                logger.error(
+                    "FloodWait: exceeded %d retries on %s", MAX_FLOOD_RETRIES, getattr(coro_fn, "__name__", coro_fn)
+                )
+                raise
+            if e.seconds > MAX_FLOOD_WAIT_SECONDS:
+                logger.error(
+                    "FloodWait: required wait %ss exceeds MAX_FLOOD_WAIT_SECONDS=%s on %s",
+                    e.seconds,
+                    MAX_FLOOD_WAIT_SECONDS,
+                    getattr(coro_fn, "__name__", coro_fn),
+                )
+                raise
+            wait_seconds = max(0, e.seconds)
+            logger.warning(
+                "FloodWait: sleeping %ss before retrying %s (retry=%d/%d)",
+                wait_seconds,
+                getattr(coro_fn, "__name__", coro_fn),
+                retries,
+                MAX_FLOOD_RETRIES,
+            )
+            await asyncio.sleep(wait_seconds + 1)
 
 
 class TelegramConnection:
@@ -116,6 +164,7 @@ class TelegramConnection:
             return self._client
 
         logger.info("Connecting to Telegram...")
+        logger.info(f"Using Telethon session database: {self.config.session_path}.session")
 
         session_file = self.config.session_path + ".session"
         snapshot_file = self.config.session_path + ".session.bak"
@@ -132,7 +181,12 @@ class TelegramConnection:
         if self._session_has_auth(session_file):
             shutil.copy2(session_file, snapshot_file)
 
-        self._client = TelegramClient(self.config.session_path, self.config.api_id, self.config.api_hash)
+        self._client = TelegramClient(
+            self.config.session_path,
+            self.config.api_id,
+            self.config.api_hash,
+            **self.config.get_telegram_client_kwargs(),
+        )
 
         # Enable WAL mode for session DB to handle concurrent access
         self._enable_wal_mode()
@@ -161,7 +215,7 @@ class TelegramConnection:
             logger.error("  Non-interactive: python scripts/auth_noninteractive.py send")
             raise RuntimeError("Session not authorized. Please run authentication setup.")
 
-        self._me = await self._client.get_me()
+        self._me = await _call_with_flood_retry(self._client.get_me)
         self._connected = True
 
         # Auth succeeded — update the golden backup (known-good state).
@@ -224,10 +278,16 @@ class TelegramConnection:
             if not self._client.is_connected():
                 logger.warning("Connection lost, reconnecting...")
                 await self._client.connect()
-                self._me = await self._client.get_me()
+                self._me = await _call_with_flood_retry(self._client.get_me)
                 logger.info(f"Reconnected as {self._me.first_name}")
         except Exception as e:
             logger.warning(f"Connection check failed: {e}, reconnecting...")
+            self._connected = False
+            if self._client:
+                try:
+                    await self._client.disconnect()
+                except Exception:
+                    pass
             await self.connect()
 
         return self._client

@@ -20,8 +20,8 @@ def _print_permission_error_help():
     print("\nThis often happens when your user ID doesn't match the")
     print("container's UID (1000). Common solutions:\n")
     print("For Podman users:")
-    print("  Add --userns=keep-id to your run command:")
-    print("  podman run --userns=keep-id -it --rm ...")
+    print("  Add --userns=keep-id:uid=1000,gid=1000 to your run command:")
+    print("  podman run --userns=keep-id:uid=1000,gid=1000 -it --rm ...")
     print("\nFor Docker users:")
     print("  Ensure the data directory is owned by UID 1000:")
     print("  mkdir -p data && sudo chown -R 1000:1000 data")
@@ -51,7 +51,12 @@ async def setup_authentication():
         logger.info("=" * 60)
 
         # Create Telegram client
-        client = TelegramClient(config.session_path, config.api_id, config.api_hash)
+        client = TelegramClient(
+            config.session_path,
+            config.api_id,
+            config.api_hash,
+            **config.get_telegram_client_kwargs(),
+        )
 
         # Connect and authenticate
         logger.info("Connecting to Telegram...")

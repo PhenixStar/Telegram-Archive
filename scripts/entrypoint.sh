@@ -13,7 +13,7 @@ fi
 
 # Run Alembic migrations if database exists
 if [ "$SKIP_MIGRATIONS" = "false" ]; then
-  if [ "$DB_TYPE" = "postgresql" ] || [ "$DB_TYPE" = "postgres" ]; then
+  if { [[ -n "$DATABASE_URL" ]] && { [[ "$DATABASE_URL" == postgresql://* ]] || [[ "$DATABASE_URL" == postgresql+asyncpg://* ]] || [[ "$DATABASE_URL" == postgres://* ]]; }; } || { [[ -z "$DATABASE_URL" ]] && { [ "$DB_TYPE" = "postgresql" ] || [ "$DB_TYPE" = "postgres" ]; }; }; then
     echo "Running database migrations..."
     python -c "
 from alembic.config import Config
@@ -22,14 +22,25 @@ import os
 import sys
 import time
 import psycopg2
+from urllib.parse import urlparse
 
-# Build connection URL
-host = os.getenv('POSTGRES_HOST', 'localhost')
-port = os.getenv('POSTGRES_PORT', '5432')
-user = os.getenv('POSTGRES_USER', 'telegram')
-password = os.getenv('POSTGRES_PASSWORD', '')
-db = os.getenv('POSTGRES_DB', 'telegram_backup')
-url = f'postgresql://{user}:{password}@{host}:{port}/{db}'
+# Build connection URL from the same DATABASE_URL-preferred contract the app uses.
+raw_url = os.getenv('DATABASE_URL', '')
+if raw_url:
+    url = raw_url.replace('postgresql+asyncpg://', 'postgresql://', 1).replace('postgres://', 'postgresql://', 1)
+    parsed = urlparse(url)
+    host = parsed.hostname or 'localhost'
+    port = str(parsed.port or 5432)
+    user = parsed.username or 'telegram'
+    password = parsed.password or ''
+    db = (parsed.path or '/telegram_backup').lstrip('/')
+else:
+    host = os.getenv('POSTGRES_HOST', 'localhost')
+    port = os.getenv('POSTGRES_PORT', '5432')
+    user = os.getenv('POSTGRES_USER', 'telegram')
+    password = os.getenv('POSTGRES_PASSWORD', '')
+    db = os.getenv('POSTGRES_DB', 'telegram_backup')
+    url = f'postgresql://{user}:{password}@{host}:{port}/{db}'
 
 print(f'Connecting to PostgreSQL at {host}:{port}...')
 
@@ -81,6 +92,44 @@ if has_tables and not has_alembic:
             CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
         );
     \"\"\")
+    # Check artifact from migration 013: file_path values use negative chat_id folders
+    # Guard: media table may not exist on very old databases
+    cur.execute(\"\"\"
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_name = 'media'
+        );
+    \"\"\")
+    has_media_table = cur.fetchone()[0]
+    has_013_paths = False
+    if has_media_table:
+        cur.execute(\"\"\"
+            SELECT EXISTS (
+                SELECT 1 FROM media
+                WHERE chat_id < 0 AND file_path LIKE '%/' || CAST(chat_id AS TEXT) || '/%'
+                LIMIT 1
+            );
+        \"\"\")
+        has_013_paths = cur.fetchone()[0]
+
+    # Check artifact from migration 012: idx_media_chat_type index
+    cur.execute(\"\"\"
+        SELECT EXISTS (
+            SELECT FROM pg_indexes
+            WHERE indexname = 'idx_media_chat_type'
+        );
+    \"\"\")
+    has_012_index = cur.fetchone()[0]
+
+    # Check artifact from migration 011: media.content_hash column
+    cur.execute(\"\"\"
+        SELECT EXISTS (
+            SELECT FROM information_schema.columns
+            WHERE table_name = 'media' AND column_name = 'content_hash'
+        );
+    \"\"\")
+    has_011_content_hash = cur.fetchone()[0]
+
     # Check all artifacts from migration 010: viewer_tokens, app_settings, viewer_accounts.no_download
     cur.execute(\"\"\"
         SELECT EXISTS (
@@ -169,7 +218,13 @@ if has_tables and not has_alembic:
     has_push_subs = cur.fetchone()[0]
 
     # Determine which version to stamp based on existing schema
-    if has_010_all:
+    if has_013_paths:
+        stamp_version = '013'
+    elif has_012_index:
+        stamp_version = '012'
+    elif has_011_content_hash:
+        stamp_version = '011'
+    elif has_010_all:
         stamp_version = '010'
     elif has_009_table:
         stamp_version = '009'
@@ -202,9 +257,18 @@ config.set_main_option('sqlalchemy.url', url)
 command.upgrade(config, 'head')
 print('Migrations complete.')
 "
-  elif [ "$DB_TYPE" = "sqlite" ] || [ -z "$DB_TYPE" ]; then
+  elif { [[ -n "$DATABASE_URL" ]] && { [[ "$DATABASE_URL" == sqlite://* ]] || [[ "$DATABASE_URL" == sqlite+aiosqlite://* ]]; }; } || { [[ -z "$DATABASE_URL" ]] && { [ "$DB_TYPE" = "sqlite" ] || [ -z "$DB_TYPE" ]; }; }; then
     # SQLite - check if database file exists before running migrations
-    DB_PATH="${DB_PATH:-${DATABASE_PATH:-${BACKUP_PATH:-/data/backups}/telegram_backup.db}}"
+    # Priority: DATABASE_PATH > DATABASE_DIR > DB_PATH > BACKUP_PATH/telegram_backup.db
+    _DB_FILE="${DATABASE_PATH:-${DATABASE_DIR:+${DATABASE_DIR}/telegram_backup.db}}"
+    _DB_FILE="${_DB_FILE:-${DB_PATH:-${BACKUP_PATH:-/data/backups}/telegram_backup.db}}"
+    # Resolve to absolute path (realpath -m works even if file doesn't exist yet)
+    DB_PATH="$(realpath -m "$_DB_FILE")"
+    if [[ "$DATABASE_URL" == sqlite+aiosqlite:///* ]]; then
+      DB_PATH="${DATABASE_URL#sqlite+aiosqlite:///}"
+    elif [[ "$DATABASE_URL" == sqlite:///* ]]; then
+      DB_PATH="${DATABASE_URL#sqlite:///}"
+    fi
 
     if [ -f "$DB_PATH" ]; then
       echo "SQLite database found at $DB_PATH - running migrations..."
@@ -214,7 +278,13 @@ from alembic import command
 import os
 import sqlite3
 
-db_path = os.getenv('DB_PATH', os.getenv('DATABASE_PATH', os.path.join(os.getenv('BACKUP_PATH', '/data/backups'), 'telegram_backup.db')))
+database_url = os.getenv('DATABASE_URL', '')
+if database_url.startswith('sqlite+aiosqlite:///'):
+    db_path = database_url.removeprefix('sqlite+aiosqlite:///')
+elif database_url.startswith('sqlite:///'):
+    db_path = database_url.removeprefix('sqlite:///')
+else:
+    db_path = os.getenv('DB_PATH', os.getenv('DATABASE_PATH', os.path.join(os.getenv('BACKUP_PATH', '/data/backups'), 'telegram_backup.db')))
 url = f'sqlite:///{db_path}'
 
 # Check if this is a pre-Alembic database that needs stamping
@@ -237,6 +307,24 @@ if has_tables and not has_alembic:
             CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
         )
     ''')
+
+    # Check artifact from migration 013: file_path values use negative chat_id folders
+    # Guard: media table may not exist on very old databases
+    cur.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='media'\")
+    has_media_table = cur.fetchone() is not None
+    has_013_paths = False
+    if has_media_table:
+        cur.execute(\"SELECT EXISTS(SELECT 1 FROM media WHERE chat_id < 0 AND file_path LIKE '%/' || CAST(chat_id AS TEXT) || '/%' LIMIT 1)\")
+        has_013_paths = cur.fetchone()[0]
+
+    # Check artifact from migration 012: idx_media_chat_type index
+    cur.execute(\"SELECT name FROM sqlite_master WHERE type='index' AND name='idx_media_chat_type'\")
+    has_012_index = cur.fetchone() is not None
+
+    # Check artifact from migration 011: media.content_hash column
+    cur.execute(\"PRAGMA table_info(media)\")
+    media_columns = {row[1] for row in cur.fetchall()}
+    has_011_content_hash = 'content_hash' in media_columns
 
     # Check all artifacts from migration 010: viewer_tokens, app_settings, viewer_accounts.no_download
     cur.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name='viewer_tokens'\")
@@ -279,7 +367,13 @@ if has_tables and not has_alembic:
     has_push_subs = cur.fetchone() is not None
 
     # Determine which version to stamp based on existing schema
-    if has_010_all:
+    if has_013_paths:
+        stamp_version = '013'
+    elif has_012_index:
+        stamp_version = '012'
+    elif has_011_content_hash:
+        stamp_version = '011'
+    elif has_010_all:
         stamp_version = '010'
     elif has_009_table:
         stamp_version = '009'
