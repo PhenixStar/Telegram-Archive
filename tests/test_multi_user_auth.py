@@ -15,14 +15,18 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(autouse=True)
 def _reset_auth_module():
-    """Reset auth module state between tests."""
-    import src.web.main as main_mod
+    """Reset auth module state between tests.
 
-    main_mod._sessions.clear()
-    main_mod._login_attempts.clear()
+    Fork layout: session/rate-limit state lives in src.web.dependencies, not in
+    the monolithic main module (base layout).
+    """
+    import src.web.dependencies as deps
+
+    deps._sessions.clear()
+    deps._login_attempts.clear()
     yield
-    main_mod._sessions.clear()
-    main_mod._login_attempts.clear()
+    deps._sessions.clear()
+    deps._login_attempts.clear()
 
 
 def _make_mock_db():
@@ -38,6 +42,8 @@ def _make_mock_db():
     db.get_cached_statistics = AsyncMock(return_value={"total_chats": 3, "total_messages": 100})
     db.get_metadata = AsyncMock(return_value=None)
     db.get_viewer_by_username = AsyncMock(return_value=None)
+    # Fork login flow checks user accounts (super_admin/admin) before viewers.
+    db.get_user_by_username = AsyncMock(return_value=None)
     db.get_viewer_account = AsyncMock(return_value=None)
     db.get_all_viewer_accounts = AsyncMock(return_value=[])
     db.create_viewer_account = AsyncMock()
@@ -49,7 +55,9 @@ def _make_mock_db():
     db.get_all_folders = AsyncMock(return_value=[])
     db.get_archived_chat_count = AsyncMock(return_value=0)
     db.get_session = AsyncMock(return_value=None)
+    db.save_session = AsyncMock()
     db.delete_session = AsyncMock()
+    db.delete_user_sessions = AsyncMock()
     return db
 
 
@@ -83,15 +91,32 @@ def no_auth_env():
 
 
 def _get_client(mock_db=None):
-    """Create a fresh TestClient by reloading the module with current env."""
+    """Create a fresh TestClient by reloading modules with current env.
+
+    Fork layout: auth state + consts live in src.web.dependencies; route handlers
+    in routes_*; app assembled in main. Reload in order dependencies -> routes ->
+    main so routers re-bind to the refreshed dependencies module.
+    """
     import importlib
 
+    import src.web.dependencies as deps
+    import src.web.routes_auth as routes_auth
+    import src.web.routes_chat as routes_chat
     import src.web.main as main_mod
 
+    importlib.reload(deps)
+    importlib.reload(routes_auth)
+    importlib.reload(routes_chat)
     importlib.reload(main_mod)
+
+    import src.web.dependencies as deps  # noqa: F811
 
     if mock_db is None:
         mock_db = _make_mock_db()
+    # TestClient runs without lifespan, so set_app_state never fires; wire the
+    # shared dependency state (db + config) manually.
+    deps.db = mock_db
+    deps.config = main_mod.config
     main_mod.db = mock_db
 
     return TestClient(main_mod.app, raise_server_exceptions=False), main_mod, mock_db
@@ -129,7 +154,7 @@ class TestMasterLogin:
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
-        assert data["role"] == "master"
+        assert data["role"] == "super_admin"
         assert "viewer_auth" in resp.cookies
 
     def test_invalid_login(self, auth_env):
@@ -156,7 +181,7 @@ class TestMasterLogin:
         resp = client.get("/api/auth/check", cookies={"viewer_auth": cookie})
         data = resp.json()
         assert data["authenticated"] is True
-        assert data["role"] == "master"
+        assert data["role"] == "super_admin"
         assert data["username"] == "admin"
 
 
@@ -179,11 +204,11 @@ class TestViewerLogin:
     """Tests for DB-backed viewer login."""
 
     def test_viewer_login(self, auth_env):
-        import src.web.main as main_mod
+        import src.web.dependencies as deps
 
         mock_db = _make_mock_db()
         salt = "a1b2c3d4"
-        pw_hash = main_mod._hash_password("viewerpass", salt)
+        pw_hash = deps._hash_password("viewerpass", salt)
         mock_db.get_viewer_by_username = AsyncMock(
             return_value={
                 "id": 1,
@@ -218,11 +243,11 @@ class TestPerUserFiltering:
         assert data["total"] == 3
 
     def test_viewer_filtered_chats(self, auth_env):
-        import src.web.main as main_mod
+        import src.web.dependencies as deps
 
         mock_db = _make_mock_db()
         salt = "abc123"
-        pw_hash = main_mod._hash_password("vpass", salt)
+        pw_hash = deps._hash_password("vpass", salt)
         mock_db.get_viewer_by_username = AsyncMock(
             return_value={
                 "id": 1,
@@ -284,11 +309,11 @@ class TestFolderScope:
         assert db.get_all_folders.call_args.kwargs == {}
 
     def test_viewer_gets_scoped_folders(self, auth_env):
-        import src.web.main as main_mod
+        import src.web.dependencies as deps
 
         mock_db = _make_mock_db()
         salt = "folderscope"
-        pw_hash = main_mod._hash_password("viewerpass", salt)
+        pw_hash = deps._hash_password("viewerpass", salt)
         mock_db.get_viewer_by_username = AsyncMock(
             return_value={
                 "id": 5,
@@ -410,11 +435,11 @@ class TestAdminEndpoints:
         assert resp.status_code == 200
 
     def test_viewer_cannot_access_admin(self, auth_env):
-        import src.web.main as main_mod
+        import src.web.dependencies as deps
 
         mock_db = _make_mock_db()
         salt = "test"
-        pw_hash = main_mod._hash_password("vpass", salt)
+        pw_hash = deps._hash_password("vpass", salt)
         mock_db.get_viewer_by_username = AsyncMock(
             return_value={
                 "id": 1,
@@ -458,7 +483,9 @@ class TestMediaAuth:
 
             from pathlib import Path
 
-            mod._media_root = Path(media_dir).resolve()
+            import src.web.dependencies as deps
+
+            deps._media_root = Path(media_dir).resolve()
 
             resp = client.get("/media/../secret.txt", cookies={"viewer_auth": cookie})
             assert resp.status_code in (403, 404)
@@ -501,7 +528,7 @@ class TestBackwardCompatibility:
         client, _, _ = _get_client()
         resp = client.post("/api/login", json={"username": "admin", "password": "testpass123"})
         assert resp.status_code == 200
-        assert resp.json()["role"] == "master"
+        assert resp.json()["role"] == "super_admin"
 
     def test_no_auth_full_access(self, no_auth_env):
         client, _, _ = _get_client()

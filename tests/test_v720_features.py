@@ -22,13 +22,14 @@ def _reset_auth_module(tmp_path):
     ):
         os.makedirs(tmp_path / "backups", exist_ok=True)
         os.makedirs(tmp_path / "media", exist_ok=True)
-        import src.web.main as main_mod
+        # Fork layout: session/rate-limit state lives in src.web.dependencies.
+        import src.web.dependencies as deps
 
-        main_mod._sessions.clear()
-        main_mod._login_attempts.clear()
+        deps._sessions.clear()
+        deps._login_attempts.clear()
         yield
-        main_mod._sessions.clear()
-        main_mod._login_attempts.clear()
+        deps._sessions.clear()
+        deps._login_attempts.clear()
 
 
 def _make_mock_db():
@@ -42,6 +43,8 @@ def _make_mock_db():
     db.get_cached_statistics = AsyncMock(return_value={"total_chats": 1, "total_messages": 10})
     db.get_metadata = AsyncMock(return_value=None)
     db.get_viewer_by_username = AsyncMock(return_value=None)
+    # Fork login flow checks user accounts (super_admin/admin) before viewers.
+    db.get_user_by_username = AsyncMock(return_value=None)
     db.get_all_viewer_accounts = AsyncMock(return_value=[])
     db.get_all_viewer_tokens = AsyncMock(return_value=[])
     db.create_viewer_token = AsyncMock()
@@ -80,15 +83,36 @@ def auth_env():
 
 
 def _get_client(mock_db=None):
+    """Create a fresh TestClient by reloading modules with current env.
+
+    Fork layout: auth state + consts live in src.web.dependencies; route handlers
+    in routes_*; app assembled in main. Reload in order dependencies -> routes ->
+    main so routers re-bind to the refreshed dependencies module.
+    """
     import importlib
 
+    import src.web.dependencies as deps
+    import src.web.routes_auth as routes_auth
+    import src.web.routes_chat as routes_chat
     import src.web.main as main_mod
 
+    importlib.reload(deps)
+    importlib.reload(routes_auth)
+    importlib.reload(routes_chat)
     importlib.reload(main_mod)
+
+    import src.web.dependencies as deps  # noqa: F811
+
     if mock_db is None:
         mock_db = _make_mock_db()
+    # TestClient runs without lifespan, so set_app_state never fires; wire the
+    # shared dependency state (db + config) manually.
+    deps.db = mock_db
+    deps.config = main_mod.config
     main_mod.db = mock_db
-    return TestClient(main_mod.app, raise_server_exceptions=False), main_mod, mock_db
+    # Return `deps` as the middle element: tests inspect _sessions / _media_root,
+    # which live in dependencies under the fork layout.
+    return TestClient(main_mod.app, raise_server_exceptions=False), deps, mock_db
 
 
 def _login_master(client):

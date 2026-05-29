@@ -28,6 +28,10 @@ class TestMainBlockEdgeCases(unittest.TestCase):
         env = {
             "CHAT_TYPES": "private,groups",
             "BACKUP_PATH": self.temp_dir,
+            # Fork loads .env via load_dotenv() at import; that .env sets DB_PATH=/data,
+            # which _ensure_directories() cannot create in test sandboxes. Pin DB_PATH
+            # into the temp dir so the __main__ block runs without a PermissionError.
+            "DB_PATH": os.path.join(self.temp_dir, "telegram_backup.db"),
             "TELEGRAM_API_ID": "99999",
             "TELEGRAM_API_HASH": "deadbeef",
             "TELEGRAM_PHONE": "+9876543210",
