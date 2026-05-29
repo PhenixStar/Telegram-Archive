@@ -779,7 +779,10 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         # On initial backup (last_message_id == 0), use forward order for efficiency.
         batch_data: list[dict] = []
         batch_size = self.config.batch_size
+        checkpoint_interval = self.config.checkpoint_interval
         grand_total = 0
+        uncheckpointed_count = 0
+        batches_since_checkpoint = 0
         running_max_id = last_message_id
 
         if last_message_id > 0:
@@ -793,8 +796,17 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
                 if len(batch_data) >= batch_size:
                     await self._commit_batch(batch_data, chat_id)
-                    grand_total += len(batch_data)
+                    count = len(batch_data)
+                    grand_total += count
+                    uncheckpointed_count += count
+                    batches_since_checkpoint += 1
                     logger.info(f"  → Processed {grand_total} messages...")
+                    # Checkpoint sync_status every checkpoint_interval batches so a
+                    # crash only re-fetches since the last checkpoint, not the whole chat.
+                    if batches_since_checkpoint >= checkpoint_interval:
+                        await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
+                        uncheckpointed_count = 0
+                        batches_since_checkpoint = 0
                     batch_data = []
         else:
             # Initial backup: forward order (old→new) for completeness
@@ -805,18 +817,30 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
                 if len(batch_data) >= batch_size:
                     await self._commit_batch(batch_data, chat_id)
-                    grand_total += len(batch_data)
+                    count = len(batch_data)
+                    grand_total += count
+                    uncheckpointed_count += count
+                    batches_since_checkpoint += 1
                     logger.info(f"  → Processed {grand_total} messages...")
+                    # Checkpoint sync_status every checkpoint_interval batches so a
+                    # crash only re-fetches since the last checkpoint, not the whole chat.
+                    if batches_since_checkpoint >= checkpoint_interval:
+                        await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
+                        uncheckpointed_count = 0
+                        batches_since_checkpoint = 0
                     batch_data = []
 
         # Flush remaining messages
         if batch_data:
             await self._commit_batch(batch_data, chat_id)
-            grand_total += len(batch_data)
+            count = len(batch_data)
+            grand_total += count
+            uncheckpointed_count += count
 
-        # Update sync status with highest message ID
-        if grand_total > 0:
-            await self.db.update_sync_status(chat_id, running_max_id, grand_total)
+        # Final checkpoint: persist remaining un-checkpointed messages, or a
+        # cursor that advanced without persisting new messages.
+        if uncheckpointed_count > 0 or (grand_total == 0 and running_max_id > last_message_id):
+            await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
 
         # Sync deletions and edits if enabled (expensive!)
         if self.config.sync_deletions_edits:

@@ -63,16 +63,26 @@ class TestAvatarPathLookup(unittest.TestCase):
     """Test avatar path discovery in web viewer."""
 
     def setUp(self):
+        # Fork moved avatar cache/lookup from main.py into routes_chat.py, which
+        # reads media_path from dependencies.config (deps.config).
+        from src.web import dependencies as deps
+        from src.web import routes_chat
+
+        self.routes_chat = routes_chat
+        self.deps = deps
         self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_config = deps.config
+        deps.config = web_main.config
         self.original_media_path = web_main.config.media_path
         web_main.config.media_path = self.temp_dir.name
-        web_main._avatar_cache.clear()
-        web_main._avatar_cache_time = None
+        routes_chat._avatar_cache.clear()
+        routes_chat._avatar_cache_time = None
 
     def tearDown(self):
         web_main.config.media_path = self.original_media_path
-        web_main._avatar_cache.clear()
-        web_main._avatar_cache_time = None
+        self.deps.config = self.original_config
+        self.routes_chat._avatar_cache.clear()
+        self.routes_chat._avatar_cache_time = None
         self.temp_dir.cleanup()
 
     def _touch_avatar(self, path: str, mtime: int) -> None:
@@ -92,11 +102,11 @@ class TestAvatarPathLookup(unittest.TestCase):
         new_avatar = os.path.join(avatars_dir, f"{chat_id}_999.jpg")
         self._touch_avatar(new_avatar, mtime=200)
 
-        path = web_main._find_avatar_path(chat_id, "private")
+        path = self.routes_chat._find_avatar_path(chat_id, "private")
         self.assertEqual(path, f"avatars/users/{chat_id}_999.jpg")
 
         os.remove(new_avatar)
-        path = web_main._find_avatar_path(chat_id, "private")
+        path = self.routes_chat._find_avatar_path(chat_id, "private")
         self.assertEqual(path, f"avatars/users/{chat_id}.jpg")
 
 
