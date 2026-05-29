@@ -83,6 +83,60 @@ async def call_with_flood_retry(coro_fn, *args, max_retries=MAX_FLOOD_RETRIES, *
             await asyncio.sleep(wait_seconds + 1)  # +1s buffer to avoid boundary re-trigger
 
 
+async def iter_messages_with_flood_retry(client, entity, *, min_id=0, **kwargs):
+    """Wrap ``client.iter_messages`` so FloodWaitError is logged and retried.
+
+    With ``flood_sleep_threshold=0`` on the client, every flood-wait bubbles up
+    as an exception. We log the wait and resume iteration from the last yielded
+    message id so progress isn't lost. Bounded by MAX_FLOOD_RETRIES consecutive
+    waits-without-progress and MAX_FLOOD_WAIT_SECONDS. FLOOD_WAIT_LOG_THRESHOLD
+    (default 10s) suppresses noise for short routine waits. Ascending only.
+    """
+    if not kwargs.get("reverse", False):
+        raise ValueError("iter_messages_with_flood_retry only supports reverse=True (ascending) iteration")
+    try:
+        log_threshold_seconds = int(os.getenv("FLOOD_WAIT_LOG_THRESHOLD", "10"))
+    except (ValueError, TypeError):
+        log_threshold_seconds = 10
+    resume_from = min_id
+    retries = 0
+    while True:
+        try:
+            async for msg in client.iter_messages(entity, min_id=resume_from, **kwargs):
+                yield msg
+                if getattr(msg, "id", None) is not None:
+                    resume_from = max(resume_from, msg.id)
+                retries = 0
+            return
+        except FloodWaitError as e:
+            retries += 1
+            if retries > MAX_FLOOD_RETRIES:
+                logger.error(
+                    "FloodWait: exceeded %d retries without progress, giving up (last_msg_id=%s)",
+                    MAX_FLOOD_RETRIES,
+                    resume_from,
+                )
+                raise
+            if e.seconds > MAX_FLOOD_WAIT_SECONDS:
+                logger.error(
+                    "FloodWait: required wait %ss exceeds MAX_FLOOD_WAIT_SECONDS=%s; aborting (last_msg_id=%s)",
+                    e.seconds,
+                    MAX_FLOOD_WAIT_SECONDS,
+                    resume_from,
+                )
+                raise
+            wait_seconds = max(0, e.seconds)
+            if e.seconds >= log_threshold_seconds:
+                logger.warning(
+                    "FloodWait: sleeping %ss before resuming (last_msg_id=%s, retry=%d/%d)",
+                    wait_seconds,
+                    resume_from,
+                    retries,
+                    MAX_FLOOD_RETRIES,
+                )
+            await asyncio.sleep(wait_seconds + 1)  # +1s buffer to avoid boundary re-trigger
+
+
 class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
     """Main class for managing Telegram backups."""
 
@@ -722,7 +776,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                     batch_data = []
         else:
             # Initial backup: forward order (old→new) for completeness
-            async for message in self.client.iter_messages(entity, reverse=True):
+            async for message in iter_messages_with_flood_retry(self.client, entity, min_id=0, reverse=True):
                 msg_data = await self._process_message(message, chat_id)
                 batch_data.append(msg_data)
                 running_max_id = max(running_max_id, message.id)
@@ -792,8 +846,8 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         batch_size = self.config.batch_size
         total = 0
 
-        async for message in self.client.iter_messages(
-            entity, min_id=gap_start, max_id=gap_end, reverse=True
+        async for message in iter_messages_with_flood_retry(
+            self.client, entity, min_id=gap_start, max_id=gap_end, reverse=True
         ):
             msg_data = await self._process_message(message, chat_id)
             batch_data.append(msg_data)
