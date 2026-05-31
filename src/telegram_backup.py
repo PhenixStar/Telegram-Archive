@@ -938,7 +938,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             chat_recovered = 0
 
             try:
-                entity = await self.client.get_entity(cid)
+                entity = await call_with_flood_retry(self.client.get_entity, cid)
             except (ChannelPrivateError, ChatForbiddenError, UserBannedInChannelError):
                 logger.warning(f"Gap-fill: skipping chat {cid} (no access)")
                 continue
