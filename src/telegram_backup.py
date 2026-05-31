@@ -226,7 +226,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             logger.error("  Local:  python -m src.setup_auth")
             raise RuntimeError("Session not authorized. Please run authentication setup.")
 
-        me = await self.client.get_me()
+        me = await call_with_flood_retry(self.client.get_me)
         logger.info(f"Connected as {me.first_name} ({me.phone})")
 
     async def disconnect(self):
@@ -253,7 +253,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             await self.client.start(phone=self.config.phone)
 
             # Get current user info
-            me = await self.client.get_me()
+            me = await call_with_flood_retry(self.client.get_me)
             logger.info(f"Logged in as {me.first_name} ({me.id})")
 
             # Store owner ID and backfill is_outgoing for existing messages
@@ -341,7 +341,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 for include_id in missing_include_ids:
                     is_in_archive = include_id in archived_chat_ids
                     try:
-                        entity = await self.client.get_entity(include_id)
+                        entity = await call_with_flood_retry(self.client.get_entity, include_id)
 
                         # Create a simple dialog-like wrapper
                         class SimpleDialog:
@@ -571,9 +571,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         archived ones, which causes overlap with the folder=1 results.
         """
         if archived:
-            dialogs = await self.client.get_dialogs(folder=1)
+            dialogs = await call_with_flood_retry(self.client.get_dialogs, folder=1)
         else:
-            dialogs = await self.client.get_dialogs(folder=0)
+            dialogs = await call_with_flood_retry(self.client.get_dialogs, folder=0)
         return dialogs
 
     async def _verify_and_redownload_media(self) -> None:
@@ -678,7 +678,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
                 # Fetch messages from Telegram in batch
                 try:
-                    messages = await self.client.get_messages(chat_id, ids=message_ids)
+                    messages = await call_with_flood_retry(self.client.get_messages, chat_id, ids=message_ids)
                 except Exception as e:
                     logger.warning(f"Cannot access chat {chat_id} for media verification: {e}")
                     failed += len(records)
@@ -1014,7 +1014,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
             try:
                 # Fetch current state from Telegram
-                remote_messages = await self.client.get_messages(entity, ids=batch_ids)
+                remote_messages = await call_with_flood_retry(self.client.get_messages, entity, ids=batch_ids)
 
                 for msg_id, remote_msg in zip(batch_ids, remote_messages):
                     # Check for deletion
@@ -1070,7 +1070,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             from telethon.tl.types import InputMessagesFilterPinned
 
             # Fetch all pinned messages from Telegram (up to 100)
-            pinned_messages = await self.client.get_messages(entity, filter=InputMessagesFilterPinned(), limit=100)
+            pinned_messages = await call_with_flood_retry(self.client.get_messages, entity, filter=InputMessagesFilterPinned(), limit=100)
 
             if pinned_messages:
                 pinned_ids = [msg.id for msg in pinned_messages]
@@ -1181,7 +1181,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             for topic_id in topic_ids:
                 # Try to get the topic's first message for metadata
                 try:
-                    msgs = await self.client.get_messages(entity, ids=[topic_id])
+                    msgs = await call_with_flood_retry(self.client.get_messages, entity, ids=[topic_id])
                     if msgs and msgs[0]:
                         msg = msgs[0]
                         topic_data = {
