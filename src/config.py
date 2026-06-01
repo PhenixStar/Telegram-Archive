@@ -89,7 +89,16 @@ def build_telegram_proxy_from_env() -> dict | None:
 
 def build_telegram_client_kwargs() -> dict:
     """Build common Telethon client keyword arguments from environment configuration."""
-    kwargs: dict = {"flood_sleep_threshold": 0}
+    # FLOOD_SLEEP_THRESHOLD: waits up to this many seconds are auto-slept by
+    # Telethon (resilient); longer waits raise FloodWaitError (visible, handled
+    # by call_with_flood_retry / iter_messages_with_flood_retry). Default 60
+    # matches Telethon's own default so routine ~30s GetDialogs waits don't
+    # abort scheduled backups. Set 0 to make every wait visible.
+    try:
+        threshold = int(os.getenv("FLOOD_SLEEP_THRESHOLD", "60"))
+    except ValueError:
+        threshold = 60
+    kwargs: dict = {"flood_sleep_threshold": threshold}
     proxy = build_telegram_proxy_from_env()
     if proxy is not None:
         kwargs["proxy"] = dict(proxy)
@@ -677,11 +686,17 @@ class Config:
     def get_telegram_client_kwargs(self) -> dict:
         """Get shared TelegramClient keyword arguments.
 
-        ``flood_sleep_threshold=0`` forces Telethon to raise FloodWaitError
-        instead of silently sleeping, so long waits become visible in the log
-        via ``iter_messages_with_flood_retry``.
+        ``flood_sleep_threshold`` (env FLOOD_SLEEP_THRESHOLD, default 60s):
+        waits up to this many seconds are auto-slept by Telethon (resilient to
+        routine ~30s GetDialogs waits); longer waits raise FloodWaitError, which
+        is handled by call_with_flood_retry / iter_messages_with_flood_retry.
+        Set 0 to make every wait visible (raises immediately).
         """
-        kwargs: dict = {"flood_sleep_threshold": 0}
+        try:
+            threshold = int(os.getenv("FLOOD_SLEEP_THRESHOLD", "60"))
+        except ValueError:
+            threshold = 60
+        kwargs: dict = {"flood_sleep_threshold": threshold}
         if self.telegram_proxy is not None:
             kwargs["proxy"] = dict(self.telegram_proxy)
         return kwargs
