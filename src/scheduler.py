@@ -82,8 +82,8 @@ class BackupScheduler:
         if self._db:
             return
         try:
-            from .db.base import DatabaseManager
             from .db.adapter import DatabaseAdapter
+            from .db.base import DatabaseManager
             db_manager = DatabaseManager()
             await db_manager.init()
             self._db = DatabaseAdapter(db_manager)

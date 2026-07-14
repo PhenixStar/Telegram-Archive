@@ -1,6 +1,5 @@
 """Media serving, thumbnail, LQIP, root page, and permalink routes."""
 
-import os
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -16,7 +15,6 @@ from .dependencies import (
     UserContext,
     _resolve_session,
     get_user_chat_ids,
-    logger,
     require_auth,
 )
 
@@ -55,7 +53,7 @@ async def serve_thumbnail(
         except ValueError:
             pass
 
-    from .thumbnails import ensure_thumbnail, ensure_video_thumbnail, _is_video
+    from .thumbnails import _is_video, ensure_thumbnail, ensure_video_thumbnail
 
     thumb_path = await ensure_thumbnail(deps._media_root, size, folder, filename)
     if not thumb_path and _is_video(filename):

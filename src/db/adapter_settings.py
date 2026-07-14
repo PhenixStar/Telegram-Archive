@@ -5,7 +5,6 @@ Provides key-value store for application settings.
 
 import logging
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import select
 

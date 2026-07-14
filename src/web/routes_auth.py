@@ -4,25 +4,19 @@ import json
 import os
 import secrets
 import time
-from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
 
 from fastapi import APIRouter, Cookie, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from . import dependencies as deps
 from .dependencies import (
+    _SA_PASSWORD,
+    _SA_USERNAME,
     AUTH_COOKIE_NAME,
     AUTH_ENABLED,
-    AUTH_PROXY_HEADER,
     AUTH_SESSION_SECONDS,
-    _PROXY_AUTH_ENABLED,
-    _resolve_proxy_user,
-    UserContext,
     SessionData,
-    _SA_USERNAME,
-    _SA_PASSWORD,
     _check_rate_limit,
     _create_session,
     _get_secure_cookies,
@@ -31,8 +25,6 @@ from .dependencies import (
     _resolve_session,
     _sessions,
     _verify_password,
-    get_user_chat_ids,
-    logger,
 )
 
 router = APIRouter()

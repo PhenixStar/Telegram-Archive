@@ -11,7 +11,6 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import selectinload
 
-from .adapter import retry_on_locked
 from .models import Media, Message, MessageEmbedding, User
 
 logger = logging.getLogger(__name__)

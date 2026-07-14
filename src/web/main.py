@@ -26,7 +26,6 @@ from fastapi.staticfiles import StaticFiles
 from ..config import Config
 from ..db import DatabaseAdapter, close_database, get_db_manager, init_database
 from ..realtime import RealtimeListener
-from .media_utils import THUMBNAIL_EXTENSIONS, legacy_folder_alternates, legacy_marked_chat_ids
 
 if TYPE_CHECKING:
     from .push import PushNotificationManager
@@ -130,9 +129,9 @@ async def _normalize_display_chat_ids():
 
 
 # AI config defaults (imported from routes_ai for seeding)
-from .routes_ai import get_ai_config_defaults, _get_default_profiles
-
 import json as _json
+
+from .routes_ai import _get_default_profiles, get_ai_config_defaults
 
 
 async def _seed_ai_config_defaults():
@@ -191,7 +190,7 @@ async def _seed_ai_config_defaults():
 
 async def session_cleanup_task():
     """Periodically evict expired sessions, flush last_accessed, and clean stale rate limits."""
-    from .dependencies import _login_attempts, _SESSION_CLEANUP_INTERVAL
+    from .dependencies import _SESSION_CLEANUP_INTERVAL, _login_attempts
 
     _last_flush_time = 0.0
 
@@ -560,14 +559,14 @@ if static_dir.exists():
 # Include routers
 # ---------------------------------------------------------------------------
 
-from .routes_health import router as health_router
-from .routes_auth import router as auth_router
-from .routes_chat import router as chat_router
-from .routes_media import router as media_router
-from .routes_admin_users import router as admin_users_router
 from .routes_admin_settings import router as admin_settings_router
+from .routes_admin_users import router as admin_users_router
 from .routes_admin_vault import router as admin_vault_router
 from .routes_ai import router as ai_router
+from .routes_auth import router as auth_router
+from .routes_chat import router as chat_router
+from .routes_health import router as health_router
+from .routes_media import router as media_router
 from .routes_websocket import router as ws_router
 
 app.include_router(health_router)

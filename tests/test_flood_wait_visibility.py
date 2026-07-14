@@ -60,21 +60,23 @@ def fake_db(monkeypatch):
         importlib.reload(src.telegram_backup)
 
 
-def test_config_kwargs_include_flood_sleep_threshold_zero():
+def test_config_kwargs_flood_sleep_threshold_default_and_override():
+    """flood_sleep_threshold defaults to 60s (env FLOOD_SLEEP_THRESHOLD); 0 opts
+    into fully-visible waits (every flood-wait raises immediately)."""
     from src.config import Config
 
-    env = {
+    base_env = {
         "CHAT_TYPES": "private",
         "BACKUP_PATH": tempfile.mkdtemp(),
         "TELEGRAM_API_ID": "1",
         "TELEGRAM_API_HASH": "x",
         "TELEGRAM_PHONE": "+1",
     }
-    with patch.dict(os.environ, env, clear=True):
-        config = Config()
+    with patch.dict(os.environ, base_env, clear=True):
+        assert Config().get_telegram_client_kwargs().get("flood_sleep_threshold") == 60
 
-    kwargs = config.get_telegram_client_kwargs()
-    assert kwargs.get("flood_sleep_threshold") == 0
+    with patch.dict(os.environ, {**base_env, "FLOOD_SLEEP_THRESHOLD": "0"}, clear=True):
+        assert Config().get_telegram_client_kwargs().get("flood_sleep_threshold") == 0
 
 
 def test_flood_env_int_parser_invalid_falls_back(fake_db, caplog):

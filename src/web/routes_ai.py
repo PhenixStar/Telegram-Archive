@@ -5,7 +5,6 @@ import base64
 import json
 import os
 import re
-import shlex
 import time
 from datetime import datetime, timezone
 
@@ -365,7 +364,7 @@ async def ai_chat(
                     if m.get("media_type") and not m.get("ocr_text"):
                         line += f" [{m['media_type']}]"
                     lines.append(line)
-                system_content += f"\n\nChat context (newest first):\n" + "\n".join(lines)
+                system_content += "\n\nChat context (newest first):\n" + "\n".join(lines)
         except Exception as e:
             logger.warning(f"Failed to load DB context: {e}")
     elif context_messages:
