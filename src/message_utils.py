@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import stat
 from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,30 @@ logger = logging.getLogger(__name__)
 def utcnow_naive() -> datetime:
     """Return current UTC time without tzinfo, for naive DB datetime columns."""
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def compute_directory_size(path: str) -> int:
+    """Return total on-disk size (bytes) of regular files under `path`.
+
+    Walks the tree without following symlinks, summing each regular file's
+    lstat size. Symlinks (used by the dedup _shared store) are not followed,
+    so shared blobs are counted exactly once. Missing path or per-entry errors
+    are ignored (best-effort, never raises)."""
+    if not path or not os.path.isdir(path):
+        return 0
+
+    total = 0
+    for root, _dirs, files in os.walk(path, followlinks=False):
+        for name in files:
+            full = os.path.join(root, name)
+            try:
+                st = os.lstat(full)
+            except OSError:
+                continue
+            if stat.S_ISLNK(st.st_mode):
+                continue
+            total += st.st_size
+    return total
 
 
 def get_shared_file_path(shared_dir: str, file_name: str, content_hash: str | None) -> str:

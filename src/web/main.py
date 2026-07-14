@@ -255,7 +255,7 @@ async def stats_calculation_scheduler():
             await asyncio.sleep(wait_seconds)
 
             logger.info("Running scheduled stats calculation...")
-            await db.calculate_and_store_statistics()
+            await db.calculate_and_store_statistics(storage_path=config.backup_path)
             logger.info("Stats calculation completed")
 
         except asyncio.CancelledError:
@@ -364,7 +364,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if not stats_calculated_at:
         logger.info("No cached stats found, running initial calculation...")
         try:
-            await db.calculate_and_store_statistics()
+            await db.calculate_and_store_statistics(storage_path=config.backup_path)
         except Exception as e:
             logger.warning(f"Initial stats calculation failed: {e}")
 

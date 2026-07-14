@@ -1259,8 +1259,16 @@
                         </div>
                         
                         <!-- Topic list -->
-                        <div v-else-if="topics.length === 0" class="flex flex-col items-center justify-center py-12 text-tg-muted">
-                            <span class="text-sm">No topics found</span>
+                        <div v-else-if="topics.length === 0" class="flex flex-col items-center justify-center py-12 px-4 text-tg-muted text-center gap-3">
+                            <span class="text-sm">No topics backed up yet</span>
+                            <span class="text-xs">
+                                <template v-if="statsData && statsData.backup_in_progress">A backup is currently running — topics appear once it finishes.</template>
+                                <template v-else>If this group uses Topics, they'll appear after the next full backup completes.</template>
+                            </span>
+                            <button @click="selectTopic(topicsNavEntry.chat || { id: topicsNavEntry.chatId, is_forum: true }, { id: 'all', title: 'All messages' })"
+                                class="mt-1 px-3 py-1.5 text-xs rounded-full bg-tg-active hover:bg-blue-600 text-white transition">
+                                View all messages
+                            </button>
                         </div>
                         <div v-else v-for="topic in topics" :key="topic.id"
                             @click="selectTopic(topicsNavEntry.chat || { id: topicsNavEntry.chatId, is_forum: true }, topic)"
@@ -3876,7 +3884,8 @@
                                     </div>
                                     <div class="flex items-center justify-between text-xs mt-3 pt-3" style="color: var(--tg-muted); border-top: 1px solid var(--tg-border);">
                                         <span>Last backup: {{ formatLastBackupTime(lastBackupTime, viewerTimezone, lastBackupTimeSource) }}</span>
-                                        <span>Updated: {{ statsData.stats_calculated_at ? formatStatsTime(statsData.stats_calculated_at) : 'N/A' }}</span>
+                                        <span v-if="statsData && statsData.backup_in_progress" class="text-blue-400 shrink-0">● Backup in progress…</span>
+                                        <span v-else>Updated: {{ statsData.stats_calculated_at ? formatStatsTime(statsData.stats_calculated_at) : 'N/A' }}</span>
                                     </div>
                                 </div>
                                 <!-- Info + Manual Backup -->
@@ -5189,7 +5198,7 @@
                 const topicsNavEntry = computed(() => {
                     const nav = currentNav.value
                     if (nav.type === 'topics') return nav
-                    if (nav.type === 'chat' && nav.topicId) {
+                    if (nav.type === 'chat' && nav.topicId && nav.topicId !== 'all') {
                         // Find the parent topics entry in navStack
                         for (let i = navStack.value.length - 2; i >= 0; i--) {
                             if (navStack.value[i].type === 'topics') {
@@ -5418,7 +5427,7 @@
                 const isMobileBreakpoint = () => typeof window !== 'undefined' && window.innerWidth < 768
                 const mobileBackStep = () => {
                     const nav = currentNav.value
-                    if (nav.type === 'chat' && nav.topicId) {
+                    if (nav.type === 'chat' && nav.topicId && nav.topicId !== 'all') {
                         navigateBack()
                         return
                     }
@@ -5719,7 +5728,8 @@
                     messages: 0,
                     media_files: 0,
                     total_size_mb: 0,
-                    stats_calculated_at: null
+                    stats_calculated_at: null,
+                    backup_in_progress: false
                 })
                 const showStatsUI = ref(true)  // Can be disabled via SHOW_STATS=false
                 
@@ -5738,7 +5748,8 @@
                                 messages: stats.messages || 0,
                                 media_files: stats.media_files || 0,
                                 total_size_mb: stats.total_size_mb || 0,
-                                stats_calculated_at: stats.stats_calculated_at
+                                stats_calculated_at: stats.stats_calculated_at,
+                                backup_in_progress: stats.backup_in_progress || false
                             }
                             
                             // Show/hide stats UI based on config
@@ -5846,14 +5857,14 @@
                 
                 // Format size in MB to appropriate unit (MB, GB, TB)
                 const formatSize = (sizeMB) => {
-                    if (!sizeMB || sizeMB === 0) return '0 MB'
+                    if (!sizeMB || sizeMB === 0) return '0 MiB'
                     if (sizeMB >= 1024 * 1024) {
-                        return (sizeMB / (1024 * 1024)).toFixed(2) + ' TB'
+                        return (sizeMB / (1024 * 1024)).toFixed(2) + ' TiB'
                     }
                     if (sizeMB >= 1024) {
-                        return (sizeMB / 1024).toFixed(1) + ' GB'
+                        return (sizeMB / 1024).toFixed(1) + ' GiB'
                     }
-                    return sizeMB.toFixed(0) + ' MB'
+                    return sizeMB.toFixed(0) + ' MiB'
                 }
                 
                 // Mark initialization complete (called after WS connects and notifications init)
@@ -6930,7 +6941,7 @@
                         // v6.2.12: Include topic_id filter when viewing a forum topic
                         let refreshUrl = `/api/chats/${selectedChat.value.id}/messages?limit=50&offset=0`
                         const nav = currentNav.value
-                        if (nav.type === 'chat' && nav.topicId) {
+                        if (nav.type === 'chat' && nav.topicId && nav.topicId !== 'all') {
                             refreshUrl += `&topic_id=${nav.topicId}`
                         }
                         const res = await fetch(refreshUrl, {
@@ -7013,7 +7024,7 @@
                         
                         // v6.2.0: Add topic_id filter if viewing a topic
                         const nav = currentNav.value
-                        if (nav.type === 'chat' && nav.topicId) {
+                        if (nav.type === 'chat' && nav.topicId && nav.topicId !== 'all') {
                             url += `&topic_id=${nav.topicId}`
                         }
 
@@ -7050,7 +7061,7 @@
                             if (searchDateTo.value) {
                                 url += `&date_to=${encodeURIComponent(searchDateTo.value + 'T23:59:59')}`
                             }
-                            if (nav.type === 'chat' && nav.topicId) {
+                            if (nav.type === 'chat' && nav.topicId && nav.topicId !== 'all') {
                                 url += `&topic_id=${nav.topicId}`
                             }
                         }

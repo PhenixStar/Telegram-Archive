@@ -368,6 +368,10 @@ async def get_stats(user: UserContext = Depends(require_auth)):
         stats["listener_active"] = bool(listener_active_since)
         stats["listener_active_since"] = listener_active_since if listener_active_since else None
 
+        # Check if a backup is currently in progress (written by backup engine)
+        backup_in_progress = await deps.db.get_metadata("backup_in_progress")
+        stats["backup_in_progress"] = backup_in_progress == "1"
+
         stats["push_notifications"] = deps.config.push_notifications
         stats["push_enabled"] = deps.push_manager is not None and deps.push_manager.is_enabled
 
@@ -383,7 +387,7 @@ async def get_stats(user: UserContext = Depends(require_auth)):
 async def refresh_stats(user: UserContext = Depends(require_master)):
     """Manually trigger stats recalculation."""
     try:
-        stats = await deps.db.calculate_and_store_statistics()
+        stats = await deps.db.calculate_and_store_statistics(storage_path=deps.config.backup_path)
         stats["timezone"] = deps.config.viewer_timezone
         return stats
     except Exception as e:
