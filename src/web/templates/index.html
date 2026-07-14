@@ -2356,14 +2356,19 @@
                             </svg>
                         </button>
                         <!-- Go to latest (shows when scrolled up a bit) -->
-                        <button v-else-if="scrollNavState === 'bottom'"
+                        <button v-else-if="scrollNavState === 'bottom' || unseenMessageCount > 0"
                             @click="scrollToLatest"
-                            class="w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105"
+                            class="relative w-11 h-11 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105"
                             style="background: var(--tg-sidebar); border: 1px solid var(--tg-border); color: var(--tg-muted);"
+                            :aria-label="unseenMessageCount > 0 ? unseenMessageCount + ' new message(s) — scroll to latest' : 'Scroll to latest messages'"
                             title="Scroll to latest messages">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
                             </svg>
+                            <span v-if="unseenMessageCount > 0" aria-hidden="true"
+                                class="absolute -top-1.5 -right-1.5 bg-blue-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                                {{ unseenMessageCount > 99 ? '99+' : unseenMessageCount }}
+                            </span>
                         </button>
                     </div>
                     </div>
@@ -5204,6 +5209,23 @@
                 // Compat shims for existing code that reads these booleans
                 const showScrollToBottom = computed(() => scrollNavState.value === 'bottom')
                 const showScrollToTop = computed(() => scrollNavState.value === 'top')
+                // Messages that arrived (WS/poll) while the user was scrolled up reading
+                // history — shown as a badge on the jump-to-latest button; cleared when the
+                // user returns near the bottom, jumps to latest, or switches view (#207).
+                const unseenMessageCount = ref(0)
+                // Telegram forums use topic id 1 for General; mirrors backend
+                // coalesce(reply_to_top_id, GENERAL_TOPIC_ID) in adapter get_messages_paginated.
+                const GENERAL_TOPIC_ID = 1
+                // flex-col-reverse geometry: scrollTop === 0 is the bottom, negative when scrolled up.
+                const STICK_TO_BOTTOM_PX = 200
+                // A realtime message belongs to the open view unless a specific forum topic is
+                // selected and the message's topic differs. Non-forum/'all' views never filter.
+                const messageBelongsToCurrentTopic = (msg) => {
+                    const nav = currentNav.value
+                    if (nav.type !== 'chat' || !nav.topicId || nav.topicId === 'all') return true
+                    return Number(msg?.reply_to_top_id ?? GENERAL_TOPIC_ID) === Number(nav.topicId)
+                }
+                const isNearMessageBottom = (container) => !!container && container.scrollTop > -STICK_TO_BOTTOM_PX
                 let _scrollUpTimer = null
                 let _lastScrollTop = 0
 
@@ -6152,10 +6174,19 @@
                 const handleWebSocketMessage = (data) => {
                     switch (data.type) {
                         case 'new_message':
-                            // Add to messages if we're viewing that chat (deduplicate by ID)
-                            if (selectedChat.value?.id === data.chat_id && data.message?.id != null) {
+                            // Add to messages if we're viewing that chat/topic (deduplicate by ID)
+                            if (selectedChat.value?.id === data.chat_id && data.message?.id != null
+                                && messageBelongsToCurrentTopic(data.message)) {
                                 if (!messages.value.some(m => m.id === data.message.id)) {
+                                    // Decide before the push whether the user is reading the latest.
+                                    const shouldStickToBottom = isNearMessageBottom(messagesContainer.value)
                                     messages.value.push(data.message)
+                                    if (shouldStickToBottom) {
+                                        nextTick(() => scrollToBottom())
+                                    } else {
+                                        // Arrived while scrolled up reading history — badge it.
+                                        unseenMessageCount.value += 1
+                                    }
                                 }
                             }
                             // Show notification
@@ -7081,17 +7112,17 @@
 
                         // Add new messages
                         if (newMessages.length > 0) {
+                            // Decide before the push whether the user is reading the latest (#207).
+                            const shouldStickToBottom = isNearMessageBottom(messagesContainer.value)
                             messages.value.push(...newMessages)
                             console.log(`[Auto-refresh] Added ${newMessages.length} new message(s)`)
 
-                            // Scroll to bottom if user is near bottom
                             await nextTick()
-                            const container = messagesContainer.value
-                            if (container) {
-                                const isNearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 200
-                                if (isNearBottom) {
-                                    scrollToBottom()
-                                }
+                            if (shouldStickToBottom) {
+                                scrollToBottom()
+                            } else {
+                                // Arrived (via poll) while scrolled up reading history — badge them.
+                                unseenMessageCount.value += newMessages.length
                             }
                         }
                     } catch (e) {
@@ -7325,6 +7356,7 @@
                             // Near bottom — hide everything
                             clearTimeout(_scrollUpTimer); _scrollUpTimer = null
                             scrollNavState.value = 'hidden'
+                            unseenMessageCount.value = 0  // user is reading the latest again (#207)
                         } else if (scrollingUp && scrollTop < -800) {
                             // Deep scroll upward — start timer for "go to oldest"
                             if (!_scrollUpTimer) {
@@ -7373,7 +7405,8 @@
 
                 const scrollToBottom = (immediate = false) => {
                     if (!messagesContainer.value) return
-                    
+                    unseenMessageCount.value = 0  // going to the latest clears the unseen badge (#207)
+
                     const doScroll = () => {
                         if (messagesContainer.value) {
                             // With flex-col-reverse: scrollTop=0 is the bottom (newest messages)
@@ -7406,6 +7439,7 @@
                 }
 
                 const scrollToLatest = () => {
+                    unseenMessageCount.value = 0  // explicit jump to latest clears the unseen badge (#207)
                     // v9.0: If in context mode, reload from latest instead of just scrolling
                     if (contextMode.value && selectedChat.value) {
                         contextMode.value = false
@@ -9420,6 +9454,7 @@
                     // Scroll navigation
                     scrollNavState,
                     showScrollToBottom,
+                    unseenMessageCount,
                     showScrollToTop,
                     scrollToLatest,
                     // Message pagination
