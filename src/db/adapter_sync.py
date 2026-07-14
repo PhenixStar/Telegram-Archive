@@ -20,6 +20,7 @@ from .models import (
     ChatFolderMember,
     Media,
     Message,
+    MessageVersion,
     Reaction,
     SyncStatus,
     User,
@@ -557,6 +558,8 @@ class SyncMixin:
     async def delete_chat_and_related_data(self, chat_id: int, media_base_path: str = None) -> None:
         """Delete a chat and all related data."""
         async with self.db_manager.async_session_factory() as session:
+            # Delete previous versions
+            await session.execute(delete(MessageVersion).where(MessageVersion.chat_id == chat_id))
             # Delete media records
             await session.execute(delete(Media).where(Media.chat_id == chat_id))
             # Delete reactions

@@ -218,6 +218,25 @@ async def get_messages(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/api/chats/{chat_id}/messages/{message_id}/versions")
+async def get_message_versions(
+    chat_id: int,
+    message_id: int,
+    user: UserContext = Depends(require_auth),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Get preserved previous versions for a message."""
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        return await deps.db.get_message_versions(chat_id=chat_id, message_id=message_id, limit=limit)
+    except Exception as e:
+        logger.error(f"Error fetching message versions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/api/chats/{chat_id}/pinned")
 async def get_pinned_messages(chat_id: int, user: UserContext = Depends(require_auth)):
     """Get all pinned messages for a chat, ordered by date descending."""
@@ -507,15 +526,30 @@ async def export_chat(
         # Default: JSON export
         filename = f"{safe_name}_export.json"
 
+        chat_metadata = {key: chat.get(key) for key in ("id", "type", "title", "username")}
+
         async def iter_json():
-            yield "[\n"
+            yield "{\n"
+            yield f'  "chat": {json.dumps(chat_metadata, ensure_ascii=False, default=str)},\n'
+            yield '  "messages": [\n'
             first = True
             async for msg in deps.db.get_messages_for_export(chat_id):
                 if not first:
                     yield ",\n"
                 first = False
-                yield json.dumps(msg, ensure_ascii=False)
-            yield "\n]"
+                yield "    " + json.dumps(msg, ensure_ascii=False, default=str)
+            yield "\n  ],\n"
+            # Stream versions like messages: a chat's edit history can be large,
+            # so it must never be materialized into a single list/dumps here.
+            yield '  "message_versions": [\n'
+            first_version = True
+            async for version in deps.db.iter_message_versions_for_export(chat_id):
+                if not first_version:
+                    yield ",\n"
+                first_version = False
+                yield "    " + json.dumps(version, ensure_ascii=False, default=str)
+            yield "\n  ]\n"
+            yield "}"
 
         encoded_filename = quote(filename)
         return StreamingResponse(
