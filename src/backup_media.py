@@ -14,6 +14,7 @@ from telethon.tl.types import (
 )
 
 from .avatar_utils import get_avatar_paths
+from .message_utils import sanitize_media_filename
 from .parallel_download import (
     ParallelDownloader,
     ParallelDownloadUnavailable,
@@ -412,7 +413,7 @@ class BackupMediaMixin:
         # If we have original filename, use it (with file_id prefix for uniqueness)
         if original_name and telegram_file_id:
             safe_id = str(telegram_file_id).replace("/", "_").replace("\\", "_")
-            return f"{safe_id}_{original_name}"
+            return sanitize_media_filename(f"{safe_id}_{original_name}")
 
         # Determine extension from mime_type, then fall back to media_type
         extension = None

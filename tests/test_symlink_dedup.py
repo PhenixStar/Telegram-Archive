@@ -673,12 +673,15 @@ class TestListenerDownloadMediaDedup(unittest.TestCase):
         result = self._run(self.listener._download_media(msg, chat_id))
 
         self.assertIsNotNone(result)
-        # Symlink should point to the .mp4 path returned by Telethon
+        # Symlink should resolve to the intended clean filename; finalize renames
+        # the download to file_name, not the path Telethon returned (#175 guard).
         chat_file = os.path.join(chat_dir, file_name)
-        if os.path.lexists(chat_file):
-            resolved = os.path.realpath(chat_file)
-            self.assertTrue(os.path.exists(resolved))
-            self.assertTrue(resolved.endswith("video_xyz.mp4"))
+        self.assertTrue(os.path.lexists(chat_file), "chat-dir symlink was never created")
+        resolved = os.path.realpath(chat_file)
+        self.assertTrue(os.path.exists(resolved))
+        self.assertEqual(os.path.basename(resolved), file_name)
+        with open(resolved, "rb") as f:
+            self.assertEqual(f.read(), b"video content")
 
     def test_listener_dedup_preserves_existing_symlink(self):
         """Listener leaves an existing chat-dir symlink alone, even when broken.

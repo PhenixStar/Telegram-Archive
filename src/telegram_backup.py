@@ -1541,6 +1541,13 @@ async def run_backup(config: Config, client: TelegramClient | None = None):
     try:
         await backup.connect()
         await backup.backup_all()
+
+        # One-time repair of media files corrupted by the pre-7.11.3 finalize bug (#175).
+        # Idempotent: streams media in bounded batches and only renames files whose
+        # on-disk name lost its extension; a clean archive is a fast no-op.
+        from .repair_media_extensions import repair_media_extensions
+
+        await repair_media_extensions(config.media_path, backup.db)
     finally:
         await backup.disconnect()
         await backup.db.close()
