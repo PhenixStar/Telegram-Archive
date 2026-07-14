@@ -18,6 +18,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 # Copy only the necessary application code for the viewer
 COPY src/__init__.py ./src/
 COPY src/config.py ./src/
+# message_utils is stdlib-only (no telethon); the db layer imports utcnow_naive
+# (soft-delete/message-versions) and compute_directory_size (storage stat) from it.
+COPY src/message_utils.py ./src/
 COPY src/realtime.py ./src/
 COPY src/ocr_worker.py ./src/
 COPY src/transcription_worker.py ./src/
