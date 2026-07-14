@@ -85,6 +85,8 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=func.now())
     is_outgoing: Mapped[int] = mapped_column(Integer, default=0)  # 0 or 1
     is_pinned: Mapped[int] = mapped_column(Integer, default=0)  # 0 or 1 - whether this message is pinned
+    is_deleted: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # 0 or 1 - deleted on Telegram
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
     # v8.0: AI-curated fields — filled by AI assistant on demand or batch
     ai_comment: Mapped[str | None] = mapped_column(Text)  # AI-generated annotation/summary
     ocr_text: Mapped[str | None] = mapped_column(Text)  # OCR extraction from images/documents

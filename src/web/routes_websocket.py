@@ -36,9 +36,20 @@ async def broadcast_message_edit(chat_id: int, message_id: int, new_text: str, e
     )
 
 
-async def broadcast_message_delete(chat_id: int, message_id: int):
+async def broadcast_message_delete(
+    chat_id: int, message_id: int, deletion_mode: str = "hard", deleted_at: str | None = None
+) -> None:
     """Broadcast a message deletion to subscribed clients."""
-    await deps.manager.broadcast_to_chat(chat_id, {"type": "delete", "chat_id": chat_id, "message_id": message_id})
+    await deps.manager.broadcast_to_chat(
+        chat_id,
+        {
+            "type": "delete",
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "deletion_mode": deletion_mode,
+            "deleted_at": deleted_at,
+        },
+    )
 
 
 async def handle_realtime_notification(payload: dict):
@@ -76,10 +87,26 @@ async def handle_realtime_notification(payload: dict):
 
     elif notification_type == "edit":
         await deps.manager.broadcast_to_chat(
-            chat_id, {"type": "edit", "message_id": data.get("message_id"), "new_text": data.get("new_text")}
+            chat_id,
+            {
+                "type": "edit",
+                "chat_id": chat_id,
+                "message_id": data.get("message_id"),
+                "new_text": data.get("new_text"),
+                "edit_date": data.get("edit_date"),
+            },
         )
     elif notification_type == "delete":
-        await deps.manager.broadcast_to_chat(chat_id, {"type": "delete", "message_id": data.get("message_id")})
+        await deps.manager.broadcast_to_chat(
+            chat_id,
+            {
+                "type": "delete",
+                "chat_id": chat_id,
+                "message_id": data.get("message_id"),
+                "deletion_mode": data.get("deletion_mode", "hard"),
+                "deleted_at": data.get("deleted_at"),
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

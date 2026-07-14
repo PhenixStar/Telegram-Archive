@@ -4,8 +4,14 @@ import asyncio
 import hashlib
 import logging
 import os
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
+
+
+def utcnow_naive() -> datetime:
+    """Return current UTC time without tzinfo, for naive DB datetime columns."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def get_shared_file_path(shared_dir: str, file_name: str, content_hash: str | None) -> str:

@@ -11,8 +11,22 @@ from typing import Any
 
 from sqlalchemy import and_, delete, func, or_, select, text, update
 
+from ..message_utils import utcnow_naive
 from .adapter import _strip_tz, retry_on_locked
 from .models import Media, Message, Reaction, SyncStatus, User
+
+
+def _message_conflict_update_values(message_data: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    """Build update values for message upserts without undoing soft deletes."""
+    update_values = dict(values)
+
+    if not message_data.get("is_deleted"):
+        update_values.pop("is_deleted", None)
+        update_values.pop("deleted_at", None)
+    elif "deleted_at" not in message_data:
+        update_values.pop("deleted_at", None)
+
+    return update_values
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +59,17 @@ class MessageMixin:
                 "edit_date": _strip_tz(message_data.get("edit_date")),
                 "raw_data": self._serialize_raw_data(message_data.get("raw_data", {})),
                 "is_outgoing": message_data.get("is_outgoing", 0),
+                "is_deleted": message_data.get("is_deleted", 0),
+                "deleted_at": _strip_tz(message_data.get("deleted_at")),
             }
+            update_values = _message_conflict_update_values(message_data, values)
 
             if self._is_sqlite:
                 stmt = sqlite_insert(Message).values(**values)
-                stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=values)
+                stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=update_values)
             else:
                 stmt = pg_insert(Message).values(**values)
-                stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=values)
+                stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=update_values)
 
             await session.execute(stmt)
             await session.commit()
@@ -85,14 +102,17 @@ class MessageMixin:
                     "raw_data": self._serialize_raw_data(m.get("raw_data", {})),
                     "is_outgoing": m.get("is_outgoing", 0),
                     "is_pinned": m.get("is_pinned", 0),
+                    "is_deleted": m.get("is_deleted", 0),
+                    "deleted_at": _strip_tz(m.get("deleted_at")),
                 }
+                update_values = _message_conflict_update_values(m, values)
 
                 if self._is_sqlite:
                     stmt = sqlite_insert(Message).values(**values)
-                    stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=values)
+                    stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=update_values)
                 else:
                     stmt = pg_insert(Message).values(**values)
-                    stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=values)
+                    stmt = stmt.on_conflict_do_update(index_elements=["id", "chat_id"], set_=update_values)
 
                 await session.execute(stmt)
 
@@ -574,6 +594,7 @@ class MessageMixin:
 
             return msg
 
+    @retry_on_locked()
     async def delete_message(self, chat_id: int, message_id: int) -> None:
         """Delete a specific message and its media."""
         async with self.db_manager.async_session_factory() as session:
@@ -587,6 +608,25 @@ class MessageMixin:
             await session.execute(delete(Message).where(and_(Message.chat_id == chat_id, Message.id == message_id)))
             await session.commit()
             logger.debug(f"Deleted message {message_id} from chat {chat_id}")
+
+    @retry_on_locked()
+    async def mark_message_deleted(self, chat_id: int, message_id: int, deleted_at: datetime | None = None) -> None:
+        """Mark a message as deleted on Telegram while keeping archive content."""
+        deleted_at = _strip_tz(deleted_at) or utcnow_naive()
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(
+                update(Message)
+                .where(and_(Message.chat_id == chat_id, Message.id == message_id))
+                .values(
+                    is_deleted=1,
+                    deleted_at=func.coalesce(Message.deleted_at, deleted_at),
+                )
+            )
+            await session.commit()
+            if result.rowcount:
+                logger.debug(f"Marked message {message_id} as deleted")
+            else:
+                logger.debug(f"Soft-delete no-op: message {message_id} not in archive")
 
     async def delete_message_by_id_any_chat(self, message_id: int) -> bool:
         """
@@ -658,6 +698,13 @@ class MessageMixin:
 
         v6.0.0: media_type, media_id, media_path removed - use media_items relationship.
         """
+        is_deleted = getattr(message, "is_deleted", 0)
+        if not isinstance(is_deleted, int):
+            is_deleted = 0
+        deleted_at = getattr(message, "deleted_at", None)
+        if not isinstance(deleted_at, datetime):
+            deleted_at = None
+
         return {
             "id": message.id,
             "chat_id": message.chat_id,
@@ -673,6 +720,8 @@ class MessageMixin:
             "created_at": message.created_at,
             "is_outgoing": message.is_outgoing,
             "is_pinned": message.is_pinned,
+            "is_deleted": int(is_deleted),
+            "deleted_at": deleted_at,
             "ai_comment": message.ai_comment,
             "ocr_text": message.ocr_text,
         }
@@ -825,7 +874,11 @@ class MessageMixin:
     async def get_messages_sync_data(self, chat_id: int) -> dict[int, str | None]:
         """Get message IDs and their edit dates for sync checking."""
         async with self.db_manager.async_session_factory() as session:
-            stmt = select(Message.id, Message.edit_date).where(Message.chat_id == chat_id)
+            # Exclude soft-deleted rows so sync doesn't re-check them. The is_(None) arm is
+            # defensive (is_deleted is NOT NULL with server_default 0) and mirrors is_archived.
+            stmt = select(Message.id, Message.edit_date).where(
+                and_(Message.chat_id == chat_id, or_(Message.is_deleted == 0, Message.is_deleted.is_(None)))
+            )
             result = await session.execute(stmt)
             return {row.id: row.edit_date for row in result}
 

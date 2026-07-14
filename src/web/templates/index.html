@@ -2247,6 +2247,7 @@
 
                                     <!-- Text with clickable links + smart highlights -->
                                     <div class="whitespace-pre-wrap break-words message-text"
+                                        :class="{ 'opacity-50': msg.is_deleted }"
                                         @contextmenu="handleTextContextMenu($event, msg)"
                                         v-html="linkifyText(msg.text, searchHighlightTerm)"></div>
 
@@ -2297,6 +2298,7 @@
                                     <span class="message-time-inline text-[10px] float-right relative ml-2"
                                         :style="{ color: isOwnMessage(msg) ? 'rgba(255,255,255,0.6)' : 'var(--tg-muted)', marginTop: '4px', marginBottom: '-4px' }">
                                         <span v-if="msg.edit_date" class="mr-0.5">edited</span>
+                                        <span v-if="msg.is_deleted" class="mr-0.5">deleted</span>
                                         {{ formatTime(msg.date) }}
                                     </span>
                                 </div>
@@ -6072,19 +6074,39 @@
                             break
                         
                         case 'edit':
+                            if (data.chat_id != null && selectedChat.value?.id !== data.chat_id) {
+                                break
+                            }
                             // Update message text in current view
-                            const editMsg = messages.value.find(m => m.id === data.message_id)
+                            const editMsg = messages.value.find(m =>
+                                m.id === data.message_id && (data.chat_id == null || m.chat_id === data.chat_id)
+                            )
                             if (editMsg) {
                                 editMsg.text = data.new_text
                                 editMsg.edit_date = data.edit_date
                             }
                             break
-                        
+
                         case 'delete':
-                            // Remove from current view
-                            const deleteIdx = messages.value.findIndex(m => m.id === data.message_id)
-                            if (deleteIdx !== -1) {
-                                messages.value.splice(deleteIdx, 1)
+                            if (data.chat_id != null && selectedChat.value?.id !== data.chat_id) {
+                                break
+                            }
+                            if (data.deletion_mode === 'soft') {
+                                const deleteMsg = messages.value.find(m =>
+                                    m.id === data.message_id && (data.chat_id == null || m.chat_id === data.chat_id)
+                                )
+                                if (deleteMsg) {
+                                    deleteMsg.is_deleted = 1
+                                    deleteMsg.deleted_at = data.deleted_at
+                                }
+                            } else {
+                                // Remove from current view
+                                const deleteIdx = messages.value.findIndex(m =>
+                                    m.id === data.message_id && (data.chat_id == null || m.chat_id === data.chat_id)
+                                )
+                                if (deleteIdx !== -1) {
+                                    messages.value.splice(deleteIdx, 1)
+                                }
                             }
                             break
                         
@@ -6918,11 +6940,23 @@
 
                         const latestMessages = await res.json()
                         const latestIds = new Set(latestMessages.map(m => m.id))
-                        // Re-read existing IDs right before mutation to avoid stale snapshots
-                        const existingIds = new Set(messages.value.map(m => m.id))
+                        // Re-read existing messages right before mutation to avoid stale snapshots.
+                        // Index by id once so the new-message filter and soft-delete refresh below
+                        // are O(latest) lookups instead of O(latest × inView) array scans per poll.
+                        const existingById = new Map(messages.value.map(m => [m.id, m]))
+                        const existingIds = new Set(existingById.keys())
 
                         // Find new messages (in server response but not in our view)
                         const newMessages = latestMessages.filter(m => !existingIds.has(m.id))
+
+                        // Refresh soft-delete markers for messages already in view
+                        latestMessages.forEach(serverMsg => {
+                            const currentMsg = existingById.get(serverMsg.id)
+                            if (currentMsg && currentMsg.chat_id === serverMsg.chat_id) {
+                                currentMsg.is_deleted = serverMsg.is_deleted
+                                currentMsg.deleted_at = serverMsg.deleted_at
+                            }
+                        })
 
                         // Find deleted messages - ONLY check messages that overlap with our fetch
                         // We fetched the latest 50/20 from server. Compare with our newest messages.
