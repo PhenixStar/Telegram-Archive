@@ -332,7 +332,16 @@ class OrganizeMixin:
             ]
 
     async def get_all_folders(self, chat_ids: set[int] | list[int] | None = None) -> list[dict[str, Any]]:
-        """Get chat folders with counts, optionally scoped to chat IDs."""
+        """Get chat folders with counts, optionally scoped to chat IDs.
+
+        Only folders that contain at least one backed-up (and, for restricted
+        viewers, accessible) chat are returned. The viewer reflects the archive,
+        not the full Telegram account: a folder whose chats were all excluded
+        from backup — or that is empty on Telegram — would otherwise show as an
+        empty filter tab that returns nothing when clicked (#208). Membership is
+        already limited to chats present in our DB by sync_folder_members, so a
+        zero count means "nothing archived here".
+        """
         async with self.db_manager.async_session_factory() as session:
             if chat_ids is not None:
                 normalized_chat_ids = sorted({int(cid) for cid in chat_ids})
@@ -364,6 +373,12 @@ class OrganizeMixin:
             result = await session.execute(stmt)
             folders = []
             for row in result:
+                count = row.chat_count or 0
+                # Hide folders with no backed-up chats (empty tabs help no one).
+                # The restricted branch already excludes them via its inner join;
+                # this also covers the unrestricted outer-join branch (#208).
+                if count == 0:
+                    continue
                 folder = row.ChatFolder
                 folders.append(
                     {
@@ -371,7 +386,7 @@ class OrganizeMixin:
                         "title": folder.title,
                         "emoticon": folder.emoticon,
                         "sort_order": folder.sort_order,
-                        "chat_count": row.chat_count or 0,
+                        "chat_count": count,
                     }
                 )
             return folders
