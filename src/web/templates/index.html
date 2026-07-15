@@ -8627,10 +8627,18 @@
                         const digits = m.replace(/\D/g, '')
                         return digits.length >= 7 && digits.length <= 15 ? `<span class="smart-badge smart-badge-phone">${m}</span>` : m
                     })
-                    // Search keyword highlighting
+                    // Search keyword highlighting.
+                    // The (?![^<]*>) lookahead makes the term match only in visible text,
+                    // never inside an already-injected tag (smart-badge spans / URL anchors).
+                    // Without it, a term overlapping tag markup — e.g. "ad" in the "smart-badge"
+                    // class, common with money badges — injected a <mark> inside an attribute,
+                    // corrupting the HTML and inflating/breaking the match count and scroll.
                     if (highlight && highlight.length >= 2) {
                         const escapedQ = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                        result = result.replace(new RegExp(`(${escapedQ})`, 'gi'), '<mark class="search-highlight">$1</mark>')
+                        result = result.replace(
+                            new RegExp(`(${escapedQ})(?![^<]*>)`, 'gi'),
+                            '<mark class="search-highlight">$1</mark>'
+                        )
                     }
                     // URL linkification LAST (won't corrupt smart badges since they don't contain URLs)
                     const urlRegex = /(https?:\/\/[^\s<]+)/g
