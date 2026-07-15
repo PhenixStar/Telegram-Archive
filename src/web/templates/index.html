@@ -8619,7 +8619,10 @@
                     const escaped = escapeHtml(text)
                     let result = escaped
                     // Smart highlights FIRST (on plain escaped text, before any HTML tags)
-                    result = result.replace(/(?:[$€£¥₫₹])\s?[\d,]+(?:\.\d{1,2})?/g, '<span class="smart-badge smart-badge-money">$&</span>')
+                    // Currency set kept in sync with the app's money detector (see the price
+                    // regexes ~line 4189): $ € £ ¥ ₹ ₫ ₱(peso) ₩ ฿ ﷼ — so a peso amount gets the
+                    // same money badge as any other currency.
+                    result = result.replace(/(?:[$€£¥₹₫₱₩฿﷼])\s?[\d,]+(?:\.\d{1,2})?/g, '<span class="smart-badge smart-badge-money">$&</span>')
                     result = result.replace(/\b(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})\b/g, '<span class="smart-badge smart-badge-date">$1</span>')
                     result = result.replace(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/g, '<span class="smart-badge smart-badge-email">$1</span>')
                     // Phone: only tag sequences with 7-15 digits
