@@ -13,8 +13,10 @@ from telethon import TelegramClient
 from telethon.errors import (
     ChannelPrivateError,
     ChatForbiddenError,
+    ChatIdInvalidError,
     FileReferenceExpiredError,
     FloodWaitError,
+    PeerIdInvalidError,
     RPCError,
     UserBannedInChannelError,
 )
@@ -1136,7 +1138,16 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
             try:
                 entity = await call_with_flood_retry(self.client.get_entity, cid)
-            except (ChannelPrivateError, ChatForbiddenError, UserBannedInChannelError):
+            except (
+                ChannelPrivateError,
+                ChatForbiddenError,
+                ChatIdInvalidError,
+                PeerIdInvalidError,
+                UserBannedInChannelError,
+            ):
+                # Terminal peer errors: the identifier is permanently invalid or
+                # inaccessible. Skip immediately instead of surfacing a scary ERROR,
+                # so whitelist gap sweeps move on cleanly.
                 logger.warning(f"Gap-fill: skipping chat {cid} (no access)")
                 continue
             except Exception as e:
