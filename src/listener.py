@@ -1030,11 +1030,15 @@ class TelegramListener:
                 self.stats["chat_actions"] += 1
 
                 action_type = None
-                if event.new_photo:
+                # A chat-photo event always sets ``new_photo``; ``event.photo``
+                # then distinguishes a change (a Photo) from a removal (None).
+                # The old ``photo is None and not new_photo`` guard matched EVERY
+                # non-photo action (joins, title changes, …) and mislabeled them
+                # all as photo_removed, since those also carry no photo.
+                if event.new_photo and event.photo is not None:
                     action_type = "photo_changed"
                     logger.info(f"📷 Chat photo changed: chat={chat_id}")
-                elif getattr(event, "photo", None) is None and not event.new_photo:
-                    # Photo removed - Telethon doesn't have photo_removed attr in all versions
+                elif event.new_photo and event.photo is None:
                     action_type = "photo_removed"
                     logger.info(f"📷 Chat photo removed: chat={chat_id}")
                 elif event.new_title:
@@ -1094,19 +1098,21 @@ class TelegramListener:
                         elif action_type == "user_kicked":
                             service_text = f"{actor_name or 'Someone'} was removed from the group"
 
-                        if service_text:
-                            # Generate unique message ID for service messages
-                            # Use negative ID to avoid collision with real messages
-                            import time
-
-                            service_msg_id = -int(time.time() * 1000) % 2147483647
-
+                        # Persist only when Telegram delivered a real service
+                        # message carrying a genuine id and date. Participant-only
+                        # syncs have action_message=None; the old code fabricated a
+                        # wall-clock-derived id for them, writing ~2 phantom rows
+                        # per join/leave that duplicate on reconnect and never
+                        # align with the real timeline.
+                        service_msg = getattr(event, "action_message", None)
+                        service_msg_id = getattr(service_msg, "id", None) if service_msg else None
+                        if service_text and service_msg_id:
                             # v6.0.0: media_type removed - service type indicated by raw_data.service_type
                             message_data = {
                                 "id": service_msg_id,
                                 "chat_id": chat_id,
                                 "sender_id": actor_id,
-                                "date": datetime.now(),
+                                "date": getattr(service_msg, "date", None) or datetime.now(),
                                 "text": service_text,
                                 "reply_to_msg_id": None,
                                 "reply_to_text": None,

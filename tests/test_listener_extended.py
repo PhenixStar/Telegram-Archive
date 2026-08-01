@@ -1134,13 +1134,18 @@ class TestOnChatActionHandler:
         assert "removed" in call_data["text"].lower()
 
     async def test_photo_removed_action(self):
-        """Photo removed event (new_photo=False, photo=None) saves service message."""
+        """Photo removed event (new_photo set, photo=None) saves service message.
+
+        A removal still raises the ``new_photo`` flag; ``photo`` being None is
+        what distinguishes it from a change. The old ``new_photo=False`` shape
+        was the classifier bug that swallowed every non-photo action.
+        """
         listener, handlers, db, config = self._setup()
         handler = handlers[events.ChatAction]
 
         event = MagicMock()
         event.chat_id = -1001234567890
-        event.new_photo = False
+        event.new_photo = True
         event.photo = None  # Photo was removed
         event.new_title = None
         event.user_joined = False
@@ -1160,6 +1165,60 @@ class TestOnChatActionHandler:
         call_data = db.insert_message.call_args[0][0]
         assert "removed" in call_data["text"].lower()
         assert call_data["raw_data"]["action_type"] == "photo_removed"
+
+    async def test_user_joined_not_misclassified_as_photo_removed(self):
+        """A join carries no photo (new_photo falsy) and must classify as
+        user_joined, not be swallowed by the photo-removed branch."""
+        listener, handlers, db, config = self._setup()
+        handler = handlers[events.ChatAction]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+        event.new_photo = False
+        event.photo = None
+        event.new_title = None
+        event.user_joined = True
+        event.user_left = False
+        event.user_added = False
+        event.user_kicked = False
+        event.user_id = 111
+        event.action_message = MagicMock(id=4242)
+
+        actor = MagicMock()
+        actor.first_name = "Jane"
+        actor.last_name = None
+        listener.client.get_entity = AsyncMock(return_value=actor)
+
+        await handler(event)
+
+        db.insert_message.assert_called_once()
+        call_data = db.insert_message.call_args[0][0]
+        assert call_data["raw_data"]["action_type"] == "user_joined"
+        assert call_data["id"] == 4242  # real service-message id, not synthetic
+
+    async def test_no_row_written_without_real_service_message(self):
+        """A participant-only sync (action_message is None) must not fabricate a
+        wall-clock-id phantom row."""
+        listener, handlers, db, config = self._setup()
+        handler = handlers[events.ChatAction]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+        event.new_photo = False
+        event.photo = None
+        event.new_title = None
+        event.user_joined = True
+        event.user_left = False
+        event.user_added = False
+        event.user_kicked = False
+        event.user_id = 111
+        event.action_message = None  # no real service message
+
+        listener.client.get_entity = AsyncMock(return_value=MagicMock(first_name="X", last_name=None))
+
+        await handler(event)
+
+        db.insert_message.assert_not_called()
 
     async def test_increments_chat_actions_stat(self):
         """Handler increments the chat_actions stat counter."""
