@@ -587,12 +587,12 @@ async def test_disconnect_handles_exception():
 
 @pytest.mark.asyncio
 async def test_ensure_connected_calls_connect_when_not_connected():
-    """ensure_connected() calls connect() when not connected."""
+    """ensure_connected() connects (via the locked path) when not connected."""
     config = MagicMock()
     conn = TelegramConnection(config)
     mock_client = AsyncMock()
 
-    with patch.object(conn, "connect", new_callable=AsyncMock, return_value=mock_client) as mock_connect:
+    with patch.object(conn, "_connect_locked", new_callable=AsyncMock, return_value=mock_client) as mock_connect:
         result = await conn.ensure_connected()
 
     mock_connect.assert_awaited_once()
@@ -635,7 +635,7 @@ async def test_ensure_connected_reconnects_when_connection_lost():
 
 @pytest.mark.asyncio
 async def test_ensure_connected_reconnects_on_check_failure():
-    """ensure_connected() calls connect() when connection check raises."""
+    """ensure_connected() reconnects (via the locked path) when the check raises."""
     config = MagicMock()
     conn = TelegramConnection(config)
     mock_client = MagicMock()
@@ -644,10 +644,29 @@ async def test_ensure_connected_reconnects_on_check_failure():
     conn._connected = True
 
     mock_new_client = AsyncMock()
-    with patch.object(conn, "connect", new_callable=AsyncMock, return_value=mock_new_client):
+    with patch.object(conn, "_connect_locked", new_callable=AsyncMock, return_value=mock_new_client):
         result = await conn.ensure_connected()
 
     assert result is mock_client  # Returns self._client at end
+
+
+@pytest.mark.asyncio
+async def test_connect_holds_connect_lock_while_connecting():
+    """connect() must run the session dance under _connect_lock so a concurrent
+    healer cannot touch the session database at the same time."""
+    config = MagicMock()
+    conn = TelegramConnection(config)
+
+    observed = {"locked": None}
+
+    async def fake_locked():
+        observed["locked"] = conn._connect_lock.locked()
+        return AsyncMock()
+
+    with patch.object(conn, "_connect_locked", side_effect=fake_locked):
+        await conn.connect()
+
+    assert observed["locked"] is True
 
 
 @pytest.mark.asyncio

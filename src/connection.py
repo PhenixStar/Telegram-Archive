@@ -105,6 +105,12 @@ class TelegramConnection:
         self._client: TelegramClient | None = None
         self._connected = False
         self._me = None
+        # One healer at a time. The scheduler drives the scheduled backup job
+        # and any reconnect on the SAME event loop, so two coroutines could
+        # otherwise reach connect()/ensure_connected() concurrently and run the
+        # session-file backup/restore dance and Telethon's connect() against a
+        # single session database at once. Serialise both entry points.
+        self._connect_lock = asyncio.Lock()
 
     @property
     def client(self) -> TelegramClient | None:
@@ -137,8 +143,18 @@ class TelegramConnection:
             return False
 
     async def connect(self) -> TelegramClient:
+        """Public connect entry point, serialised by ``_connect_lock``.
+
+        Kept as a thin wrapper so ``ensure_connected`` (which already holds the
+        lock) can reach the same logic via ``_connect_locked`` without a
+        non-reentrant re-acquire deadlock.
         """
-        Connect to Telegram and authenticate.
+        async with self._connect_lock:
+            return await self._connect_locked()
+
+    async def _connect_locked(self) -> TelegramClient:
+        """
+        Connect to Telegram and authenticate. Caller must hold ``_connect_lock``.
 
         Session protection: Telethon's .connect() silently replaces the auth_key
         in the session DB via DH key exchange when the existing key is invalid
@@ -227,7 +243,9 @@ class TelegramConnection:
             pass
         shutil.copy2(session_file, golden_file)
 
-        logger.info(f"Connected as {self._me.first_name} ({self._me.phone})")
+        # Do not log the account holder's name or phone — keep account PII out
+        # of the logs, matching the rule that keeps chat ids and message text out.
+        logger.info("Connected to Telegram")
 
         return self._client
 
@@ -267,30 +285,37 @@ class TelegramConnection:
         """
         Ensure the client is connected, reconnecting if necessary.
 
+        Healing is serialised by ``_connect_lock`` so it can never run the
+        session-file dance or Telethon's connect() concurrently with the public
+        ``connect()`` on the shared event loop. Because we hold the lock here,
+        reconnect goes through ``_connect_locked`` (not ``connect``) to avoid a
+        non-reentrant re-acquire deadlock.
+
         Returns:
             The connected TelegramClient instance
         """
-        if not self.is_connected:
-            return await self.connect()
+        async with self._connect_lock:
+            if not self.is_connected:
+                return await self._connect_locked()
 
-        # Check if connection is still alive
-        try:
-            if not self._client.is_connected():
-                logger.warning("Connection lost, reconnecting...")
-                await self._client.connect()
-                self._me = await _call_with_flood_retry(self._client.get_me)
-                logger.info(f"Reconnected as {self._me.first_name}")
-        except Exception as e:
-            logger.warning(f"Connection check failed: {e}, reconnecting...")
-            self._connected = False
-            if self._client:
-                try:
-                    await self._client.disconnect()
-                except Exception:
-                    pass
-            await self.connect()
+            # Check if connection is still alive
+            try:
+                if not self._client.is_connected():
+                    logger.warning("Connection lost, reconnecting...")
+                    await self._client.connect()
+                    self._me = await _call_with_flood_retry(self._client.get_me)
+                    logger.info("Reconnected")
+            except Exception as e:
+                logger.warning(f"Connection check failed: {e}, reconnecting...")
+                self._connected = False
+                if self._client:
+                    try:
+                        await self._client.disconnect()
+                    except Exception:
+                        pass
+                await self._connect_locked()
 
-        return self._client
+            return self._client
 
     async def __aenter__(self) -> TelegramConnection:
         """Async context manager entry."""
