@@ -2130,7 +2130,7 @@
                                             <audio :ref="el => { if (el) voiceAudioRefs[msg.id] = el }"
                                                 preload="metadata" :src="getMediaUrl(msg)"
                                                 @timeupdate="updateVoiceProgress(msg, $event)"
-                                                @ended="voicePlaying[msg.id] = false; voiceProgress[msg.id] = 0"
+                                                @ended="onVoiceEnded(msg)"
                                                 class="hidden">
                                             </audio>
                                             <!-- Voice transcription text -->
@@ -2848,6 +2848,34 @@
                     </div>
                 </div>
             </aside>
+        </div>
+
+        <!-- Global voice player bar — persists while scrolling, auto-advances -->
+        <div v-if="nowPlayingVoiceMsg"
+            class="fixed z-40 flex items-center gap-3 px-3 py-2 rounded-full shadow-lg"
+            style="left: 50%; transform: translateX(-50%); bottom: 84px; max-width: 92vw; background: var(--tg-card, #1f2937); border: 1px solid var(--tg-border, rgba(255,255,255,0.1));">
+            <button @click="toggleNowPlaying"
+                class="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center"
+                style="background: var(--tg-accent, #3b82f6);"
+                :title="voicePlaying[nowPlayingVoiceId] ? 'Pause' : 'Play'">
+                <svg v-if="!voicePlaying[nowPlayingVoiceId]" class="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <svg v-else class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+            </button>
+            <button @click="scrollToNowPlaying" class="flex flex-col items-start min-w-0 text-left" title="Jump to message">
+                <span class="text-xs font-medium truncate max-w-[46vw] md:max-w-[240px]" style="color: var(--tg-text, #fff);">
+                    <i class="fas fa-microphone mr-1" style="color: var(--tg-accent);"></i>
+                    {{ nowPlayingVoiceMsg._voiceProfileName || (nowPlayingVoiceMsg.sender_name || 'Voice message') }}
+                </span>
+                <span class="w-[40vw] md:w-[220px] h-1 mt-1 rounded-full overflow-hidden" style="background: var(--tg-muted, rgba(255,255,255,0.2));">
+                    <span class="block h-full rounded-full" style="background: var(--tg-accent, #3b82f6);" :style="{ width: ((voiceProgress[nowPlayingVoiceId] || 0) * 100) + '%' }"></span>
+                </span>
+            </button>
+            <label class="flex items-center gap-1 text-[10px] cursor-pointer flex-shrink-0" style="color: var(--tg-muted);" title="Auto-play the next voice note">
+                <input type="checkbox" v-model="voiceAutoAdvance" class="accent-current"> Auto
+            </label>
+            <button @click="stopNowPlaying" class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center" style="color: var(--tg-muted);" title="Close">
+                <i class="fas fa-times"></i>
+            </button>
         </div>
 
         <!-- Lightbox Modal for Images -->
@@ -7528,6 +7556,13 @@
                 const WAVEFORM_BARS = 32
                 const voicePlaying = Vue.reactive({})
                 const voiceProgress = Vue.reactive({})
+                // Global voice player: the id of the voice note currently driving
+                // the persistent player bar. Because the message list is not
+                // virtualized, every loaded <audio> stays mounted, so playback
+                // continues while the user scrolls away and can auto-advance to
+                // the next loaded voice note hands-free.
+                const nowPlayingVoiceId = ref(null)
+                const voiceAutoAdvance = ref(true)
                 const voiceAudioRefs = Vue.reactive({})
 
                 const getWaveformBars = (msg) => {
@@ -7557,7 +7592,67 @@
                         })
                         audio.play().catch(() => {})
                         voicePlaying[msg.id] = true
+                        nowPlayingVoiceId.value = msg.id
                     }
+                }
+
+                // The message object the persistent player bar reflects.
+                const nowPlayingVoiceMsg = computed(() => {
+                    if (nowPlayingVoiceId.value == null) return null
+                    return sortedMessages.value.find(m => m.id === nowPlayingVoiceId.value) || null
+                })
+
+                // Locate the next loaded voice note after the given one so
+                // playback can advance without a round trip. sortedMessages is
+                // newest-first, so the visually-next (older) message is index+1.
+                const findNextVoiceMsg = (fromId) => {
+                    const list = sortedMessages.value
+                    const idx = list.findIndex(m => m.id === fromId)
+                    if (idx === -1) return null
+                    for (let i = idx + 1; i < list.length; i++) {
+                        if (list[i].media?.type === 'voice' && voiceAudioRefs[list[i].id]) return list[i]
+                    }
+                    return null
+                }
+
+                // @ended handler: clear the finished track, then auto-advance to
+                // the next loaded voice note when enabled. If none is loaded, the
+                // bar simply stops (past-window paging is intentionally not
+                // attempted here).
+                const onVoiceEnded = (msg) => {
+                    voicePlaying[msg.id] = false
+                    voiceProgress[msg.id] = 0
+                    if (nowPlayingVoiceId.value === msg.id && voiceAutoAdvance.value) {
+                        const next = findNextVoiceMsg(msg.id)
+                        if (next) {
+                            toggleVoicePlay(null, next)
+                            return
+                        }
+                    }
+                    if (nowPlayingVoiceId.value === msg.id) nowPlayingVoiceId.value = null
+                }
+
+                // Play/pause from the persistent bar.
+                const toggleNowPlaying = () => {
+                    const msg = nowPlayingVoiceMsg.value
+                    if (msg) toggleVoicePlay(null, msg)
+                }
+
+                // Stop playback and dismiss the bar.
+                const stopNowPlaying = () => {
+                    const id = nowPlayingVoiceId.value
+                    if (id != null && voiceAudioRefs[id]) voiceAudioRefs[id].pause()
+                    if (id != null) { voicePlaying[id] = false; voiceProgress[id] = 0 }
+                    nowPlayingVoiceId.value = null
+                }
+
+                // Jump the message view to the track the bar is playing.
+                const scrollToNowPlaying = () => {
+                    const id = nowPlayingVoiceId.value
+                    if (id == null) return
+                    const el = voiceAudioRefs[id]
+                    const bubble = el && el.closest ? el.closest('[data-msg-id], .message-bubble') : null
+                    if (bubble && bubble.scrollIntoView) bubble.scrollIntoView({ behavior: 'smooth', block: 'center' })
                 }
 
                 const updateVoiceProgress = (msg, event) => {
@@ -9418,6 +9513,13 @@
                     getWaveformBars,
                     toggleVoicePlay,
                     updateVoiceProgress,
+                    nowPlayingVoiceId,
+                    voiceAutoAdvance,
+                    nowPlayingVoiceMsg,
+                    onVoiceEnded,
+                    toggleNowPlaying,
+                    stopNowPlaying,
+                    scrollToNowPlaying,
                     formatDuration,
                     exportChat,
                     // Error states
