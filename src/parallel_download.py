@@ -35,7 +35,12 @@ import logging
 import os
 
 from telethon import utils
-from telethon.errors import FileMigrateError, FileReferenceExpiredError, FloodWaitError
+from telethon.errors import (
+    FileMigrateError,
+    FileReferenceExpiredError,
+    FloodPremiumWaitError,
+    FloodWaitError,
+)
 from telethon.network import MTProtoSender
 from telethon.tl import functions
 from telethon.tl.alltlobjects import LAYER
@@ -233,9 +238,11 @@ class ParallelDownloader:
             request = functions.upload.GetFileRequest(location, offset=offset, limit=self._part_size)
             try:
                 result = await self._client._call(sender, request)
-            except FloodWaitError:
+            except (FloodWaitError, FloodPremiumWaitError):
                 # Must propagate unchanged so the caller's single flood budget
                 # (call_with_flood_retry) governs it — never a second backoff.
+                # FloodPremiumWaitError is a sibling of FloodWaitError, not a
+                # subclass, so it must be named explicitly.
                 raise
             except FileReferenceExpiredError:
                 # Propagate unchanged so the caller's file-reference refresh
@@ -305,7 +312,7 @@ class ParallelDownloader:
             raise
         except Exception as exc:  # noqa: BLE001
             await self._close_senders(senders)
-            if isinstance(exc, (FloodWaitError, FileReferenceExpiredError)):
+            if isinstance(exc, (FloodWaitError, FloodPremiumWaitError, FileReferenceExpiredError)):
                 # Surface flood (single budget) and stale-reference (refresh
                 # loop) unchanged so the caller's existing handling governs
                 # them, rather than masking them as a generic fallback.

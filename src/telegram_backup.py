@@ -15,6 +15,7 @@ from telethon.errors import (
     ChatForbiddenError,
     ChatIdInvalidError,
     FileReferenceExpiredError,
+    FloodPremiumWaitError,
     FloodWaitError,
     PeerIdInvalidError,
     RPCError,
@@ -97,7 +98,7 @@ async def call_with_flood_retry(coro_fn, *args, max_retries=MAX_FLOOD_RETRIES, *
     while True:
         try:
             return await coro_fn(*args, **kwargs)
-        except FloodWaitError as e:
+        except (FloodWaitError, FloodPremiumWaitError) as e:
             retries += 1
             if retries > max_retries:
                 logger.error(
@@ -150,7 +151,7 @@ async def iter_messages_with_flood_retry(client, entity, *, min_id=0, **kwargs):
                     resume_from = max(resume_from, msg.id)
                 retries = 0
             return
-        except FloodWaitError as e:
+        except (FloodWaitError, FloodPremiumWaitError) as e:
             retries += 1
             if retries > MAX_FLOOD_RETRIES:
                 logger.error(

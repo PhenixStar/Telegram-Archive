@@ -18,7 +18,7 @@ import shutil
 import sqlite3
 
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodPremiumWaitError, FloodWaitError
 
 from .config import Config
 
@@ -46,7 +46,7 @@ async def _call_with_flood_retry(coro_fn, *args, **kwargs):
     while True:
         try:
             return await coro_fn(*args, **kwargs)
-        except FloodWaitError as e:
+        except (FloodWaitError, FloodPremiumWaitError) as e:
             retries += 1
             if retries > MAX_FLOOD_RETRIES:
                 logger.error(

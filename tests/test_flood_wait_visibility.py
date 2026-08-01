@@ -24,7 +24,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodPremiumWaitError, FloodWaitError
 
 
 def _patch_db_module(monkeypatch):
@@ -463,6 +463,58 @@ async def test_call_with_flood_retry_retries_and_succeeds(fake_db):
 
     assert result.first_name == "Test"
     assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_call_with_flood_retry_handles_premium_flood(fake_db):
+    """FloodPremiumWaitError is a sibling of FloodWaitError, not a subclass, so
+    it must be caught explicitly and retried the same way."""
+    from src import telegram_backup
+
+    calls = {"n": 0}
+
+    async def flaky_get_me():
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise FloodPremiumWaitError(request=None, capture=5)
+        return SimpleNamespace(first_name="Prem", phone="123")
+
+    async def fast_sleep(_):
+        return None
+
+    with patch.object(telegram_backup.asyncio, "sleep", fast_sleep):
+        result = await telegram_backup.call_with_flood_retry(flaky_get_me)
+
+    assert result.first_name == "Prem"
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_iter_with_flood_retry_handles_premium_flood(caplog, fake_db):
+    """iter_messages_with_flood_retry must also absorb the premium flood sibling."""
+    from src import telegram_backup
+
+    attempts = {"n": 0}
+
+    async def fake_iter(entity, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise FloodPremiumWaitError(request=None, capture=5)
+        for i in (1, 2):
+            yield SimpleNamespace(id=i)
+
+    client = SimpleNamespace(iter_messages=fake_iter)
+
+    async def fast_sleep(_):
+        return None
+
+    seen = []
+    with patch.object(telegram_backup.asyncio, "sleep", fast_sleep):
+        async for msg in telegram_backup.iter_messages_with_flood_retry(client, object(), reverse=True):
+            seen.append(msg.id)
+
+    assert seen == [1, 2]
+    assert attempts["n"] == 2
 
 
 @pytest.mark.asyncio
