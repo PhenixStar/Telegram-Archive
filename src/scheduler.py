@@ -309,6 +309,13 @@ class BackupScheduler:
                 await self._listener_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                # The task may already have died (e.g. a transient
+                # ConnectionError from run_until_disconnected). Awaiting a
+                # done task re-raises its stored exception; the restart loop
+                # has already logged it, so swallow here to let the graceful
+                # listener restart proceed instead of crashing the process.
+                pass
             self._listener_task = None
 
         if self._listener:
