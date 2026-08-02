@@ -1936,7 +1936,7 @@
                             <div v-if="msg.raw_data?.service_type === 'service'" class="flex justify-center my-2">
                                 <div class="service-message px-4 py-1.5 rounded-full text-xs text-center max-w-[80%]"
                                     style="background: var(--tg-msg-service); color: rgba(255,255,255,0.8);">
-                                    {{ msg.text }}
+                                    {{ serviceLabel(msg) }}
                                 </div>
                             </div>
                             <!-- Regular Message (hide duplicate album messages - only show first in group) -->
@@ -7646,6 +7646,23 @@
                     nowPlayingVoiceId.value = null
                 }
 
+                // Display text for a service message. Live events store a
+                // ready sentence in msg.text; historical backfills store only
+                // raw_data metadata (service_type/action_type/new_title), so
+                // derive a readable label from that instead of a blank bubble.
+                const serviceLabel = (msg) => {
+                    if (msg.text) return msg.text
+                    const rd = msg.raw_data || {}
+                    const at = rd.action_type || ''
+                    const title = rd.new_title
+                    if (at === 'topic_create') return title ? `Topic created: ${title}` : 'Topic created'
+                    if (at === 'topic_edit' || at === 'chat_edit_title' || at === 'title_changed')
+                        return title ? `Renamed to "${title}"` : 'Renamed'
+                    if (title) return title
+                    if (!at) return ''
+                    return at.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
+                }
+
                 // Jump the message view to the track the bar is playing.
                 const scrollToNowPlaying = () => {
                     const id = nowPlayingVoiceId.value
@@ -9520,6 +9537,7 @@
                     toggleNowPlaying,
                     stopNowPlaying,
                     scrollToNowPlaying,
+                    serviceLabel,
                     formatDuration,
                     exportChat,
                     // Error states

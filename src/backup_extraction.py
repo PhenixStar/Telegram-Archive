@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import re
 
 from telethon.tl.types import (
     Channel,
@@ -14,6 +15,16 @@ from telethon.tl.types import (
 from telethon.utils import get_peer_id
 
 logger = logging.getLogger(__name__)
+
+
+def _service_action_type(action: object) -> str:
+    """Normalize a Telethon ``MessageAction`` class name to snake_case.
+
+    ``MessageActionTopicCreate`` -> ``"topic_create"``,
+    ``MessageActionChatEditTitle`` -> ``"chat_edit_title"``.
+    """
+    name = type(action).__name__.removeprefix("MessageAction")
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 class BackupExtractionMixin:
@@ -116,6 +127,20 @@ class BackupExtractionMixin:
             "is_outgoing": 1 if message.out else 0,
             "is_pinned": 1 if getattr(message, "pinned", False) else 0,
         }
+
+        # Preserve service-action metadata (e.g. forum topic creations and
+        # renames) so historical backfills keep parity with the listener's
+        # raw_data convention (service_type / action_type, since v6.0.0).
+        # Without this, service events are stored with empty text and no
+        # marker, so the viewer renders them as blank regular bubbles and the
+        # payload is irrecoverable once the history is archived.
+        action = getattr(message, "action", None)
+        if action is not None:
+            message_data["raw_data"]["service_type"] = "service"
+            message_data["raw_data"]["action_type"] = _service_action_type(action)
+            action_title = getattr(action, "title", None)
+            if action_title is not None:
+                message_data["raw_data"]["new_title"] = self._text_with_entities_to_string(action_title)
 
         # Capture grouped_id for album detection (multiple photos/videos sent together)
         if message.grouped_id:
