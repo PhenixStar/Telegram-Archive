@@ -274,8 +274,8 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             logger.error("  Local:  python -m src.setup_auth")
             raise RuntimeError("Session not authorized. Please run authentication setup.")
 
-        me = await call_with_flood_retry(self.client.get_me)
-        logger.info(f"Connected as {me.first_name} ({me.phone})")
+        await call_with_flood_retry(self.client.get_me)  # confirm the session is authorized
+        logger.info("Connected to Telegram")
 
     async def disconnect(self):
         """
@@ -302,7 +302,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
             # Get current user info
             me = await call_with_flood_retry(self.client.get_me)
-            logger.info(f"Logged in as {me.first_name} ({me.id})")
+            logger.info("Logged in")
 
             # Store owner ID and backfill is_outgoing for existing messages
             await self.db.set_metadata("owner_id", str(me.id))

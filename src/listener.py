@@ -332,8 +332,8 @@ class TelegramListener:
         if self.client is not None and not self._owns_client:
             if not self.client.is_connected():
                 raise RuntimeError("Shared client is not connected")
-            me = await self.client.get_me()
-            logger.info(f"Connected as {me.first_name} ({me.phone})")
+            await self.client.get_me()  # confirm the session is authorized
+            logger.info("Connected to Telegram")
         else:
             # Create new client
             logger.info(f"Using Telethon session database: {self.config.session_path}.session")
@@ -353,8 +353,8 @@ class TelegramListener:
                 logger.error("Please run the authentication setup first.")
                 raise RuntimeError("Session not authorized. Please run authentication setup.")
 
-            me = await self.client.get_me()
-            logger.info(f"Connected as {me.first_name} ({me.phone})")
+            await self.client.get_me()  # confirm the session is authorized
+            logger.info("Connected to Telegram")
 
         # Load tracked chat IDs from database
         await self._load_tracked_chats()
