@@ -1260,3 +1260,37 @@ class MessageMixin:
             result = await session.execute(stmt)
             row = result.first()
             return row[0] if row else None
+
+    async def get_migration_markers(self) -> list[tuple[int, int]]:
+        """Return stored group→supergroup migration pointers (#228).
+
+        Selects service messages whose ``raw_data.action_type`` is
+        ``chat_migrate_to`` and returns ``(old_chat_id, new_marked_id)`` pairs,
+        where ``new_marked_id`` is ``raw_data.migrate_to_id`` (already in marked
+        ``-100…`` form, written by ``_process_message``). SELECT-only; used to
+        reconcile scope for migrations that occurred while the archiver was
+        offline (the dead basic group may no longer surface as a dialog).
+
+        The ``LIKE`` clause is only a cheap prefilter — the authoritative match
+        is the Python-side ``json.loads`` — so the result is portable across the
+        SQLite and PostgreSQL backends without dialect-specific JSON operators.
+        PII: ids are returned to the caller for scope reconciliation only.
+        """
+        markers: list[tuple[int, int]] = []
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(
+                select(Message.chat_id, Message.raw_data).where(Message.raw_data.like('%"chat_migrate_to"%'))
+            )
+            for chat_id, raw in result.all():
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                if data.get("action_type") != "chat_migrate_to":
+                    continue
+                new_id = data.get("migrate_to_id")
+                if isinstance(new_id, int):
+                    markers.append((chat_id, new_id))
+        return markers
