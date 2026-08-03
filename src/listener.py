@@ -42,6 +42,7 @@ from .message_utils import (
     extract_topic_id,
     finalize_atomic_download,
     sanitize_media_filename,
+    sender_display_name,
     utcnow_naive,
 )
 from .realtime import NotificationType, RealtimeNotifier
@@ -931,18 +932,28 @@ class TelegramListener:
                     }
                     await self.db.upsert_chat(chat_data)
 
+                # message.sender is usually already attached by Telethon for live
+                # NewMessage events; fall back to a single flood-aware get_sender()
+                # call only when it's missing, instead of skipping the snapshot.
+                sender = message.sender
+                if sender is None:
+                    try:
+                        sender = await call_with_flood_retry(event.get_sender)
+                    except Exception:
+                        sender = None
+
                 # Save sender information if available
                 # sender_user is kept for the WS notify payload below (mirrors the API row's
                 # flat first_name/last_name/username fields).
                 sender_user = None
-                if message.sender and isinstance(message.sender, User):
+                if sender and isinstance(sender, User):
                     user_data = {
-                        "id": message.sender.id,
-                        "username": message.sender.username,
-                        "first_name": message.sender.first_name,
-                        "last_name": message.sender.last_name,
-                        "phone": message.sender.phone,
-                        "is_bot": message.sender.bot,
+                        "id": sender.id,
+                        "username": sender.username,
+                        "first_name": sender.first_name,
+                        "last_name": sender.last_name,
+                        "phone": sender.phone,
+                        "is_bot": sender.bot,
                     }
                     await self.db.upsert_user(user_data)
                     sender_user = user_data
@@ -951,6 +962,7 @@ class TelegramListener:
                     "id": message.id,
                     "chat_id": chat_id,
                     "sender_id": message.sender_id,
+                    "sender_name": sender_display_name(sender),
                     "date": message.date,
                     "text": message.text or "",
                     "reply_to_msg_id": message.reply_to_msg_id if hasattr(message, "reply_to_msg_id") else None,
@@ -1147,6 +1159,7 @@ class TelegramListener:
                                 "id": service_msg_id,
                                 "chat_id": chat_id,
                                 "sender_id": actor_id,
+                                "sender_name": actor_name or None,
                                 "date": getattr(service_msg, "date", None) or datetime.now(),
                                 "text": service_text,
                                 "reply_to_msg_id": None,

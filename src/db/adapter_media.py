@@ -355,7 +355,14 @@ class MediaMixin:
         """
         async with self.db_manager.async_session_factory() as session:
             stmt = (
-                select(Media, Message.date, User.first_name, User.last_name)
+                select(
+                    Media,
+                    Message.date,
+                    Message.sender_name,
+                    User.first_name,
+                    User.last_name,
+                    User.username,
+                )
                 .join(
                     Message,
                     and_(
@@ -411,9 +418,11 @@ class MediaMixin:
                     "height": media.height,
                     "duration": media.duration,
                     "message_date": msg_date.isoformat() if msg_date else None,
-                    "sender_name": f"{first_name or ''} {last_name or ''}".strip() or None,
+                    "sender_name": (
+                        sender_name or f"{first_name or ''} {last_name or ''}".strip() or username or None
+                    ),
                 }
-                for media, msg_date, first_name, last_name in rows[:limit]
+                for media, msg_date, sender_name, first_name, last_name, username in rows[:limit]
             ]
 
             return {"items": items, "has_more": has_more}

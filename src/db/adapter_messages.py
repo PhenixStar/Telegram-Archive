@@ -19,6 +19,10 @@ from .adapter import _strip_tz, retry_on_locked
 from .models import Media, Message, MessageVersion, Reaction, SyncStatus, User
 
 
+def _is_nonblank_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _message_conflict_update_values(message_data: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
     """Build update values for message upserts without undoing soft deletes."""
     update_values = dict(values)
@@ -82,10 +86,13 @@ class MessageMixin:
     """
 
     def _message_values(self, message_data: dict[str, Any]) -> dict[str, Any]:
+        sender_name = message_data.get("sender_name")
+        sender_name = sender_name.strip() if _is_nonblank_text(sender_name) else None
         return {
             "id": message_data["id"],
             "chat_id": message_data["chat_id"],
             "sender_id": message_data.get("sender_id"),
+            "sender_name": sender_name,
             "date": _strip_tz(message_data["date"]),
             "text": message_data.get("text"),
             "reply_to_msg_id": message_data.get("reply_to_msg_id"),
@@ -234,9 +241,9 @@ class MessageMixin:
         Applies the text/edit_date gating policy, then drops every key whose value
         already matches the row, so re-scanning an unchanged message performs no
         write at all. Deliberate scope note: when text is withheld (older or
-        no-evidence source), the remaining metadata (raw_data, reply_to_*, sender,
-        …) still refreshes from the incoming payload — non-text fields stay
-        last-writer-wins exactly as before versioning existed.
+        no-evidence source), remaining metadata still refreshes from the incoming
+        payload. The exception is sender_name: once nonblank, that capture-time
+        snapshot is immutable.
         """
         update_values = _message_conflict_update_values(message_data, values)
         if self._should_apply_upsert_text(existing, values):
@@ -247,6 +254,13 @@ class MessageMixin:
         else:
             update_values.pop("text", None)
             update_values.pop("edit_date", None)
+
+        # Sender names are capture-time snapshots. A missing/blank snapshot may
+        # be hydrated once, but a nonblank archived value is immutable.
+        if _is_nonblank_text(getattr(existing, "sender_name", None)) or not _is_nonblank_text(
+            values.get("sender_name")
+        ):
+            update_values.pop("sender_name", None)
 
         changed = {}
         for key, value in update_values.items():
@@ -999,11 +1013,14 @@ class MessageMixin:
         deleted_at = getattr(message, "deleted_at", None)
         if not isinstance(deleted_at, datetime):
             deleted_at = None
+        sender_name = getattr(message, "sender_name", None)
+        sender_name = sender_name.strip() if _is_nonblank_text(sender_name) else None
 
         return {
             "id": message.id,
             "chat_id": message.chat_id,
             "sender_id": message.sender_id,
+            "sender_name": sender_name,
             "date": message.date,
             "text": message.text,
             "reply_to_msg_id": message.reply_to_msg_id,
@@ -1114,6 +1131,7 @@ class MessageMixin:
                         Message.text,
                         Message.is_outgoing,
                         Message.reply_to_msg_id,
+                        Message.sender_name,
                         Media.type.label("media_type"),
                         Media.file_path.label("media_file_path"),
                         User.first_name,
@@ -1133,6 +1151,7 @@ class MessageMixin:
                         Message.text,
                         Message.is_outgoing,
                         Message.reply_to_msg_id,
+                        Message.sender_name,
                         User.first_name,
                         User.last_name,
                         User.username,
@@ -1148,7 +1167,10 @@ class MessageMixin:
                     "id": row.id,
                     "date": row.date.isoformat() if hasattr(row.date, 'isoformat') else row.date,
                     "sender": {
-                        "name": f"{row.first_name or ''} {row.last_name or ''}".strip() or row.username or "Unknown",
+                        "name": row.sender_name
+                        or f"{row.first_name or ''} {row.last_name or ''}".strip()
+                        or row.username
+                        or "Unknown",
                         "username": row.username,
                     },
                     "text": row.text,

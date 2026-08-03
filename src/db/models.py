@@ -75,6 +75,10 @@ class Message(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chats.id"), primary_key=True)
     # NOTE: sender_id has no FK constraint because it can be channel/group IDs (not in users table)
     sender_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Capture-time snapshot of the sender's display name (immutable once set, see
+    # adapter_messages._pending_update_values). Lets the viewer show who sent a
+    # message as of capture, independent of later profile-name changes.
+    sender_name: Mapped[str | None] = mapped_column(Text)
     date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     text: Mapped[str | None] = mapped_column(Text)
     reply_to_msg_id: Mapped[int | None] = mapped_column(BigInteger)
