@@ -4,6 +4,69 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Fork port] - 2026-08-03
+
+Semantic back-port of a batch of upstream (GeiserX/Telegram-Archive, up to v7.33.4)
+features and fixes into this fork. Because the fork's modular refactor makes
+`git cherry-pick` non-viable (0 of 97 candidate commits applied cleanly), each
+item was re-implemented against the fork's structure and verified with tests and
+a live browser/container validation. Full technical record:
+`plans/reports/port-260803-upstream-feature-port-and-deploy.md`.
+
+### Added
+- **Global voice player bar** — a persistent bottom-centre player for voice
+  notes that keeps playing while you scroll away and auto-advances to the next
+  loaded voice note (opt-out "Auto" toggle); play/pause, progress, jump-to-message.
+- **Accessible, topic-aware jump-to-date calendar** — aria-modal dialog with a
+  keyboard focus trap, viewer-timezone-correct date parsing, topic-scoped jumps,
+  toast feedback, and day-availability dots backed by a new endpoint
+  `GET /api/chats/{id}/messages/dates?month&timezone&topic_id`.
+- **Readable service messages** — historical backfills now preserve
+  `service_type`/`action_type`/`new_title` for service events (joins, photo
+  changes, forum topic create/rename); the viewer derives a label when a service
+  message has no text, so they no longer render as blank bubbles.
+- **Per-message sender history** — new nullable `messages.sender_name` column
+  (migration `016`) snapshots the sender's display name at capture time. The
+  viewer prefers it over the live user join, so a message keeps showing who sent
+  it even after that account is later renamed.
+- **Group→supergroup migration handling** — the archiver now detects when a
+  tracked basic group migrates to a supergroup (previously capture stopped
+  silently) and always emits a counts-only warning. Opt-in
+  `FOLLOW_CHAT_MIGRATIONS` (default off) additionally adopts and backfills the
+  new supergroup id, persisted in the metadata KV (no schema change).
+
+### Changed
+- **Mid-run reconnect healing** — a network drop during a backup run now heals
+  the shared connection in place (`ensure_connected()`) and continues, instead
+  of failing every remaining item until the next scheduled cycle.
+
+### Security
+- **Import path-traversal confinement** — imported media/control files are
+  confined to the export root: absolute paths, drive letters, `..` segments, and
+  symlinked path components are rejected, and the resolved path must be a regular
+  file under the root (re-validated again at write time). Filenames are sanitised
+  and byte-capped. One bad file is skipped, never aborting the import.
+- **Log privacy scrub** — the account holder's name/phone, chat titles, message
+  text, participant names, and viewer usernames are no longer written to
+  persistent logs; numeric ids / roles / exception class names are kept for
+  debugging.
+
+### Fixed
+- **Scheduler no longer crashes the container** on a transient listener
+  `ConnectionError` — the dead-task exception is swallowed during teardown so
+  only the listener restarts, not the whole process.
+- **`FloodPremiumWaitError`** (a sibling of `FloodWaitError`, not a subclass) is
+  now handled at every flood catch site instead of propagating unhandled.
+- **Terminal invalid-peer errors** (`ChatIdInvalidError`, `PeerIdInvalidError`)
+  are treated as benign gap-fill skips instead of surfacing as errors.
+- **Chat-action classification** — the photo-removed branch no longer swallows
+  every non-photo action (joins, title changes) as `photo_removed`, and service
+  rows use the real `MessageService` id/date instead of synthetic wall-clock ids
+  that produced phantom/duplicate rows.
+- **`SimpleDialog` crash** — the include-fetch fallback wrapper now exposes a
+  `message` attribute, preventing an `AttributeError` that could abort a whole
+  backup run (surfaced by the followed-migration fetch).
+
 ## [7.10.10] - 2026-05-24
 
 ### Fixed
