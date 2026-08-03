@@ -621,6 +621,11 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                             def __init__(self, entity):
                                 self.entity = entity
                                 self.date = datetime.now()
+                                # A fetched-not-in-dialog-list chat has no "last
+                                # dialog message"; the smart-skip check below reads
+                                # ``dialog.message`` unconditionally, so expose it
+                                # (as None) to avoid an AttributeError crash.
+                                self.message = None
 
                         filtered_dialogs.append(SimpleDialog(entity))
                         logger.info(
