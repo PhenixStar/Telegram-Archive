@@ -50,7 +50,10 @@ class TestMainBlockEdgeCases(unittest.TestCase):
         # Lines 634-637 log API ID, Phone, Schedule, and Chat types
         self.assertIn("Configuration test successful", result.stderr)
         self.assertIn("99999", result.stderr)
-        self.assertIn("+9876543210", result.stderr)
+        # Phone number itself must never be written to logs — only whether
+        # it's configured
+        self.assertIn("Phone: configured", result.stderr)
+        self.assertNotIn("+9876543210", result.stderr)
         self.assertIn("0 */6 * * *", result.stderr)
 
     def test_main_block_config_error_prints_to_stdout(self):
