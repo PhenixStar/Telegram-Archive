@@ -448,7 +448,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
                         filtered_dialogs.append(SimpleDialog(entity))
                         logger.info(
-                            f"  → Added: {self._get_chat_name(entity)} (ID: {include_id}){' [in archive]' if is_in_archive else ' [not in any dialog list]'}"
+                            f"  → Added: chat {include_id}{' [in archive]' if is_in_archive else ' [not in any dialog list]'}"
                         )
                     except Exception as e:
                         logger.warning(f"  → Could not fetch included chat {include_id}: {e}")
@@ -512,7 +512,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 is_archived = chat_id in archived_chat_ids and chat_id not in seen_chat_ids
                 if chat_id in archived_chat_ids and chat_id in seen_chat_ids:
                     logger.warning(
-                        f"  Chat {chat_name} (ID: {chat_id}) appears in both regular and archived dialog lists - treating as NOT archived"
+                        f"  Chat {chat_id} appears in both regular and archived dialog lists - treating as NOT archived"
                     )
 
                 # Phase 1: Smart skip — compare dialog's top message with last synced ID
@@ -538,7 +538,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         break
                     continue
 
-                label = f"[{i}/{len(filtered_dialogs)}] Backing up{' (archived)' if is_archived else ''}: {chat_name} (ID: {chat_id})"
+                label = f"[{i}/{len(filtered_dialogs)}] Backing up{' (archived)' if is_archived else ''}: chat {chat_id}"
                 logger.info(label)
 
                 try:
@@ -565,10 +565,10 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 except (ChannelPrivateError, ChatForbiddenError, UserBannedInChannelError) as e:
                     logger.warning(f"  → Skipped (no access): {e.__class__.__name__}")
                 except (TimeoutError, RPCError, ConnectionError, OSError) as e:
-                    logger.error(f"  → Connection error backing up {chat_name}: {e}")
+                    logger.error(f"  → Connection error backing up chat {chat_id}: {e.__class__.__name__}")
                     await self._heal_connection()
                 except Exception as e:
-                    logger.error(f"  → Error backing up {chat_name}: {e}", exc_info=True)
+                    logger.error(f"  → Error backing up chat {chat_id}: {e}", exc_info=True)
 
             if skipped_chats:
                 logger.info(f"Smart skip: {skipped_chats} chats had no new messages (metadata updated)")
@@ -602,7 +602,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                     entity = dialog.entity
                     chat_id = self._get_marked_id(entity)
                     chat_name = self._get_chat_name(entity)
-                    logger.info(f"  [Archived {i}/{len(archived_to_backup)}] {chat_name} (ID: {chat_id})")
+                    logger.info(f"  [Archived {i}/{len(archived_to_backup)}] chat {chat_id}")
 
                     try:
                         message_count = await self._backup_dialog(dialog, is_archived=True)
@@ -1228,7 +1228,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 continue
 
             chat_name = self._get_chat_name(entity)
-            logger.info(f"Gap-fill: {chat_name} (ID: {cid}) — {len(gaps)} gap(s) detected")
+            logger.info(f"Gap-fill: chat {cid} — {len(gaps)} gap(s) detected")
 
             for gap_start, gap_end, gap_size in gaps:
                 logger.info(f"  → Gap [{gap_start}..{gap_end}] (~{gap_size} IDs missing)")
