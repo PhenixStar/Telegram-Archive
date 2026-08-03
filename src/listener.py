@@ -994,14 +994,10 @@ class TelegramListener:
                     }
                     await self._notifier.notify(NotificationType.NEW_MESSAGE, chat_id, {"message": ws_message})
 
-                # Log the new message (truncate text for logging)
-                text_preview = (message.text or "")[:50]
-                if len(message.text or "") > 50:
-                    text_preview += "..."
+                # Log the new message (no text content — avoid leaking message
+                # bodies into persistent logs)
                 media_indicator = f" [{media_type}]" if media_type else ""
-                logger.info(
-                    f"📩 New message saved: chat={chat_id} msg={message.id}{media_indicator} text='{text_preview}'"
-                )
+                logger.info(f"📩 New message saved: chat={chat_id} msg={message.id}{media_indicator}")
 
             except Exception as e:
                 self.stats["errors"] += 1
@@ -1043,7 +1039,7 @@ class TelegramListener:
                     logger.info(f"📷 Chat photo removed: chat={chat_id}")
                 elif event.new_title:
                     action_type = "title_changed"
-                    logger.info(f"📝 Chat title changed to '{event.new_title}': chat={chat_id}")
+                    logger.info(f"📝 Chat title changed: chat={chat_id}")
                 elif event.user_joined:
                     action_type = "user_joined"
                     logger.debug(f"👤 User joined: chat={chat_id}")
@@ -1126,7 +1122,9 @@ class TelegramListener:
                                 "is_outgoing": 0,
                             }
                             await self.db.insert_message(message_data)
-                            logger.info(f"📌 Service message saved: {service_text}")
+                            # service_text may contain a participant's name — keep
+                            # the log entry to the numeric chat/action instead
+                            logger.info(f"📌 Service message saved: chat={chat_id} action={action_type}")
                     except Exception as e:
                         logger.warning(f"Failed to save service message: {e}")
 

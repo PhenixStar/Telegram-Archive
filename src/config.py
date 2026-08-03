@@ -795,7 +795,7 @@ if __name__ == "__main__":
         setup_logging(config)
         logger.info("Configuration test successful")
         logger.info(f"API ID: {config.api_id}")
-        logger.info(f"Phone: {config.phone}")
+        logger.info("Phone: %s", "configured" if config.phone else "not set")
         logger.info(f"Schedule: {config.schedule}")
         logger.info(f"Chat types: {config.chat_types}")
     except ValueError as e:

@@ -381,7 +381,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     try:
                         allowed = set(json.loads(row["allowed_chat_ids"]))
                     except (json.JSONDecodeError, TypeError):
-                        logger.warning(f"Skipping session with corrupted allowed_chat_ids for {row['username']}")
+                        logger.warning("Skipping session with corrupted allowed_chat_ids (role=%s)", row["role"])
                         continue
                 _sessions[row["token"]] = SessionData(
                     username=row["username"],
