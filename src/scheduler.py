@@ -180,8 +180,10 @@ class BackupScheduler:
                 # Ensure connection is still alive
                 client = await self._connection.ensure_connected()
 
-                # Run backup using shared client
-                await run_backup(self.config, client=client)
+                # Run backup using shared client (pass the connection too, so a
+                # mid-run network drop can be healed instead of failing every
+                # remaining item until the next scheduled cycle)
+                await run_backup(self.config, client=client, connection=self._connection)
 
                 # Run gap-fill if enabled
                 gap_fill_ok = True
@@ -190,7 +192,7 @@ class BackupScheduler:
                         from .telegram_backup import run_fill_gaps
 
                         logger.info("Running post-backup gap-fill...")
-                        result = await run_fill_gaps(self.config, client=client)
+                        result = await run_fill_gaps(self.config, client=client, connection=self._connection)
                         if result.get("errors", 0) > 0:
                             gap_fill_ok = False
                             logger.warning(
@@ -347,7 +349,7 @@ class BackupScheduler:
         logger.info("Running initial backup on startup...")
         async with self._backup_lock:
             try:
-                await run_backup(self.config, client=self._connection.client)
+                await run_backup(self.config, client=self._connection.client, connection=self._connection)
                 logger.info("Initial backup completed")
 
                 # Run gap-fill if enabled
@@ -356,7 +358,9 @@ class BackupScheduler:
                         from .telegram_backup import run_fill_gaps
 
                         logger.info("Running initial gap-fill...")
-                        result = await run_fill_gaps(self.config, client=self._connection.client)
+                        result = await run_fill_gaps(
+                            self.config, client=self._connection.client, connection=self._connection
+                        )
                         if result.get("errors", 0) > 0:
                             logger.warning(f"Initial gap-fill completed with {result['errors']} error(s)")
                     except Exception as e:
