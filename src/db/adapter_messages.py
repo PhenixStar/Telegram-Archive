@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, exists, func, literal, or_, select, union_all, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -717,6 +717,39 @@ class MessageMixin:
             result = await session.execute(stmt)
             message = result.scalar_one_or_none()
             return self._message_to_dict(message) if message else None
+
+    async def get_message_dates(
+        self,
+        chat_id: int,
+        day_ranges: list[tuple[str, datetime, datetime]],
+        topic_id: int | None = None,
+    ) -> list[str]:
+        """Return which of the requested local-calendar days contain messages.
+
+        ``day_ranges`` is a list of ``(date_str, utc_start, utc_end)`` where the
+        UTC bounds are the day's local midnight boundaries already converted to
+        UTC by the caller (so timezone handling stays in the route). One EXISTS
+        branch per day is UNION ALL-ed into a single round trip.
+        """
+        if not day_ranges:
+            return []
+
+        branches = []
+        for day, utc_start, utc_end in day_ranges:
+            conditions = [
+                Message.chat_id == chat_id,
+                Message.date >= utc_start,
+                Message.date < utc_end,
+            ]
+            if topic_id is not None:
+                conditions.append(func.coalesce(Message.reply_to_top_id, 1) == topic_id)
+            branches.append(
+                select(literal(day).label("day")).where(exists(select(1).where(*conditions)))
+            )
+
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(union_all(*branches))
+            return sorted(set(result.scalars().all()))
 
     async def find_message_by_date_with_joins(self, chat_id: int, target_date: datetime) -> dict[str, Any] | None:
         """

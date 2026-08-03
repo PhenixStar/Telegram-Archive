@@ -3,7 +3,7 @@
 import csv
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -465,6 +465,64 @@ async def get_message_by_date(
         raise
     except Exception as e:
         logger.error(f"Error finding message by date: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/api/chats/{chat_id}/messages/dates")
+async def get_message_dates(
+    chat_id: int,
+    user: UserContext = Depends(require_auth),
+    month: str = Query(..., description="Month in YYYY-MM format"),
+    timezone: str = Query(None, description="IANA timezone for local-day boundaries"),
+    topic_id: int | None = Query(None, description="Optional forum topic id to scope the count"),
+):
+    """Return the local calendar dates that contain messages in a month.
+
+    Advisory only: the viewer uses this to dot days that have messages. Each
+    local day is converted to its UTC half-open range in the viewer's timezone
+    so day boundaries match what the by-date jump would land on.
+    """
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        month_start = datetime.strptime(month, "%Y-%m")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
+
+    tz_str = timezone or deps.config.viewer_timezone or "UTC"
+    try:
+        user_tz = ZoneInfo(tz_str)
+    except Exception:
+        logger.warning(f"Invalid timezone '{tz_str}', falling back to UTC")
+        user_tz = ZoneInfo("UTC")
+
+    if month_start.month == 12:
+        next_month = datetime(month_start.year + 1, 1, 1)
+    else:
+        next_month = datetime(month_start.year, month_start.month + 1, 1)
+
+    day_ranges: list[tuple[str, datetime, datetime]] = []
+    current_day = month_start
+    while current_day < next_month:
+        following_day = current_day + timedelta(days=1)
+        local_start = current_day.replace(tzinfo=user_tz)
+        local_end = following_day.replace(tzinfo=user_tz)
+        day_ranges.append(
+            (
+                current_day.strftime("%Y-%m-%d"),
+                local_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None),
+                local_end.astimezone(ZoneInfo("UTC")).replace(tzinfo=None),
+            )
+        )
+        current_day = following_day
+
+    try:
+        dates = await deps.db.get_message_dates(chat_id, day_ranges, topic_id)
+        return {"dates": dates}
+    except Exception as e:
+        logger.error(f"Error listing message dates: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
