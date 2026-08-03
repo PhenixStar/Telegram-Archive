@@ -356,6 +356,21 @@ class Config:
         self.mass_operation_window_seconds = int(os.getenv("MASS_OPERATION_WINDOW_SECONDS", "30"))
         self.mass_operation_buffer_delay = float(os.getenv("MASS_OPERATION_BUFFER_DELAY", "2.0"))
 
+        # =====================================================================
+        # GROUP → SUPERGROUP MIGRATION FOLLOWING (issue #228)
+        # =====================================================================
+        # When a basic group is upgraded to a supergroup it is assigned a brand
+        # new channel id. Neither the live NewMessage handler nor the ChatAction
+        # handler sees the migration service message (Telethon exposes it to
+        # neither), so capture of the group silently stops at the old id. The
+        # scheduled sweep therefore ALWAYS warns (count-only) when a tracked
+        # group has migrated to a supergroup that is not in scope.
+        # FOLLOW_CHAT_MIGRATIONS (default OFF) additionally makes the archiver
+        # adopt the new supergroup id automatically: it is persisted to the
+        # metadata KV and merged into the effective backup + listener scope so
+        # capture continues seamlessly without editing GROUPS_INCLUDE_CHAT_IDS.
+        self.follow_chat_migrations = _parse_bool(os.getenv("FOLLOW_CHAT_MIGRATIONS"), default=False)
+
         # Display chat IDs - restrict viewer to specific chats only
         # Useful for sharing public channel viewers without exposing other chats
         self.display_chat_ids = self._parse_id_list(os.getenv("DISPLAY_CHAT_IDS", ""))
@@ -484,6 +499,10 @@ class Config:
                 logger.info("  LISTEN_CHAT_ACTIONS: true - Chat metadata changes tracked!")
             logger.info(
                 f"  Mass operation protection: block if >{self.mass_operation_threshold} ops in {self.mass_operation_window_seconds}s"
+            )
+        if self.follow_chat_migrations:
+            logger.info(
+                "FOLLOW_CHAT_MIGRATIONS enabled - will adopt the new supergroup id after a group→supergroup migration"
             )
         if self.display_chat_ids:
             logger.info(f"Display mode: Viewer restricted to chat IDs {self.display_chat_ids}")

@@ -8,7 +8,11 @@ from telethon.tl.types import (
     Channel,
     Chat,
     Message,
+    MessageActionChannelMigrateFrom,
+    MessageActionChatMigrateTo,
     MessageMediaPoll,
+    PeerChannel,
+    PeerChat,
     TextWithEntities,
     User,
 )
@@ -141,6 +145,16 @@ class BackupExtractionMixin:
             action_title = getattr(action, "title", None)
             if action_title is not None:
                 message_data["raw_data"]["new_title"] = self._text_with_entities_to_string(action_title)
+
+            # Group ↔ supergroup migration pointers (#228). MessageActionChatMigrateTo
+            # carries only ``.channel_id`` (no ``.title``), so the new supergroup id
+            # would otherwise be silently dropped; persist it in marked form so a
+            # later sweep can reconcile scope even if the migration happened while
+            # the archiver was offline. The reverse marker records the old group id.
+            if isinstance(action, MessageActionChatMigrateTo):
+                message_data["raw_data"]["migrate_to_id"] = get_peer_id(PeerChannel(action.channel_id))
+            elif isinstance(action, MessageActionChannelMigrateFrom):
+                message_data["raw_data"]["migrate_from_id"] = get_peer_id(PeerChat(action.chat_id))
 
         # Capture grouped_id for album detection (multiple photos/videos sent together)
         if message.grouped_id:
