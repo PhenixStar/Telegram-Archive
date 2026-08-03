@@ -32,6 +32,7 @@ from telethon.tl.types import (
 from .backup_extraction import BackupExtractionMixin
 from .backup_media import BackupMediaMixin
 from .config import Config
+from .connection import TelegramConnection
 from .db import DatabaseAdapter, create_adapter
 from .folder_utils import FolderChat, FolderRules, resolve_folder_member_ids
 from .media_errors import is_media_location_error
@@ -183,7 +184,13 @@ async def iter_messages_with_flood_retry(client, entity, *, min_id=0, **kwargs):
 class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
     """Main class for managing Telegram backups."""
 
-    def __init__(self, config: Config, db: DatabaseAdapter, client: TelegramClient | None = None):
+    def __init__(
+        self,
+        config: Config,
+        db: DatabaseAdapter,
+        client: TelegramClient | None = None,
+        connection: TelegramConnection | None = None,
+    ):
         """
         Initialize Telegram backup manager.
 
@@ -192,11 +199,19 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             db: Async database adapter (must be initialized before passing)
             client: Optional existing TelegramClient to use (for shared connection).
                    If not provided, will create a new client in connect().
+            connection: Optional TelegramConnection wrapping the shared client.
+                   When provided, a mid-run connection error triggers
+                   ``connection.ensure_connected()`` so the rest of THIS run
+                   can heal instead of every remaining item failing until the
+                   next scheduled backup cycle reconnects. Purely additive —
+                   omitting it (the default) keeps the old skip-and-continue
+                   behavior unchanged.
         """
         self.config = config
         self.config.validate_credentials()
         self.db = db
         self.client: TelegramClient | None = client
+        self._connection: TelegramConnection | None = connection
         self._owns_client = client is None  # Track if we created the client
         self._cleaned_media_chats: set[int] = set()  # Track chats already cleaned this session
         # Lazily-built parallel downloader (issue #183). Stays None until the
@@ -208,19 +223,25 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         logger.info("TelegramBackup initialized")
 
     @classmethod
-    async def create(cls, config: Config, client: TelegramClient | None = None) -> "TelegramBackup":
+    async def create(
+        cls,
+        config: Config,
+        client: TelegramClient | None = None,
+        connection: TelegramConnection | None = None,
+    ) -> "TelegramBackup":
         """
         Factory method to create TelegramBackup with initialized database.
 
         Args:
             config: Configuration object
             client: Optional existing TelegramClient to use (for shared connection)
+            connection: Optional TelegramConnection for mid-run reconnect healing
 
         Returns:
             Initialized TelegramBackup instance
         """
         db = await create_adapter()
-        return cls(config, db, client=client)
+        return cls(config, db, client=client, connection=connection)
 
     async def connect(self):
         """
@@ -287,6 +308,29 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         if self.client and self._owns_client:
             await self.client.disconnect()
             logger.info("Disconnected from Telegram")
+
+    async def _heal_connection(self) -> None:
+        """Best-effort mid-run reconnect via the shared ``TelegramConnection``.
+
+        Telethon stops reconnecting after a connection failure and marks the
+        client disconnected; every later request then raises until something
+        calls ``connect()`` again. Without a shared connection reference the
+        only place that happens is the start of the next scheduled backup
+        job, so a network outage mid-run fails every remaining item in THIS
+        run. When a ``TelegramConnection`` was passed in, heal it now so the
+        run can continue; refresh ``self.client`` from the (possibly new)
+        healed client.
+
+        No-ops when no connection was provided (old contract) — callers keep
+        their existing skip-and-continue behavior, unchanged from before.
+        """
+        if self._connection is None:
+            return
+        try:
+            await self._connection.ensure_connected()
+            self.client = self._connection.client
+        except Exception as e:
+            logger.warning(f"Mid-run reconnect attempt failed: {e}")
 
     async def backup_all(self):
         """
@@ -520,6 +564,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
                 except (ChannelPrivateError, ChatForbiddenError, UserBannedInChannelError) as e:
                     logger.warning(f"  → Skipped (no access): {e.__class__.__name__}")
+                except (TimeoutError, RPCError, ConnectionError, OSError) as e:
+                    logger.error(f"  → Connection error backing up {chat_name}: {e}")
+                    await self._heal_connection()
                 except Exception as e:
                     logger.error(f"  → Error backing up {chat_name}: {e}", exc_info=True)
 
@@ -565,6 +612,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                             logger.info(f"    → Backed up {message_count} new messages")
                     except (ChannelPrivateError, ChatForbiddenError, UserBannedInChannelError) as e:
                         logger.warning(f"    → Skipped (no access): {e.__class__.__name__}")
+                    except (TimeoutError, RPCError, ConnectionError, OSError) as e:
+                        logger.error(f"    → Connection error: {e}")
+                        await self._heal_connection()
                     except Exception as e:
                         logger.error(f"    → Error: {e}", exc_info=True)
             else:
@@ -662,6 +712,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             fresh_messages = await call_with_flood_retry(_get_messages_once)
         except (TimeoutError, RPCError, ConnectionError, OSError) as e:
             logger.debug("Could not refresh media reference (%s)", type(e).__name__)
+            await self._heal_connection()
             return None
         if fresh_messages and fresh_messages[0]:
             return fresh_messages[0]
@@ -756,6 +807,23 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         attempt + 1,
                         MEDIA_REFRESH_MAX_ATTEMPTS,
                     )
+                except (ConnectionError, OSError) as e:
+                    # Mid-run network drop: heal the shared connection (if any)
+                    # before retrying, otherwise every remaining attempt/item
+                    # would keep failing until the next scheduled backup.
+                    if attempt >= last:
+                        logger.warning(
+                            "Media download connection error after %d attempt(s) (%s); leaving it for a future backup run",
+                            attempt + 1,
+                            type(e).__name__,
+                        )
+                        raise
+                    logger.warning(
+                        "Media download connection error (attempt %d/%d); healing and retrying",
+                        attempt + 1,
+                        MEDIA_REFRESH_MAX_ATTEMPTS,
+                    )
+                    await self._heal_connection()
             # Defensive: the loop returns on success or raises on the final attempt.
             raise FileReferenceExpiredError(request=None)
         except BaseException:
@@ -1151,6 +1219,10 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 # so whitelist gap sweeps move on cleanly.
                 logger.warning(f"Gap-fill: skipping chat {cid} (no access)")
                 continue
+            except (TimeoutError, RPCError, ConnectionError, OSError) as e:
+                logger.error(f"Gap-fill: connection error getting entity for chat {cid}: {e}")
+                await self._heal_connection()
+                continue
             except Exception as e:
                 logger.error(f"Gap-fill: cannot get entity for chat {cid}: {e}")
                 continue
@@ -1167,6 +1239,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         logger.info(f"    Recovered {recovered} messages")
                     else:
                         logger.info("    No messages found (likely deleted)")
+                except (TimeoutError, RPCError, ConnectionError, OSError) as e:
+                    logger.error(f"    Connection error filling gap: {e}")
+                    await self._heal_connection()
                 except Exception as e:
                     logger.error(f"    Error filling gap: {e}", exc_info=True)
 
@@ -1644,7 +1719,11 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             return 0
 
 
-async def run_backup(config: Config, client: TelegramClient | None = None):
+async def run_backup(
+    config: Config,
+    client: TelegramClient | None = None,
+    connection: TelegramConnection | None = None,
+):
     """
     Run a single backup operation.
 
@@ -1653,8 +1732,9 @@ async def run_backup(config: Config, client: TelegramClient | None = None):
         client: Optional existing TelegramClient to use (for shared connection).
                If provided, the backup will use this client instead of creating
                its own, avoiding session file lock conflicts.
+        connection: Optional TelegramConnection for mid-run reconnect healing.
     """
-    backup = await TelegramBackup.create(config, client=client)
+    backup = await TelegramBackup.create(config, client=client, connection=connection)
     try:
         await backup.connect()
         await backup.backup_all()
@@ -1671,7 +1751,10 @@ async def run_backup(config: Config, client: TelegramClient | None = None):
 
 
 async def run_fill_gaps(
-    config: Config, client: TelegramClient | None = None, chat_id: int | None = None
+    config: Config,
+    client: TelegramClient | None = None,
+    chat_id: int | None = None,
+    connection: TelegramConnection | None = None,
 ) -> dict:
     """Run gap-fill operation.
 
@@ -1679,8 +1762,9 @@ async def run_fill_gaps(
         config: Configuration object.
         client: Optional shared TelegramClient.
         chat_id: If provided, fill gaps only for this chat.
+        connection: Optional TelegramConnection for mid-run reconnect healing.
     """
-    backup = await TelegramBackup.create(config, client=client)
+    backup = await TelegramBackup.create(config, client=client, connection=connection)
     try:
         await backup.connect()
         return await backup._fill_gaps(chat_id=chat_id)

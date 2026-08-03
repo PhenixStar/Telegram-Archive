@@ -193,7 +193,8 @@ class TestBackupSchedulerRunBackupJob:
             return scheduler
 
     async def test_run_backup_job_calls_run_backup(self, scheduler_with_connection):
-        """Backup job calls run_backup with config and shared client."""
+        """Backup job calls run_backup with config, shared client, and the
+        shared connection (so a mid-run network drop can be healed)."""
         scheduler = scheduler_with_connection
         mock_client = MagicMock()
         scheduler._connection.ensure_connected = AsyncMock(return_value=mock_client)
@@ -201,7 +202,9 @@ class TestBackupSchedulerRunBackupJob:
         with patch("src.scheduler.run_backup", new_callable=AsyncMock) as mock_backup:
             await scheduler._run_backup_job()
 
-            mock_backup.assert_called_once_with(scheduler.config, client=mock_client)
+            mock_backup.assert_called_once_with(
+                scheduler.config, client=mock_client, connection=scheduler._connection
+            )
 
     async def test_run_backup_job_with_gap_fill_enabled(self, scheduler_with_connection):
         """Backup job runs gap-fill when fill_gaps is enabled."""

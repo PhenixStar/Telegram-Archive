@@ -39,6 +39,7 @@ def _make_backup(*, timeout: int = 3600) -> TelegramBackup:
     cfg.download_timeout_seconds = timeout
     backup.config = cfg
     backup.client = MagicMock()
+    backup._connection = None
     backup._parallel_downloader = None
     backup._parallel_download_disabled = False
     return backup
