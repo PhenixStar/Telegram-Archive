@@ -7580,6 +7580,10 @@
                     if (msg.raw_data && msg.raw_data.post_author) {
                         return msg.raw_data.post_author
                     }
+                    // Prefer the name captured at message time (#241 sender history):
+                    // it preserves who sent it even after the account later renames.
+                    // Falls back to the live user join for pre-capture rows (null snapshot).
+                    if (msg.sender_name) return msg.sender_name
                     if (msg.first_name || msg.last_name) {
                         return `${msg.first_name || ''} ${msg.last_name || ''}`.trim()
                     }
