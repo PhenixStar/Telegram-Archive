@@ -2586,3 +2586,173 @@ class TestListenerMainEntryPoint:
             pytest.raises(RuntimeError, match="fatal"),
         ):
             await main()
+
+
+# ===========================================================================
+# sender_name capture (#241 part B: preserve sender history)
+# ===========================================================================
+
+
+class TestOnNewMessageSenderName:
+    """on_new_message snapshots the sender's display name into message_data."""
+
+    async def test_uses_already_attached_sender_first_last_name(self):
+        """message.sender already present (the common live-event case) is used
+        directly — no extra get_sender() call is made."""
+        from telethon.tl.types import User
+
+        listener, handlers, db, config = _make_listener_with_handlers()
+        handler = handlers[events.NewMessage]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+        event.get_sender = AsyncMock()
+        msg = MagicMock()
+        msg.reply_to = None
+        msg.id = 42
+        msg.sender_id = 111
+        msg.date = datetime(2025, 1, 1)
+        msg.text = "Hello"
+        msg.reply_to_msg_id = None
+        msg.edit_date = None
+        msg.out = False
+        msg.grouped_id = None
+        msg.media = None
+
+        sender = MagicMock(spec=User)
+        sender.id = 111
+        sender.username = "testuser"
+        sender.first_name = "Test"
+        sender.last_name = "User"
+        sender.phone = "+1234"
+        sender.bot = False
+        msg.sender = sender
+        event.message = msg
+        event.get_chat = AsyncMock(return_value=MagicMock())
+
+        await handler(event)
+
+        call_data = db.insert_message.call_args[0][0]
+        assert call_data["sender_name"] == "Test User"
+        event.get_sender.assert_not_awaited()
+
+    async def test_falls_back_to_get_sender_when_missing(self):
+        """message.sender is None (rare) -> flood-aware event.get_sender() fallback."""
+        from telethon.tl.types import User
+
+        listener, handlers, db, config = _make_listener_with_handlers()
+        handler = handlers[events.NewMessage]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+        msg = MagicMock()
+        msg.reply_to = None
+        msg.id = 42
+        msg.sender_id = 222
+        msg.date = datetime(2025, 1, 1)
+        msg.text = "Hello"
+        msg.reply_to_msg_id = None
+        msg.edit_date = None
+        msg.out = False
+        msg.grouped_id = None
+        msg.media = None
+        msg.sender = None
+        event.message = msg
+        event.get_chat = AsyncMock(return_value=MagicMock())
+
+        fallback_sender = MagicMock(spec=User)
+        fallback_sender.id = 222
+        fallback_sender.username = "fallback"
+        fallback_sender.first_name = "Fallback"
+        fallback_sender.last_name = None
+        fallback_sender.phone = None
+        fallback_sender.bot = False
+        event.get_sender = AsyncMock(return_value=fallback_sender)
+
+        await handler(event)
+
+        event.get_sender.assert_awaited_once()
+        call_data = db.insert_message.call_args[0][0]
+        assert call_data["sender_name"] == "Fallback"
+        db.upsert_user.assert_called_once()
+
+    async def test_get_sender_failure_degrades_to_none(self):
+        """A failed fallback resolution must not crash the handler; sender_name is None."""
+        listener, handlers, db, config = _make_listener_with_handlers()
+        handler = handlers[events.NewMessage]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+        msg = MagicMock()
+        msg.reply_to = None
+        msg.id = 42
+        msg.sender_id = 333
+        msg.date = datetime(2025, 1, 1)
+        msg.text = "Hello"
+        msg.reply_to_msg_id = None
+        msg.edit_date = None
+        msg.out = False
+        msg.grouped_id = None
+        msg.media = None
+        msg.sender = None
+        event.message = msg
+        event.get_chat = AsyncMock(return_value=MagicMock())
+        event.get_sender = AsyncMock(side_effect=RuntimeError("boom"))
+
+        await handler(event)
+
+        call_data = db.insert_message.call_args[0][0]
+        assert call_data["sender_name"] is None
+        db.insert_message.assert_called_once()
+
+
+class TestOnChatActionSenderName:
+    """on_chat_action reuses the already-resolved actor for sender_name."""
+
+    async def test_user_joined_captures_actor_name(self):
+        listener, handlers, db, config = _make_listener_with_handlers()
+        handler = handlers[events.ChatAction]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+        event.new_photo = False
+        event.photo = MagicMock()
+        event.new_title = None
+        event.user_joined = True
+        event.user_left = False
+        event.user_added = False
+        event.user_kicked = False
+        event.user_id = 111
+
+        actor = MagicMock()
+        actor.first_name = "John"
+        actor.last_name = "Doe"
+        listener.client.get_entity = AsyncMock(return_value=actor)
+
+        await handler(event)
+
+        call_data = db.insert_message.call_args[0][0]
+        assert call_data["sender_name"] == "John Doe"
+
+    async def test_unresolvable_actor_yields_none_sender_name(self):
+        """get_entity failure (swallowed for actor_name) must yield sender_name=None,
+        not an empty string."""
+        listener, handlers, db, config = _make_listener_with_handlers()
+        handler = handlers[events.ChatAction]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+        event.new_photo = False
+        event.photo = MagicMock()
+        event.new_title = None
+        event.user_joined = True
+        event.user_left = False
+        event.user_added = False
+        event.user_kicked = False
+        event.user_id = 111
+        listener.client.get_entity = AsyncMock(side_effect=RuntimeError("no access"))
+
+        await handler(event)
+
+        call_data = db.insert_message.call_args[0][0]
+        assert call_data["sender_name"] is None

@@ -18,6 +18,8 @@ from telethon.tl.types import (
 )
 from telethon.utils import get_peer_id
 
+from .message_utils import sender_display_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,9 +102,14 @@ class BackupExtractionMixin:
             message: Message object from Telegram
             chat_id: Chat identifier
         """
+        # Scheduled sweeps snapshot only sender entities already attached by
+        # Telethon; resolving a missing sender here would add one API request per
+        # message and create avoidable flood risk on large histories.
+        sender = message.sender
+
         # Save sender information if available
-        if message.sender:
-            sender_data = self._extract_user_data(message.sender)
+        if sender:
+            sender_data = self._extract_user_data(sender)
             if sender_data:
                 await self.db.upsert_user(sender_data)
 
@@ -120,6 +127,7 @@ class BackupExtractionMixin:
             "id": message.id,
             "chat_id": chat_id,
             "sender_id": message.sender_id,
+            "sender_name": sender_display_name(sender),
             "date": message.date,
             "text": message.text or "",
             "reply_to_msg_id": message.reply_to_msg_id,
