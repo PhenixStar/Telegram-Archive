@@ -1408,6 +1408,13 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 # so whitelist gap sweeps move on cleanly.
                 logger.warning(f"Gap-fill: skipping chat {cid} (no access)")
                 continue
+            except ValueError:
+                # Telethon raises a bare ValueError ("Could not find the input
+                # entity for ...") when a peer can't be resolved from the session
+                # cache and can't be fetched (e.g. a user with no shared dialog).
+                # That is a benign, expected skip — not an error worth alarming on.
+                logger.warning(f"Gap-fill: skipping chat {cid} (peer not resolvable)")
+                continue
             except (TimeoutError, RPCError, ConnectionError, OSError) as e:
                 logger.error(f"Gap-fill: connection error getting entity for chat {cid}: {e}")
                 await self._heal_connection()

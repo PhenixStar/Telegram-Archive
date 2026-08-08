@@ -229,3 +229,34 @@ class TestFillGapsSummary:
         source = inspect.getsource(TelegramBackup._fill_gaps)
         for key in ["chats_scanned", "chats_with_gaps", "total_gaps", "total_recovered", "details"]:
             assert key in source, f"Missing key '{key}' in _fill_gaps summary"
+
+
+class TestGapFillUnresolvablePeer:
+    """A peer that Telethon can't resolve is a benign skip, not an ERROR."""
+
+    @pytest.mark.asyncio
+    async def test_fill_gaps_skips_unresolvable_peer_as_warning(self, caplog):
+        import logging
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.telegram_backup import TelegramBackup
+
+        config = MagicMock()
+        config.gap_threshold = 50
+        backup = TelegramBackup(config, AsyncMock())
+        backup._connection = None
+        cid = 8398139053
+        backup.db.get_chats_with_messages = AsyncMock(return_value=[cid])
+        backup.db.detect_message_gaps = AsyncMock(return_value=[(1, 10, 9)])
+        backup.client = MagicMock()
+        backup.client.get_entity = AsyncMock(
+            side_effect=ValueError(f"Could not find the input entity for PeerUser(user_id={cid})")
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = await backup._fill_gaps(cid)
+
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert not errors, f"unresolvable peer should not log ERROR, got: {[r.getMessage() for r in errors]}"
+        assert any("peer not resolvable" in r.getMessage() for r in caplog.records)
+        assert result["total_recovered"] == 0
