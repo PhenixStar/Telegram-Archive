@@ -1,5 +1,6 @@
 """Media serving, thumbnail, LQIP, root page, and permalink routes."""
 
+import mimetypes
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -131,7 +132,22 @@ async def serve_media(path: str, download: int = Query(0), user: UserContext = D
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
+    # Archived files come from any Telegram contact. Rendering an .html or .svg
+    # inline would run its scripts on the viewer's own origin, so only media the
+    # browser cannot execute is served inline; everything else downloads.
+    content_type, _ = mimetypes.guess_type(resolved.name)
+    if not _is_inline_safe(content_type):
+        return FileResponse(resolved, filename=resolved.name, content_disposition_type="attachment")
     return FileResponse(resolved)
+
+
+def _is_inline_safe(content_type: str | None) -> bool:
+    """True for media types a browser displays without executing script."""
+    if not content_type:
+        return False
+    if content_type == "image/svg+xml":
+        return False
+    return content_type.startswith(("image/", "video/", "audio/")) or content_type == "application/pdf"
 
 
 @router.get("/", response_class=HTMLResponse)
