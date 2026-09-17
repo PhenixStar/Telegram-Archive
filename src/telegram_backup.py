@@ -40,6 +40,11 @@ from .db import DatabaseAdapter, create_adapter
 from .folder_utils import FolderChat, FolderRules, resolve_folder_member_ids
 from .media_errors import is_media_location_error
 from .parallel_download import ParallelDownloader
+from .telegram_stall_guard import (
+    TELEGRAM_CALL_TIMEOUT_SECONDS,
+    iter_with_stall_timeout,
+    with_call_timeout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,16 +97,27 @@ def _media_retry_backoff_seconds(attempt: int) -> float:
     return base + random.uniform(0.5, 1.5)
 
 
-async def call_with_flood_retry(coro_fn, *args, max_retries=MAX_FLOOD_RETRIES, **kwargs):
+async def call_with_flood_retry(
+    coro_fn,
+    *args,
+    max_retries=MAX_FLOOD_RETRIES,
+    call_timeout: float | None = TELEGRAM_CALL_TIMEOUT_SECONDS,
+    **kwargs,
+):
     """Retry a single async Telegram call on FloodWaitError with bounded sleep.
 
     Use for one-shot API calls (``get_dialogs``, ``get_entity``, ``get_me``, etc.)
     that are not async iterators. Raises once the retry/wait budget is exceeded.
+
+    Each attempt is bounded by ``call_timeout`` (``TimeoutError`` when exceeded) so
+    a request lost to a dead connection cannot hang forever; the FloodWait sleep
+    between attempts is not timed. Pass ``call_timeout=None`` for operations with
+    their own bound, such as media downloads.
     """
     retries = 0
     while True:
         try:
-            return await coro_fn(*args, **kwargs)
+            return await with_call_timeout(coro_fn(*args, **kwargs), call_timeout)
         except (FloodWaitError, FloodPremiumWaitError) as e:
             retries += 1
             if retries > max_retries:
@@ -149,7 +165,7 @@ async def iter_messages_with_flood_retry(client, entity, *, min_id=0, **kwargs):
     retries = 0
     while True:
         try:
-            async for msg in client.iter_messages(entity, min_id=resume_from, **kwargs):
+            async for msg in iter_with_stall_timeout(client.iter_messages(entity, min_id=resume_from, **kwargs)):
                 yield msg
                 if getattr(msg, "id", None) is not None:
                     resume_from = max(resume_from, msg.id)
@@ -953,6 +969,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         tmp_path,
                         file_size,
                         timeout_val,
+                        call_timeout=None,  # bounded by DOWNLOAD_TIMEOUT_SECONDS instead
                     )
                 except (FileReferenceExpiredError, RPCError) as e:
                     is_expired_ref = isinstance(e, FileReferenceExpiredError)
@@ -1244,7 +1261,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
         if last_message_id > 0:
             # Incremental: fetch newest first, stop at last synced
-            async for message in self.client.iter_messages(entity):
+            async for message in iter_with_stall_timeout(self.client.iter_messages(entity)):
                 if message.id <= last_message_id:
                     break
                 msg_data = await self._process_message(message, chat_id)
@@ -1593,7 +1610,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             topics_count = 0
 
             try:
-                input_channel = await self.client.get_input_entity(entity)
+                input_channel = await with_call_timeout(
+                    self.client.get_input_entity(entity), TELEGRAM_CALL_TIMEOUT_SECONDS
+                )
                 # offset_date must be a proper date object, not int 0
                 from datetime import datetime as dt
 
@@ -1845,7 +1864,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         try:
             from telethon.tl.functions.messages import GetDialogFiltersRequest
 
-            result = await self.client(GetDialogFiltersRequest())
+            result = await with_call_timeout(self.client(GetDialogFiltersRequest()), TELEGRAM_CALL_TIMEOUT_SECONDS)
 
             # result might be a list directly or have a .filters attribute
             filters = result.filters if hasattr(result, "filters") else result

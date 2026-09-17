@@ -20,6 +20,7 @@ from .parallel_download import (
     ParallelDownloadUnavailable,
     supports_parallel_download,
 )
+from .telegram_stall_guard import TELEGRAM_CALL_TIMEOUT_SECONDS, with_call_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,13 @@ class BackupMediaMixin:
             if not needs_download:
                 return
 
-            result = await self.client.download_profile_photo(
-                entity,
-                file=avatar_path,
-                download_big=False,  # Small size is usually sufficient
+            result = await with_call_timeout(
+                self.client.download_profile_photo(
+                    entity,
+                    file=avatar_path,
+                    download_big=False,  # Small size is usually sufficient
+                ),
+                TELEGRAM_CALL_TIMEOUT_SECONDS,
             )
             if result:
                 logger.info(f"📷 Avatar downloaded: {avatar_path}")

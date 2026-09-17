@@ -12,10 +12,12 @@ This avoids session file lock conflicts and allows both to run simultaneously.
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 from datetime import datetime, timedelta
 
+from apscheduler.events import EVENT_JOB_MAX_INSTANCES
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -32,6 +34,22 @@ ACTIVE_BOOST_INTERVAL = 120  # 2 minutes
 VIEWER_HEARTBEAT_FRESHNESS = 300  # 5 minutes
 # How often to poll app_settings for schedule changes
 SETTINGS_POLL_INTERVAL = 30  # seconds
+
+
+def _backup_job_timeout_seconds() -> float | None:
+    """Wall-clock cap for one scheduled backup run (env BACKUP_JOB_TIMEOUT_HOURS, 0 disables).
+
+    A backstop for hangs the per-request timeouts miss: a run stuck forever keeps
+    its APScheduler instance slot, so every later scheduled run would be skipped.
+    Progress is checkpointed per batch, so a cancelled run resumes next time.
+    """
+    raw = os.getenv("BACKUP_JOB_TIMEOUT_HOURS", "12")
+    try:
+        hours = float(raw)
+    except ValueError:
+        logger.warning("Invalid BACKUP_JOB_TIMEOUT_HOURS=%r, using default=12", raw)
+        hours = 12.0
+    return hours * 3600 if hours > 0 else None
 
 
 class BackupScheduler:
@@ -53,6 +71,8 @@ class BackupScheduler:
         self.scheduler = AsyncIOScheduler()
         self.running = False
         self._backup_lock = asyncio.Lock()
+        # Set while a backup job runs, so a skipped run can report how long it has been stuck
+        self._backup_started_at: datetime | None = None
 
         # Current effective schedule (tracks what's active to avoid unnecessary reschedules)
         self._current_schedule: str = config.schedule
@@ -174,47 +194,61 @@ class BackupScheduler:
             return
 
         async with self._backup_lock:
+            timeout = _backup_job_timeout_seconds()
+            self._backup_started_at = datetime.now()
             try:
-                logger.info("Scheduled backup starting...")
+                await asyncio.wait_for(self._run_backup_job_body(), timeout=timeout)
+            except TimeoutError:
+                logger.error(
+                    f"Scheduled backup exceeded BACKUP_JOB_TIMEOUT_HOURS ({timeout / 3600:g}h) and was cancelled; "
+                    "the next run resumes from the last checkpoint"
+                )
+            finally:
+                self._backup_started_at = None
 
-                # Ensure connection is still alive
-                client = await self._connection.ensure_connected()
+    async def _run_backup_job_body(self):
+        """Run one backup (plus optional gap-fill); errors are logged, never raised."""
+        try:
+            logger.info("Scheduled backup starting...")
 
-                # Run backup using shared client (pass the connection too, so a
-                # mid-run network drop can be healed instead of failing every
-                # remaining item until the next scheduled cycle)
-                await run_backup(self.config, client=client, connection=self._connection)
+            # Ensure connection is still alive
+            client = await self._connection.ensure_connected()
 
-                # Run gap-fill if enabled
-                gap_fill_ok = True
-                if self.config.fill_gaps:
-                    try:
-                        from .telegram_backup import run_fill_gaps
+            # Run backup using shared client (pass the connection too, so a
+            # mid-run network drop can be healed instead of failing every
+            # remaining item until the next scheduled cycle)
+            await run_backup(self.config, client=client, connection=self._connection)
 
-                        logger.info("Running post-backup gap-fill...")
-                        result = await run_fill_gaps(self.config, client=client, connection=self._connection)
-                        if result.get("errors", 0) > 0:
-                            gap_fill_ok = False
-                            logger.warning(
-                                f"Gap-fill completed with {result['errors']} error(s) "
-                                f"({result['total_recovered']} messages recovered)"
-                            )
-                    except Exception as e:
+            # Run gap-fill if enabled
+            gap_fill_ok = True
+            if self.config.fill_gaps:
+                try:
+                    from .telegram_backup import run_fill_gaps
+
+                    logger.info("Running post-backup gap-fill...")
+                    result = await run_fill_gaps(self.config, client=client, connection=self._connection)
+                    if result.get("errors", 0) > 0:
                         gap_fill_ok = False
-                        logger.error(f"Gap-fill failed: {e}", exc_info=True)
+                        logger.warning(
+                            f"Gap-fill completed with {result['errors']} error(s) "
+                            f"({result['total_recovered']} messages recovered)"
+                        )
+                except Exception as e:
+                    gap_fill_ok = False
+                    logger.error(f"Gap-fill failed: {e}", exc_info=True)
 
-                # Reload tracked chats in listener after backup
-                # (new chats may have been added)
-                if self._listener:
-                    await self._listener._load_tracked_chats()
+            # Reload tracked chats in listener after backup
+            # (new chats may have been added)
+            if self._listener:
+                await self._listener._load_tracked_chats()
 
-                if gap_fill_ok:
-                    logger.info("Scheduled backup completed successfully")
-                else:
-                    logger.warning("Scheduled backup completed, but gap-fill had errors")
+            if gap_fill_ok:
+                logger.info("Scheduled backup completed successfully")
+            else:
+                logger.warning("Scheduled backup completed, but gap-fill had errors")
 
-            except Exception as e:
-                logger.error(f"Scheduled backup failed: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Scheduled backup failed: {e}", exc_info=True)
 
     def start(self):
         """Start the scheduler."""
@@ -232,6 +266,9 @@ class BackupScheduler:
             minute, hour, day, month, day_of_week = parts
 
             trigger = CronTrigger(minute=minute, hour=hour, day=day, month=month, day_of_week=day_of_week)
+
+            # A skipped run means the previous one is still going; surface a stuck run loudly
+            self.scheduler.add_listener(self._on_job_max_instances, EVENT_JOB_MAX_INSTANCES)
 
             # Add job to scheduler
             self.scheduler.add_job(
@@ -253,6 +290,15 @@ class BackupScheduler:
         except Exception as e:
             logger.error(f"Failed to start scheduler: {e}", exc_info=True)
             raise
+
+    def _on_job_max_instances(self, event) -> None:
+        """Log an error when a scheduled backup is skipped because one is still running."""
+        if event.job_id != "telegram_backup":
+            return
+        running_for = ""
+        if self._backup_started_at is not None:
+            running_for = f" (running for {datetime.now() - self._backup_started_at})"
+        logger.error(f"Scheduled backup skipped: previous backup is still running{running_for}")
 
     def stop(self):
         """Stop the scheduler."""

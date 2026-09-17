@@ -19,6 +19,7 @@ from telethon.tl.types import (
 from telethon.utils import get_peer_id
 
 from .message_utils import sender_display_name
+from .telegram_stall_guard import TELEGRAM_CALL_TIMEOUT_SECONDS, with_call_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,9 @@ class BackupExtractionMixin:
             elif fwd.from_id:
                 # Try to resolve the name from the entity
                 try:
-                    fwd_entity = await self.client.get_entity(fwd.from_id)
+                    fwd_entity = await with_call_timeout(
+                        self.client.get_entity(fwd.from_id), TELEGRAM_CALL_TIMEOUT_SECONDS
+                    )
                     if hasattr(fwd_entity, "title"):
                         message_data["raw_data"]["forward_from_name"] = fwd_entity.title
                     elif hasattr(fwd_entity, "first_name"):

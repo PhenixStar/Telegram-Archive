@@ -692,7 +692,7 @@ class TelegramListener:
                 os.makedirs(shared_dir, exist_ok=True)
 
                 async def _download_fn(tmp_path):
-                    return await call_with_flood_retry(self.client.download_media, message, tmp_path)
+                    return await call_with_flood_retry(self.client.download_media, message, tmp_path, call_timeout=None)
 
                 shared_file_path, content_hash = await download_and_shard_media(
                     db=self.db,
@@ -714,7 +714,7 @@ class TelegramListener:
                     tmp_file_path = f"{file_path}.{os.getpid()}.{task_id}.part"
                     if os.path.exists(tmp_file_path):
                         os.remove(tmp_file_path)
-                    actual_path = await call_with_flood_retry(self.client.download_media, message, tmp_file_path)
+                    actual_path = await call_with_flood_retry(self.client.download_media, message, tmp_file_path, call_timeout=None)
                     file_path = finalize_atomic_download(
                         actual_path if isinstance(actual_path, str) else None,
                         tmp_file_path,
