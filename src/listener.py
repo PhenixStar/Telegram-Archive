@@ -585,8 +585,12 @@ class TelegramListener:
         elif isinstance(media, MessageMediaDocument):
             # Check document attributes to determine specific type
             if hasattr(media, "document") and media.document:
+                # DocumentEmpty is truthy but has no .attributes; treat it like a missing document
+                attributes = getattr(media.document, "attributes", None)
+                if attributes is None:
+                    return None
                 is_animated = False
-                for attr in media.document.attributes:
+                for attr in attributes:
                     attr_type = type(attr).__name__
                     if "Animated" in attr_type:
                         is_animated = True
@@ -614,7 +618,7 @@ class TelegramListener:
         """Generate a filename for media."""
         # Try to get original filename from document
         if hasattr(message.media, "document") and message.media.document:
-            for attr in message.media.document.attributes:
+            for attr in getattr(message.media.document, "attributes", None) or ():
                 if hasattr(attr, "file_name") and attr.file_name:
                     # Use Telegram file ID + original name for deduplication
                     if telegram_file_id:

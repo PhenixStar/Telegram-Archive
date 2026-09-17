@@ -273,7 +273,7 @@ class BackupMediaMixin:
                 media_data["height"] = getattr(photo, "h", None)
             elif hasattr(media, "document"):
                 doc = media.document
-                for attr in doc.attributes:
+                for attr in getattr(doc, "attributes", None) or ():
                     if hasattr(attr, "w") and hasattr(attr, "h"):
                         media_data["width"] = attr.w
                         media_data["height"] = attr.h
@@ -367,8 +367,13 @@ class BackupMediaMixin:
         elif isinstance(media, MessageMediaDocument):
             # Check document attributes to determine specific type
             if hasattr(media, "document") and media.document:
+                # DocumentEmpty is truthy but has no .attributes; its reference is
+                # unusable, so treat it like a missing document.
+                attributes = getattr(media.document, "attributes", None)
+                if attributes is None:
+                    return None
                 is_animated = False
-                for attr in media.document.attributes:
+                for attr in attributes:
                     attr_type = type(attr).__name__
                     if "Animated" in attr_type:
                         is_animated = True
@@ -385,7 +390,8 @@ class BackupMediaMixin:
                 # If animated but no video attribute, still an animation
                 if is_animated:
                     return "animation"
-            return "document"
+                return "document"
+            return None  # document reference unavailable (e.g. forwarded from a private channel)
         elif isinstance(media, MessageMediaContact):
             return "contact"
         elif isinstance(media, MessageMediaGeo):
@@ -409,7 +415,7 @@ class BackupMediaMixin:
             doc = message.media.document
             mime_type = getattr(doc, "mime_type", None)
 
-            for attr in doc.attributes:
+            for attr in getattr(doc, "attributes", None) or ():
                 if hasattr(attr, "file_name") and attr.file_name:
                     original_name = attr.file_name
                     break

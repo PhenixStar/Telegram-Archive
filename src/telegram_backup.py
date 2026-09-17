@@ -49,6 +49,10 @@ from .telegram_stall_guard import (
 logger = logging.getLogger(__name__)
 
 
+class TelegramUnreachableError(ConnectionError):
+    """Telegram stayed unreachable after a mid-run reconnect attempt."""
+
+
 def _get_int_env(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None:
@@ -332,7 +336,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             await self.client.disconnect()
             logger.info("Disconnected from Telegram")
 
-    async def _heal_connection(self) -> None:
+    async def _heal_connection(self) -> bool:
         """Best-effort mid-run reconnect via the shared ``TelegramConnection``.
 
         Telethon stops reconnecting after a connection failure and marks the
@@ -346,14 +350,29 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
         No-ops when no connection was provided (old contract) — callers keep
         their existing skip-and-continue behavior, unchanged from before.
+
+        Returns ``False`` only when a reconnect was attempted and failed.
         """
         if self._connection is None:
-            return
+            return True
         try:
             await self._connection.ensure_connected()
             self.client = self._connection.client
+            return True
         except Exception as e:
             logger.warning(f"Mid-run reconnect attempt failed: {e}")
+            return False
+
+    async def _heal_or_end_run(self) -> None:
+        """Heal the connection, or end the run when Telegram is unreachable.
+
+        While the network is down every remaining chat or gap fails the same way,
+        and each attempt waits out Telethon's full reconnect cycle (about two
+        minutes), so grinding on only stretches one outage across hours. The
+        cursor is checkpointed per batch, so the next scheduled run resumes.
+        """
+        if not await self._heal_connection():
+            raise TelegramUnreachableError("Telegram unreachable after a reconnect attempt; ending this run early")
 
     async def _load_followed_migrations(self) -> None:
         """Load adopted-supergroup ids from the metadata KV (#228).
@@ -763,7 +782,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                     logger.warning(f"  → Skipped (no access): {e.__class__.__name__}")
                 except (TimeoutError, RPCError, ConnectionError, OSError) as e:
                     logger.error(f"  → Connection error backing up chat {chat_id}: {e.__class__.__name__}")
-                    await self._heal_connection()
+                    await self._heal_or_end_run()
                 except Exception as e:
                     logger.error(f"  → Error backing up chat {chat_id}: {e}", exc_info=True)
 
@@ -813,7 +832,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         logger.warning(f"    → Skipped (no access): {e.__class__.__name__}")
                     except (TimeoutError, RPCError, ConnectionError, OSError) as e:
                         logger.error(f"    → Connection error: {e}")
-                        await self._heal_connection()
+                        await self._heal_or_end_run()
                     except Exception as e:
                         logger.error(f"    → Error: {e}", exc_info=True)
             else:
@@ -1434,7 +1453,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 continue
             except (TimeoutError, RPCError, ConnectionError, OSError) as e:
                 logger.error(f"Gap-fill: connection error getting entity for chat {cid}: {e}")
-                await self._heal_connection()
+                await self._heal_or_end_run()
                 continue
             except Exception as e:
                 logger.error(f"Gap-fill: cannot get entity for chat {cid}: {e}")
@@ -1454,7 +1473,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         logger.info("    No messages found (likely deleted)")
                 except (TimeoutError, RPCError, ConnectionError, OSError) as e:
                     logger.error(f"    Connection error filling gap: {e}")
-                    await self._heal_connection()
+                    await self._heal_or_end_run()
                 except Exception as e:
                     logger.error(f"    Error filling gap: {e}", exc_info=True)
 
@@ -1513,9 +1532,31 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 # Fetch current state from Telegram
                 remote_messages = await call_with_flood_retry(self.client.get_messages, entity, ids=batch_ids)
 
-                for msg_id, remote_msg in zip(batch_ids, remote_messages):
+                # Telegram may omit ids from the response instead of returning None
+                # for them, which shifts every later position: a positional zip
+                # would overwrite one message's text with another's or delete a
+                # live message. Trust positions only when the response provably
+                # lines up; otherwise pair by id and never delete an unmatched id.
+                aligned = len(remote_messages) == len(batch_ids) and all(
+                    remote_msg is None or remote_msg.id == msg_id
+                    for msg_id, remote_msg in zip(batch_ids, remote_messages)
+                )
+                if aligned:
+                    pairs = list(zip(batch_ids, remote_messages))
+                else:
+                    remote_by_id = {m.id: m for m in remote_messages if m is not None}
+                    pairs = [(msg_id, remote_by_id.get(msg_id)) for msg_id in batch_ids]
+                    unmatched = sum(1 for _, m in pairs if m is None)
+                    logger.warning(
+                        f"  → Sync response misaligned ({unmatched} of {len(batch_ids)} ids unmatched); "
+                        "no deletions for unmatched ids this run"
+                    )
+
+                for msg_id, remote_msg in pairs:
                     # Check for deletion
                     if remote_msg is None:
+                        if not aligned:
+                            continue  # omitted from a misaligned response, not confirmed deleted
                         if getattr(self.config, "deletion_mode", "hard") == "soft":
                             # mark_message_deleted defaults deleted_at to now(UTC); this path
                             # doesn't broadcast, so no need to pass an explicit timestamp.
@@ -1663,7 +1704,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                                 self.client, GetCustomEmojiDocumentsRequest(document_id=emoji_ids)
                             )
                             for doc in docs:
-                                for attr in doc.attributes:
+                                for attr in getattr(doc, "attributes", None) or ():
                                     if hasattr(attr, "alt") and attr.alt:
                                         emoji_map[doc.id] = attr.alt
                                         break

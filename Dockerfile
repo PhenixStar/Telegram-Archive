@@ -42,6 +42,11 @@ ENV BACKUP_PATH=/data/backups \
 # Volume for persistent data
 VOLUME ["/data"]
 
+# Unhealthy when the scheduler is dead, its event loop is wedged, or a backup run is stuck.
+# The start period covers entrypoint migrations on a large archive.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=300s --retries=3 \
+  CMD ["python3", "/app/scripts/healthcheck_backup.py"]
+
 # Entrypoint runs migrations, then hands off to CMD
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 

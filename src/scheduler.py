@@ -11,6 +11,7 @@ This avoids session file lock conflicts and allows both to run simultaneously.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -34,6 +35,23 @@ ACTIVE_BOOST_INTERVAL = 120  # 2 minutes
 VIEWER_HEARTBEAT_FRESHNESS = 300  # 5 minutes
 # How often to poll app_settings for schedule changes
 SETTINGS_POLL_INTERVAL = 30  # seconds
+# Liveness file for the Docker HEALTHCHECK (scripts/healthcheck_backup.py reads its age)
+HEARTBEAT_FILE_DEFAULT = "/tmp/telegram-archive.heartbeat"
+HEARTBEAT_INTERVAL_SECONDS = 30
+
+
+def _backup_stuck_alert_seconds() -> float:
+    """How long one backup run may take before the healthcheck reports it stuck.
+
+    Env BACKUP_STUCK_ALERT_HOURS, default 6 (one default schedule interval).
+    """
+    raw = os.getenv("BACKUP_STUCK_ALERT_HOURS", "6")
+    try:
+        hours = float(raw)
+    except ValueError:
+        logger.warning("Invalid BACKUP_STUCK_ALERT_HOURS=%r, using default=6", raw)
+        hours = 6.0
+    return max(hours, 0.0) * 3600
 
 
 def _backup_job_timeout_seconds() -> float | None:
@@ -277,6 +295,10 @@ class BackupScheduler:
                 id="telegram_backup",
                 name="Telegram Backup",
                 replace_existing=True,
+                # APScheduler's default 1s misfire grace skips a tick outright when the
+                # loop is briefly late; start late instead, and collapse missed ticks
+                misfire_grace_time=3600,
+                coalesce=True,
             )
 
             logger.info(f"Backup scheduled with cron: {self.config.schedule}")
@@ -291,6 +313,11 @@ class BackupScheduler:
             logger.error(f"Failed to start scheduler: {e}", exc_info=True)
             raise
 
+    def _backup_looks_stuck(self) -> bool:
+        """True while the current backup run has outlasted BACKUP_STUCK_ALERT_HOURS."""
+        started = self._backup_started_at
+        return started is not None and (datetime.now() - started).total_seconds() > _backup_stuck_alert_seconds()
+
     def _on_job_max_instances(self, event) -> None:
         """Log an error when a scheduled backup is skipped because one is still running."""
         if event.job_id != "telegram_backup":
@@ -299,6 +326,28 @@ class BackupScheduler:
         if self._backup_started_at is not None:
             running_for = f" (running for {datetime.now() - self._backup_started_at})"
         logger.error(f"Scheduled backup skipped: previous backup is still running{running_for}")
+
+    async def _heartbeat_loop(self) -> None:
+        """Touch the healthcheck file while the scheduler is healthy.
+
+        Stops touching when the process or event loop is wedged (the task never
+        runs) and also while one backup run has lasted longer than
+        BACKUP_STUCK_ALERT_HOURS: a run hung on a lost request leaves the loop
+        responsive, which a plain liveness beat would report as healthy.
+        """
+        path = os.getenv("HEARTBEAT_FILE", HEARTBEAT_FILE_DEFAULT)
+        stop = asyncio.Event()  # never set; the task ends by cancellation
+        while True:
+            if not self._backup_looks_stuck():
+                try:
+                    with open(path, "w") as f:
+                        f.write(datetime.now().isoformat())
+                except OSError as e:
+                    logger.warning(f"Could not write heartbeat: {type(e).__name__}")
+            # Waiting on an event always suspends the task, so the beat can never
+            # spin the loop even if the sleep primitive returns immediately.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_INTERVAL_SECONDS)
 
     def stop(self):
         """Stop the scheduler."""
@@ -382,80 +431,64 @@ class BackupScheduler:
         4. Run initial backup (uses shared connection)
         5. Keep running until stopped
         """
-        # Establish shared connection
-        await self._connect()
-
-        # Start scheduler
-        self.start()
-
-        # Start real-time listener if enabled (uses shared connection)
-        await self._start_listener()
-
-        # Run initial backup immediately on startup (uses shared connection)
-        logger.info("Running initial backup on startup...")
-        async with self._backup_lock:
-            try:
-                await run_backup(self.config, client=self._connection.client, connection=self._connection)
-                logger.info("Initial backup completed")
-
-                # Run gap-fill if enabled
-                if self.config.fill_gaps:
-                    try:
-                        from .telegram_backup import run_fill_gaps
-
-                        logger.info("Running initial gap-fill...")
-                        result = await run_fill_gaps(
-                            self.config, client=self._connection.client, connection=self._connection
-                        )
-                        if result.get("errors", 0) > 0:
-                            logger.warning(f"Initial gap-fill completed with {result['errors']} error(s)")
-                    except Exception as e:
-                        logger.error(f"Initial gap-fill failed: {e}", exc_info=True)
-
-                # Reload tracked chats in listener after initial backup
-                if self._listener:
-                    await self._listener._load_tracked_chats()
-
-            except Exception as e:
-                logger.error(f"Initial backup failed: {e}", exc_info=True)
-
-        # Initialize DB for settings polling
-        await self._init_db()
-
-        # Keep running until stopped
-        settings_check_counter = 0
+        # Healthcheck heartbeat first, so a slow connect or a long initial sweep never reads as dead
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop(), name="health_heartbeat")
         try:
-            while self.running:
-                await asyncio.sleep(1)
-                settings_check_counter += 1
+            # Establish shared connection
+            await self._connect()
 
-                # Poll app_settings for schedule changes every SETTINGS_POLL_INTERVAL seconds
-                if settings_check_counter >= SETTINGS_POLL_INTERVAL:
-                    settings_check_counter = 0
-                    await self._check_schedule_settings()
+            # Start scheduler
+            self.start()
 
-                # Check if listener task died unexpectedly and restart it
-                if self.config.enable_listener and self._listener_task:
-                    if self._listener_task.done():
-                        # Check if there was an exception
-                        try:
-                            exc = self._listener_task.exception()
-                            if exc:
-                                logger.error(f"Listener task died with error: {exc}")
-                        except asyncio.CancelledError:
-                            pass
+            # Start real-time listener if enabled (uses shared connection)
+            await self._start_listener()
 
-                        logger.warning("Listener task died, restarting...")
-                        await self._stop_listener()
-                        await asyncio.sleep(5)  # Brief pause before restart
-                        await self._start_listener()
+            # Run initial backup immediately on startup, with the same watchdog and
+            # gap-fill handling as scheduled runs
+            logger.info("Running initial backup on startup...")
+            await self._run_backup_job()
 
-        except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
+            # Initialize DB for settings polling
+            await self._init_db()
+
+            # Keep running until stopped
+            settings_check_counter = 0
+            try:
+                while self.running:
+                    await asyncio.sleep(1)
+                    settings_check_counter += 1
+
+                    # Poll app_settings for schedule changes every SETTINGS_POLL_INTERVAL seconds
+                    if settings_check_counter >= SETTINGS_POLL_INTERVAL:
+                        settings_check_counter = 0
+                        await self._check_schedule_settings()
+
+                    # Check if listener task died unexpectedly and restart it
+                    if self.config.enable_listener and self._listener_task:
+                        if self._listener_task.done():
+                            # Check if there was an exception
+                            try:
+                                exc = self._listener_task.exception()
+                                if exc:
+                                    logger.error(f"Listener task died with error: {exc}")
+                            except asyncio.CancelledError:
+                                pass
+
+                            logger.warning("Listener task died, restarting...")
+                            await self._stop_listener()
+                            await asyncio.sleep(5)  # Brief pause before restart
+                            await self._start_listener()
+
+            except KeyboardInterrupt:
+                logger.info("Keyboard interrupt received")
+            finally:
+                await self._stop_listener()
+                self.stop()
+                await self._disconnect()
         finally:
-            await self._stop_listener()
-            self.stop()
-            await self._disconnect()
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
 
 
 async def main():

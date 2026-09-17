@@ -123,11 +123,12 @@ class TestSchedulerGapFill:
         assert "run_fill_gaps" in source
 
     def test_scheduler_run_forever_calls_gap_fill(self):
-        """run_forever source references fill_gaps for initial backup."""
+        """run_forever's initial backup goes through the job that runs gap-fill."""
         from pathlib import Path
 
         source = Path("src/scheduler.py").read_text()
-        assert "Initial gap-fill" in source
+        run_forever = source[source.index("async def run_forever") :]
+        assert "await self._run_backup_job()" in run_forever
 
 
 class TestCLIFillGaps:
