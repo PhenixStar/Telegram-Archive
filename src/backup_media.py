@@ -14,7 +14,7 @@ from telethon.tl.types import (
 )
 
 from .avatar_utils import get_avatar_paths
-from .message_utils import sanitize_media_filename
+from .message_utils import METADATA_ONLY_MEDIA_TYPES, sanitize_media_filename
 from .parallel_download import (
     ParallelDownloader,
     ParallelDownloadUnavailable,
@@ -23,6 +23,45 @@ from .parallel_download import (
 from .telegram_stall_guard import TELEGRAM_CALL_TIMEOUT_SECONDS, with_call_timeout
 
 logger = logging.getLogger(__name__)
+
+
+def media_download_allowed(config, media: object, media_type: str | None) -> bool:
+    """The DOWNLOAD_MEDIA_TYPES / DOWNLOAD_DOCUMENT_MIME_TYPES predicate.
+
+    Shared by the scheduled sweep (``BackupMediaMixin._process_media``) and the
+    real-time listener (``TelegramListener._download_media``) so both lanes
+    decline the same files the same way. Module-level (not a mixin method) so
+    the listener can import it without depending on TelegramBackup.
+    Config-agnostic on purpose: ``config`` only needs the two predicates
+    ``Config`` exposes (``should_download_media_type`` /
+    ``document_mime_allowed``), so a double in tests works fine.
+
+    Metadata-only kinds (contact/geo/poll/...) have no file behind them, so a
+    download whitelist has no opinion on them -- they always pass.
+
+    Documents get a second, narrower gate: exact MIME match or a filename
+    extension derived from the configured MIME types, so a file Telethon
+    reports as ``application/octet-stream`` but named ``report.pdf`` still
+    passes an ``application/pdf`` whitelist.
+    """
+    if media_type in METADATA_ONLY_MEDIA_TYPES:
+        return True
+
+    if not config.should_download_media_type(media_type):
+        return False
+
+    if media_type == "document" and config.download_document_mime_types:
+        document = getattr(media, "document", None)
+        mime_type = getattr(document, "mime_type", None) if document is not None else None
+        file_name = None
+        if document is not None:
+            for attr in getattr(document, "attributes", None) or ():
+                file_name = getattr(attr, "file_name", None)
+                if file_name:
+                    break
+        return config.document_mime_allowed(mime_type, file_name)
+
+    return True
 
 
 class BackupMediaMixin:
@@ -164,6 +203,21 @@ class BackupMediaMixin:
         # Check file size (estimated)
         file_size = self._get_media_size(media)
         max_size = self.config.get_max_media_size_bytes()
+
+        # DOWNLOAD_MEDIA_TYPES / DOWNLOAD_DOCUMENT_MIME_TYPES (opt-in, default
+        # OFF): media the operator did not ask for is recorded with its
+        # metadata, exactly like the over-size skip below, so the viewer still
+        # shows that media existed. Only the bytes stay on Telegram.
+        if not media_download_allowed(self.config, media, media_type):
+            logger.debug(f"Skipping filtered media (type: {media_type})")
+            return {
+                "id": media_id,
+                "type": media_type,
+                "message_id": message.id,
+                "chat_id": chat_id,
+                "file_size": file_size,
+                "downloaded": False,
+            }
 
         if file_size > max_size:
             logger.debug(f"Skipping large media file: {file_size / 1024 / 1024:.2f} MB")

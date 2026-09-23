@@ -4,7 +4,9 @@ Loads and validates settings from environment variables.
 """
 
 import logging
+import mimetypes
 import os
+import re
 
 from dotenv import load_dotenv
 
@@ -26,6 +28,31 @@ def _parse_bool(value: str | None, default: bool = False) -> bool:
         return False
 
     raise ValueError(f"Invalid boolean value: {value}")
+
+
+# Valid DOWNLOAD_MEDIA_TYPES tokens: every value BackupMediaMixin._get_media_type
+# (and TelegramListener._get_media_type, kept in lockstep with it) can return
+# that has a downloadable file behind it. "contact"/"geo"/"poll" are the only
+# other values those classifiers return, and they are metadata-only (no file),
+# so a download whitelist has no opinion on them -- see media_download_allowed
+# in backup_media.py.
+_VALID_MEDIA_TYPES = frozenset({"photo", "video", "animation", "voice", "audio", "sticker", "document"})
+
+# A full ``type/subtype``, the only form DOWNLOAD_DOCUMENT_MIME_TYPES accepts.
+# Deliberately rejects a wildcard (``image/*``) and a bare extension (``pdf``):
+# the whitelist compares by exact string, so neither is a narrower filter --
+# both are filters that match nothing.
+_MIME_TYPE_RE = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*")
+
+
+def _normalize_mime_type(value: str) -> str:
+    """``type/subtype``, lowercased, with any ``; charset=...`` parameter removed.
+
+    A document's ``mime_type`` is the verbatim string the uploading client
+    sent, so it can carry parameters. The whitelist compares by exact string,
+    so one parameter would otherwise defeat a configured match.
+    """
+    return value.split(";", 1)[0].strip().lower()
 
 
 def build_telegram_proxy_from_env() -> dict | None:
@@ -124,6 +151,49 @@ class Config:
         self.max_media_size_mb = int(os.getenv("MAX_MEDIA_SIZE_MB", "100"))
 
         # =====================================================================
+        # MEDIA TYPE / DOCUMENT MIME DOWNLOAD FILTERS (opt-in, default OFF)
+        # =====================================================================
+        # DOWNLOAD_MEDIA_TYPES: comma-separated allow-list of the types
+        # BackupMediaMixin._get_media_type classifies (photo, video, animation,
+        # voice, audio, sticker, document). Empty/unset means "download every
+        # type" -- byte-for-byte the same behaviour as before this setting
+        # existed. A type left out of the list is not silently lost: the
+        # message and a metadata-only media row (type, size) are still
+        # recorded, exactly like an over-size file today, so the viewer still
+        # shows that media existed. Only the bytes stay on Telegram.
+        self.download_media_types = {
+            part.strip().lower() for part in os.environ.get("DOWNLOAD_MEDIA_TYPES", "").split(",") if part.strip()
+        }
+        self._validate_media_types()
+        # DOWNLOAD_DOCUMENT_MIME_TYPES: narrows the "document" type further to
+        # specific MIME types (exact "type/subtype" match, case-insensitive),
+        # or a filename extension derived from the configured MIMEs for
+        # mislabeled files (e.g. application/octet-stream carrying a .pdf
+        # name). Empty/unset means "download every document allowed by
+        # DOWNLOAD_MEDIA_TYPES".
+        _raw_document_mime_types = [
+            part.strip() for part in os.environ.get("DOWNLOAD_DOCUMENT_MIME_TYPES", "").split(",") if part.strip()
+        ]
+        self._validate_document_mime_types(_raw_document_mime_types)
+        self.download_document_mime_types = {_normalize_mime_type(raw) for raw in _raw_document_mime_types}
+        # mimetypes reads the HOST's MIME database, which may not know every
+        # configured type, silently losing the extension fallback above for
+        # it. Compute once and say which types lost it, rather than leaving
+        # the operator to guess why a mislabeled file stopped passing.
+        _extensions_by_mime = {mime: mimetypes.guess_all_extensions(mime) for mime in self.download_document_mime_types}
+        self.download_document_mime_extensions = {
+            ext.lower() for extensions in _extensions_by_mime.values() for ext in extensions
+        }
+        _mimes_without_extension = sorted(mime for mime, exts in _extensions_by_mime.items() if not exts)
+        if _mimes_without_extension:
+            # WARNING, not debug: some deployments only surface WARNING+ before
+            # setup_logging runs, and this only fires when the feature is used.
+            logger.warning(
+                f"No filename extension is known for {_mimes_without_extension}; documents carrying one of "
+                "these types are matched by their declared MIME type only"
+            )
+
+        # =====================================================================
         # PARALLEL CHUNKED DOWNLOADS (issue #183)
         # =====================================================================
         # Split a single large file into chunks fetched concurrently over
@@ -168,7 +238,18 @@ class Config:
         # MODE 2: Type-based Mode (default) - use CHAT_TYPES + INCLUDE/EXCLUDE
         #   CHAT_TYPES=private,groups,bots  → Backup all chats of these types
         #   *_INCLUDE_CHAT_IDS         → ALSO include these (additive)
-        #   *_EXCLUDE_CHAT_IDS         → Exclude these (takes priority)
+        #   *_INCLUDE_FOLDER_IDS       → ALSO include a Telegram folder's chats
+        #                                (additive, same tier as *_INCLUDE_CHAT_IDS,
+        #                                opt-in, default OFF; see should_backup_chat)
+        #   *_EXCLUDE_CHAT_IDS         → Exclude these (takes priority over both)
+        #
+        # PRECEDENCE (see should_backup_chat for the authoritative order):
+        #   1. CHAT_IDS whitelist mode        → ignores everything below,
+        #                                        including *_INCLUDE_FOLDER_IDS
+        #   2. *_EXCLUDE_CHAT_IDS             → always wins
+        #   3-4. *_INCLUDE_CHAT_IDS ∪ *_INCLUDE_FOLDER_IDS chat ids (additive,
+        #        same priority tier as each other)
+        #   5. CHAT_TYPES                     → only if no include list/folder is set
         #
         # =====================================================================
 
@@ -206,6 +287,50 @@ class Config:
 
         self.channels_include_ids = self._parse_id_list(os.getenv("CHANNELS_INCLUDE_CHAT_IDS", ""))
         self.channels_exclude_ids = self._parse_id_list(os.getenv("CHANNELS_EXCLUDE_CHAT_IDS", ""))
+
+        # =====================================================================
+        # FOLDER-BASED INCLUDE (opt-in, default OFF)
+        # =====================================================================
+        # Back up whatever a Telegram folder (dialog filter) currently
+        # contains. Membership is a live snapshot, refreshed once per backup
+        # cycle by TelegramBackup._sync_folder_include_filters via
+        # GetDialogFiltersRequest, so a chat someone adds to the folder in the
+        # Telegram app is picked up on the very next scheduled run -- no
+        # config edit or restart needed.
+        #
+        # A configured folder id is ADDITIVE at the same priority tier as the
+        # matching *_INCLUDE_CHAT_IDS list (see should_backup_chat steps 3-4):
+        # it does not widen CHAT_TYPES, and CHAT_IDS whitelist mode ignores it
+        # entirely, same as every other include filter. A *_EXCLUDE_CHAT_IDS
+        # entry still wins over a folder id (step 2 runs first).
+        #
+        # Only a folder's EXPLICIT membership (pinned + include peers) is
+        # honored. Category-flag membership (e.g. a folder built only from
+        # "all groups"/"all channels" toggles, no picked chats) is NOT
+        # evaluated in this port -- the refresh runs before the dialog list is
+        # fetched, so no chat's type/contact facts are on hand yet to test a
+        # flag against (see folder_utils.FolderPeers for the alternative not
+        # taken). List the target chats explicitly in the Telegram folder, or
+        # use *_INCLUDE_CHAT_IDS, for a flag-only folder. A configured folder
+        # id Telegram can't resolve (deleted, wrong number), or one that
+        # resolves to zero explicit peers (a flag-only folder), fails closed
+        # -- it admits nothing, it does not fall back to "all chats of that
+        # type".
+        self.global_include_folder_ids = self._parse_id_list(
+            os.getenv("GLOBAL_INCLUDE_FOLDER_IDS") or os.getenv("INCLUDE_FOLDER_IDS", "")
+        )
+        self.private_include_folder_ids = self._parse_id_list(os.getenv("PRIVATE_INCLUDE_FOLDER_IDS", ""))
+        self.groups_include_folder_ids = self._parse_id_list(os.getenv("GROUPS_INCLUDE_FOLDER_IDS", ""))
+        self.channels_include_folder_ids = self._parse_id_list(os.getenv("CHANNELS_INCLUDE_FOLDER_IDS", ""))
+
+        # Live-resolved membership of the folders above; empty (adds nothing)
+        # until the first successful refresh, and left untouched -- not
+        # cleared -- if a cycle's folder fetch fails, so a transient API
+        # hiccup never un-backs-up a chat mid-run.
+        self.global_include_folder_chat_ids: frozenset = frozenset()
+        self.private_include_folder_chat_ids: frozenset = frozenset()
+        self.groups_include_folder_chat_ids: frozenset = frozenset()
+        self.channels_include_folder_chat_ids: frozenset = frozenset()
 
         # Priority chats - these are processed FIRST in all backup/sync operations
         # Useful for ensuring important chats are always backed up first
@@ -450,6 +575,19 @@ class Config:
         logger.info("Configuration loaded successfully")
         logger.debug(f"Backup path: {self.backup_path}")
         logger.debug(f"Download media: {self.download_media}")
+        if self.download_media_types:
+            logger.info(f"Download media types filter active: {sorted(self.download_media_types)}")
+        if self.download_document_mime_types:
+            logger.info(f"Download document MIME types filter active: {sorted(self.download_document_mime_types)}")
+        if self.has_folder_include_filters:
+            logger.info(
+                "Folder-based include filters configured (global=%d, private=%d, groups=%d, channels=%d); "
+                "membership refreshes at the start of every backup cycle",
+                len(self.global_include_folder_ids),
+                len(self.private_include_folder_ids),
+                len(self.groups_include_folder_ids),
+                len(self.channels_include_folder_ids),
+            )
 
         # Log filtering mode
         if self.whitelist_mode:
@@ -637,6 +775,32 @@ class Config:
         if invalid_types:
             raise ValueError(f"Invalid chat types: {invalid_types}. Valid options are: {valid_types}")
 
+    def _validate_media_types(self):
+        """Validate that DOWNLOAD_MEDIA_TYPES tokens are known, downloadable media types.
+
+        Empty set is allowed - it means "download every media type" (the default).
+        """
+        invalid_types = self.download_media_types - _VALID_MEDIA_TYPES
+
+        if invalid_types:
+            raise ValueError(f"Invalid media types: {invalid_types}. Valid options are: {sorted(_VALID_MEDIA_TYPES)}")
+
+    def _validate_document_mime_types(self, raw_values: list[str]):
+        """Validate that DOWNLOAD_DOCUMENT_MIME_TYPES values are full MIME types.
+
+        Empty list is allowed - it means "download every document". A value
+        that can never match anything (a wildcard like ``image/*``, or a bare
+        extension like ``pdf``) must fail here rather than quietly archiving
+        zero document bodies with only a debug line to explain why.
+        """
+        invalid_types = sorted(raw for raw in raw_values if not _MIME_TYPE_RE.fullmatch(_normalize_mime_type(raw)))
+
+        if invalid_types:
+            raise ValueError(
+                f"Invalid document MIME types: {invalid_types}. Each value must be a full type/subtype "
+                "such as 'application/pdf'; wildcards and bare extensions are not supported."
+            )
+
     def _ensure_directories(self):
         """Create necessary directories if they don't exist."""
         os.makedirs(self.backup_path, exist_ok=True)
@@ -688,9 +852,18 @@ class Config:
             Filtering logic (Priority Order):
             1. Global Exclude (Blacklist) -> Skip
             2. Type-Specific Exclude -> Skip
-            3. Global Include -> Backup (additive)
-            4. Type-Specific Include -> Backup (additive for that type)
+            3. Global Include (+ folder) -> Backup (additive)
+            4. Type-Specific Include (+ folder) -> Backup (additive for that type)
             5. Chat Type Filter (CHAT_TYPES) -> Backup if matches
+
+            *_INCLUDE_FOLDER_IDS (opt-in, default OFF) is additive at the SAME
+            priority tier as the matching *_INCLUDE_CHAT_IDS list in steps 3-4
+            -- a folder id widens that include set, it never widens CHAT_TYPES
+            and it plays no role in Whitelist Mode. Its live membership comes
+            from TelegramBackup._sync_folder_include_filters, refreshed once
+            per backup cycle; before the first successful refresh (or after a
+            failed one) it contributes nothing, so the filter fails closed
+            rather than admitting every chat of that type.
 
         Args:
             chat_id: Telegram chat ID
@@ -724,20 +897,57 @@ class Config:
         if is_channel and chat_id in self.channels_exclude_ids:
             return False
 
-        # 3. Global Include (acts as whitelist - if set, ONLY these are backed up)
-        if self.global_include_ids:
-            return chat_id in self.global_include_ids
+        # 3. Global Include (acts as whitelist - if set, ONLY these are backed
+        # up), folder-resolved ids are additive alongside the static list
+        if self.global_include_ids or self.global_include_folder_ids:
+            return chat_id in self.global_include_ids or chat_id in self.global_include_folder_chat_ids
 
-        # 4. Type-Specific Include (bots use private include lists)
-        if (is_user or is_bot) and self.private_include_ids:
-            return chat_id in self.private_include_ids
-        if is_group and self.groups_include_ids:
-            return chat_id in self.groups_include_ids
-        if is_channel and self.channels_include_ids:
-            return chat_id in self.channels_include_ids
+        # 4. Type-Specific Include (bots use private include lists; folder-
+        # resolved ids are additive alongside the static *_INCLUDE_CHAT_IDS lists)
+        if (is_user or is_bot) and (self.private_include_ids or self.private_include_folder_ids):
+            return chat_id in self.private_include_ids or chat_id in self.private_include_folder_chat_ids
+        if is_group and (self.groups_include_ids or self.groups_include_folder_ids):
+            return chat_id in self.groups_include_ids or chat_id in self.groups_include_folder_chat_ids
+        if is_channel and (self.channels_include_ids or self.channels_include_folder_ids):
+            return chat_id in self.channels_include_ids or chat_id in self.channels_include_folder_chat_ids
 
         # 5. Chat Type Filter (only if no include lists are set)
         return self.should_backup_chat_type(is_user, is_group, is_channel, is_bot)
+
+    @property
+    def has_folder_include_filters(self) -> bool:
+        """Whether any *_INCLUDE_FOLDER_IDS var is configured.
+
+        Gates the extra live GetDialogFiltersRequest call each backup cycle
+        (see TelegramBackup._sync_folder_include_filters) so a deployment not
+        using this feature pays nothing extra for it.
+        """
+        return bool(
+            self.global_include_folder_ids
+            or self.private_include_folder_ids
+            or self.groups_include_folder_ids
+            or self.channels_include_folder_ids
+        )
+
+    def update_folder_resolved_chat_ids(
+        self,
+        *,
+        global_ids: frozenset | set = frozenset(),
+        private_ids: frozenset | set = frozenset(),
+        group_ids: frozenset | set = frozenset(),
+        channel_ids: frozenset | set = frozenset(),
+    ) -> None:
+        """Replace this cycle's live folder-membership snapshot used by should_backup_chat.
+
+        Called once per backup cycle by TelegramBackup._sync_folder_include_filters
+        after a successful GetDialogFiltersRequest refresh; a failed refresh
+        simply does not call this, leaving the previous snapshot (or the empty
+        default) in place.
+        """
+        self.global_include_folder_chat_ids = frozenset(global_ids)
+        self.private_include_folder_chat_ids = frozenset(private_ids)
+        self.groups_include_folder_chat_ids = frozenset(group_ids)
+        self.channels_include_folder_chat_ids = frozenset(channel_ids)
 
     def get_max_media_size_bytes(self) -> int:
         """Get maximum media file size in bytes."""
@@ -762,6 +972,50 @@ class Config:
             return False
 
         return True
+
+    def should_download_media_type(self, media_type: str | None) -> bool:
+        """
+        Determine if a classified media type passes DOWNLOAD_MEDIA_TYPES.
+
+        Args:
+            media_type: type string from BackupMediaMixin._get_media_type /
+                TelegramListener._get_media_type
+
+        Returns:
+            True when the type is downloadable (empty filter = every type)
+        """
+        if not self.download_media_types:
+            return True
+
+        return media_type in self.download_media_types
+
+    def document_mime_allowed(self, mime_type: str | None, file_name: str | None = None) -> bool:
+        """
+        Determine if a document passes DOWNLOAD_DOCUMENT_MIME_TYPES.
+
+        Matches the declared MIME type exactly (case-insensitive) or, when the
+        document carries a useless MIME (e.g. application/octet-stream), the
+        filename extension derived from the configured MIME types.
+
+        Args:
+            mime_type: document MIME type (may be None)
+            file_name: document filename (may be None)
+
+        Returns:
+            True when the document is downloadable (empty filter = every document)
+        """
+        if not self.download_document_mime_types:
+            return True
+
+        if mime_type and _normalize_mime_type(mime_type) in self.download_document_mime_types:
+            return True
+
+        if file_name:
+            extension = os.path.splitext(file_name)[1].lower()
+            if extension and extension in self.download_document_mime_extensions:
+                return True
+
+        return False
 
     def validate_credentials(self):
         """Ensure Telegram credentials are present."""

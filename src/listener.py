@@ -34,6 +34,7 @@ from telethon.tl.types import (
 from telethon.utils import get_peer_id
 
 from .avatar_utils import get_avatar_paths
+from .backup_media import media_download_allowed
 from .config import Config
 from .db import DatabaseAdapter, create_adapter
 from .message_utils import (
@@ -657,6 +658,15 @@ class TelegramListener:
 
         if not media_type or media_type in ("contact", "geo", "poll"):
             return None  # These don't have downloadable files
+
+        # DOWNLOAD_MEDIA_TYPES / DOWNLOAD_DOCUMENT_MIME_TYPES (opt-in, default
+        # OFF), same policy as the scheduled sweep's _process_media: declined
+        # here the same way an over-size file already is on this path (no
+        # media row -- the scheduled sweep records the metadata-only row on
+        # its next pass).
+        if not media_download_allowed(self.config, media, media_type):
+            logger.debug(f"Skipping filtered media (type: {media_type})")
+            return None
 
         try:
             # Get Telegram's file unique ID for deduplication

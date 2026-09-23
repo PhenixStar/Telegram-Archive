@@ -45,6 +45,49 @@ _GROUP_TYPES = frozenset({"group", "supergroup"})
 
 
 @dataclass(frozen=True)
+class FolderPeers:
+    """A dialog filter's explicit peer membership, resolved to marked chat ids.
+
+    Used by the *_INCLUDE_FOLDER_IDS backup-filtering feature, which answers a
+    different question from ``resolve_folder_member_ids`` below: that function
+    decides folder membership for chats already in the archive (for viewer
+    display); this one decides whether a chat should be ADMITTED to the
+    archive in the first place. Only explicit ``pinned_peers``/``include_peers``
+    are captured here -- a folder's category flags (``groups``, ``broadcasts``,
+    contacts/non_contacts, ``bots``) are NOT evaluated in this port, because
+    ``TelegramBackup._sync_folder_include_filters`` deliberately runs before
+    the dialog list is fetched (matching upstream's placement and staying
+    independent of ``_backup_folders()``), so no chat's type/contact facts are
+    on hand yet to test a flag against. A folder meant to drive backup
+    inclusion should list its target chats explicitly rather than rely on flag
+    toggles. See that method's docstring for the alternative (moving the
+    refresh after the dialog fetch to reuse ``resolve_folder_member_ids`` for
+    full flag support) that was not taken for this port.
+    """
+
+    folder_id: int
+    peer_ids: frozenset[int]
+
+
+def resolve_include_folder_chat_ids(folders: Iterable[FolderPeers], folder_ids: Iterable[int]) -> frozenset[int]:
+    """Union the explicit peer ids of every folder in ``folder_ids``.
+
+    Pure set algebra so it's unit-testable without Telethon; the caller
+    (``TelegramBackup._sync_folder_include_filters``) does the live
+    ``GetDialogFiltersRequest`` fetch and marked-id resolution and hands the
+    results in as ``FolderPeers``.
+    """
+    wanted = frozenset(folder_ids)
+    if not wanted:
+        return frozenset()
+    result: set[int] = set()
+    for folder in folders:
+        if folder.folder_id in wanted:
+            result.update(folder.peer_ids)
+    return frozenset(result)
+
+
+@dataclass(frozen=True)
 class FolderChat:
     """The minimal archived-chat facts needed to evaluate a folder's flags."""
 

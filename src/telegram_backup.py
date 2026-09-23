@@ -40,7 +40,13 @@ from .backup_media import BackupMediaMixin
 from .config import Config
 from .connection import TelegramConnection
 from .db import DatabaseAdapter, create_adapter
-from .folder_utils import FolderChat, FolderRules, resolve_folder_member_ids
+from .folder_utils import (
+    FolderChat,
+    FolderPeers,
+    FolderRules,
+    resolve_folder_member_ids,
+    resolve_include_folder_chat_ids,
+)
 from .media_errors import is_media_location_error
 from .parallel_download import ParallelDownloader
 from .telegram_stall_guard import (
@@ -557,6 +563,11 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             # Store owner ID and backfill is_outgoing for existing messages
             await self.db.set_metadata("owner_id", str(me.id))
             await self.db.backfill_is_outgoing(me.id)
+
+            # Refresh *_INCLUDE_FOLDER_IDS membership before the dialog
+            # filtering pass below reads it. No-op (no extra API call) when
+            # the feature is unused or CHAT_IDS whitelist mode is active.
+            await self._sync_folder_include_filters(me.id)
 
             start_time = datetime.now()
 
@@ -2039,6 +2050,110 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         except Exception as e:
             logger.warning(f"Could not resolve own id for folder resolution: {e}")
             return None
+
+    async def _sync_folder_include_filters(self, own_id: int | None = None) -> None:
+        """Refresh the live folder-membership snapshot behind *_INCLUDE_FOLDER_IDS.
+
+        Runs once near the start of every backup_all() cycle, before the dialog
+        filtering pass that decides what gets backed up, so a chat someone drops
+        into a configured folder in the Telegram app shows up in the archive
+        starting the very next scheduled run -- no config edit or restart needed.
+
+        No-ops (skips the API call) in whitelist mode, which ignores folder ids,
+        and when no *_INCLUDE_FOLDER_IDS var is set, so a deployment not using
+        this feature sees no extra traffic.
+
+        Deliberately independent of _backup_folders(): that method runs near the
+        END of backup_all (after the dialog loop, for viewer display/metadata
+        persistence only) and only persists membership for chats already
+        archived -- too late, and too narrow, to drive this run's own filtering
+        decisions. The extra GetDialogFiltersRequest call this duplicates is the
+        accepted cost of keeping the two features decoupled.
+
+        Only a folder's EXPLICIT (pinned + include) peers drive inclusion here
+        (see folder_utils.FolderPeers) -- category-flag membership is not
+        evaluated, because this runs before backup_all's own dialog fetch, so
+        no chat's type/contact facts are on hand yet. An alternative not taken
+        for this port: move this call to after the dialog fetch and reuse
+        _folder_rules_from_filter() + resolve_folder_member_ids() +
+        _get_contact_ids() (the same machinery _backup_folders() already uses)
+        against the fetched entities, which would give full flag support at
+        the cost of coupling this method to backup_all's dialog-fetch order.
+        """
+        if self.config.whitelist_mode or not self.config.has_folder_include_filters:
+            return
+        try:
+            from telethon.tl.functions.messages import GetDialogFiltersRequest
+            from telethon.tl.types import DialogFilter, DialogFilterChatlist
+
+            # backup_all passes the id it already resolved, so a pinned Saved
+            # Messages entry does not depend on a second get_me succeeding.
+            if own_id is None:
+                own_id = await self._get_own_id()
+            result = await with_call_timeout(self.client(GetDialogFiltersRequest()), TELEGRAM_CALL_TIMEOUT_SECONDS)
+            raw_filters = result.filters if hasattr(result, "filters") else result
+
+            # _resolve_peer_ids (not a bare get_peer_id loop) so a pinned Saved
+            # Messages entry (InputPeerSelf) resolves to own_id instead of
+            # raising and dropping the whole folder's ids. DialogFilterChatlist
+            # (shared/shareable folders) is accepted alongside DialogFilter for
+            # the same reason _folder_rules_from_filter/_backup_folders() do --
+            # it carries the same pinned_peers/include_peers fields, no flags.
+            folders = [
+                FolderPeers(
+                    folder_id=f.id,
+                    peer_ids=frozenset(self._resolve_peer_ids((*f.pinned_peers, *f.include_peers), own_id)),
+                )
+                for f in raw_filters
+                if isinstance(f, (DialogFilter, DialogFilterChatlist))
+            ]
+
+            self.config.update_folder_resolved_chat_ids(
+                global_ids=resolve_include_folder_chat_ids(folders, self.config.global_include_folder_ids),
+                private_ids=resolve_include_folder_chat_ids(folders, self.config.private_include_folder_ids),
+                group_ids=resolve_include_folder_chat_ids(folders, self.config.groups_include_folder_ids),
+                channel_ids=resolve_include_folder_chat_ids(folders, self.config.channels_include_folder_ids),
+            )
+
+            configured = (
+                self.config.global_include_folder_ids
+                | self.config.private_include_folder_ids
+                | self.config.groups_include_folder_ids
+                | self.config.channels_include_folder_ids
+            )
+            missing = configured - {folder.folder_id for folder in folders}
+            if missing:
+                # Count only (no folder titles -- PII rule). The filters stay
+                # allow-lists, so a mistyped or deleted folder admits nothing
+                # extra; say so instead of letting a chat type go quiet.
+                logger.warning(
+                    f"{len(missing)} configured include folder id(s) are not among this account's Telegram "
+                    "folders; no chats are admitted through them"
+                )
+            # A configured folder that exists but resolved to zero explicit
+            # (pinned/included) peers is the flag-only-folder trap: only
+            # explicit membership drives *_INCLUDE_FOLDER_IDS (see the class
+            # docstring above), so a folder built purely from category-flag
+            # toggles (e.g. "all groups") silently admits nothing. Warn about
+            # it the same way as a missing folder id, rather than leaving the
+            # operator with only a debug line to explain an empty include set.
+            empty_peer_folder_ids = {folder.folder_id for folder in folders if not folder.peer_ids}
+            empty_configured = configured & empty_peer_folder_ids
+            if empty_configured:
+                logger.warning(
+                    f"{len(empty_configured)} configured include folder id(s) have no explicit "
+                    "(pinned/included) chats; category-flag-only folders admit nothing through "
+                    "*_INCLUDE_FOLDER_IDS"
+                )
+            logger.debug(f"Resolved {len(folders)} Telegram folder(s) for *_INCLUDE_FOLDER_IDS filtering")
+        except Exception as e:
+            # Best-effort: the config keeps its last successful refresh (none
+            # yet means the folder filters admit nothing extra), and a
+            # folder-list hiccup never aborts the run.
+            logger.warning(
+                f"Could not refresh folder-based include filters this cycle, keeping the last resolved "
+                f"membership: {e}"
+            )
 
     async def _backup_folders(self) -> int:
         """

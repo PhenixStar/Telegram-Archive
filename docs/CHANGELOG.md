@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Fork port wave 4] - 2026-09-23
+
+Two opt-in upstream features. Both default to off, so behaviour is unchanged
+until the corresponding variables are set.
+
+### Added
+- **Media-type and document-MIME download filters** (upstream #463).
+  `DOWNLOAD_MEDIA_TYPES` limits which media kinds are downloaded, and
+  `DOWNLOAD_DOCUMENT_MIME_TYPES` narrows documents further by MIME type. A
+  filtered file is recorded exactly as an over-size file already is, so the
+  viewer still shows that the media existed rather than losing the row.
+- **Folder-driven chat inclusion** (upstream #448).
+  `GLOBAL_INCLUDE_FOLDER_IDS` and the per-category
+  `PRIVATE_/GROUPS_/CHANNELS_INCLUDE_FOLDER_IDS` add whatever a Telegram folder
+  currently contains to the backup, additively with the matching
+  `*_INCLUDE_CHAT_IDS` at the same priority. Membership refreshes once per
+  backup cycle, so moving a chat into a folder in the Telegram app is picked up
+  on the next run with no config change. A failed refresh keeps the last good
+  membership. Only a folder's explicit members count, matching upstream;
+  category-flag folders ("all groups", "unread") are not resolved.
+
+### Added — tooling
+- **`scripts/refetch_incomplete_messages.py`** repairs rows the archive stored
+  incompletely: messages with no text and no media (mostly the media kinds
+  recognised only from 7.15.0), and media rows whose file is empty or missing on
+  disk. Dry run by default, throttled, resumable, and it works on a copy of the
+  session so it does not contend with a running scheduler.
+
 ## [Fork port wave 3] - 2026-09-23
 
 ### Fixed
