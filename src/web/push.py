@@ -7,6 +7,7 @@ This module handles:
 - Sending push notifications to subscribed clients
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -18,6 +19,18 @@ from py_vapid.utils import b64urlencode
 from pywebpush import WebPushException, webpush
 
 logger = logging.getLogger(__name__)
+
+# webpush() is pywebpush's synchronous requests.post, and it forwards its own
+# timeout argument, so omitting it means requests.post(timeout=None) — no timeout
+# at all. Called directly in this coroutine it blocked the whole event loop, so a
+# single blackholed push endpoint could freeze the viewer for every user until the
+# OS gave up on the TCP connection. requests applies the value per socket
+# operation (connect, then each read), not to the request as a whole.
+_PUSH_TIMEOUT_SECONDS = 10
+# Sends run on the loop's default thread executor, which thumbnail generation also
+# uses, so cap the fan-out rather than letting a large subscriber list occupy every
+# worker thread for the length of a timeout.
+_PUSH_CONCURRENCY = 8
 
 
 class PushNotificationManager:
@@ -272,10 +285,10 @@ class PushNotificationManager:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
-        sent = 0
-        failed_endpoints = []
+        semaphore = asyncio.Semaphore(_PUSH_CONCURRENCY)
 
-        for sub in subscriptions:
+        async def deliver(sub: dict[str, Any]) -> tuple[bool, str | None]:
+            """Send one notification. Returns (sent, endpoint to prune)."""
             try:
                 # Extract origin from endpoint for VAPID audience claim
                 from urllib.parse import urlparse
@@ -286,21 +299,33 @@ class PushNotificationManager:
                 # Generate VAPID headers using py_vapid
                 vapid_headers = self._vapid.sign({"sub": self.config.vapid_contact, "aud": audience})
 
-                webpush(subscription_info=sub, data=json.dumps(payload), headers=vapid_headers)
-                sent += 1
+                async with semaphore:
+                    await asyncio.to_thread(
+                        webpush,
+                        subscription_info=sub,
+                        data=json.dumps(payload),
+                        headers=vapid_headers,
+                        timeout=_PUSH_TIMEOUT_SECONDS,
+                    )
+                return True, None
             except WebPushException as e:
                 if e.response and e.response.status_code in (404, 410):
                     # Subscription expired or unsubscribed
-                    failed_endpoints.append(sub["endpoint"])
                     logger.debug(f"Push subscription expired: {sub['endpoint'][:50]}...")
-                elif e.response and e.response.status_code == 403:
+                    return False, sub["endpoint"]
+                if e.response and e.response.status_code == 403:
                     # Permission denied - user blocked notifications
-                    failed_endpoints.append(sub["endpoint"])
                     logger.info(f"Push blocked by user (403): {sub['endpoint'][:50]}...")
-                else:
-                    logger.warning(f"Push notification failed: {e}")
+                    return False, sub["endpoint"]
+                logger.warning(f"Push notification failed: {e}")
+                return False, None
             except Exception as e:
                 logger.warning(f"Push notification error: {e}")
+                return False, None
+
+        results = await asyncio.gather(*(deliver(sub) for sub in subscriptions))
+        sent = sum(1 for delivered, _ in results if delivered)
+        failed_endpoints = [endpoint for _, endpoint in results if endpoint]
 
         # Clean up expired subscriptions
         for endpoint in failed_endpoints:

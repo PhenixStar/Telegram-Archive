@@ -5,7 +5,9 @@ locally.  A module-level guard skips all tests gracefully when unavailable.
 They will pass on CI where all dependencies are present.
 """
 
+import asyncio
 import json
+import threading
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -386,3 +388,45 @@ class TestGetPushManagerSingleton(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@_skip_unless_push
+class TestPushFanOutDoesNotBlockTheLoop(unittest.IsolatedAsyncioTestCase):
+    """webpush() is a blocking requests.post with no default timeout, so it must
+    run off the event loop and with a timeout, or one dead endpoint freezes the
+    viewer for every user."""
+
+    async def test_every_send_passes_a_timeout(self):
+        mgr = _make_enabled_manager()
+        mgr.get_subscriptions = AsyncMock(
+            return_value=[{"endpoint": "https://push.example.com/sub1", "keys": {"p256dh": "k", "auth": "a"}}]
+        )
+
+        with patch("src.web.push.webpush") as mock_webpush:
+            await mgr.send_notification("Test", "Hello")
+
+        self.assertEqual(mock_webpush.call_args.kwargs["timeout"], push_mod._PUSH_TIMEOUT_SECONDS)
+
+    async def test_a_slow_endpoint_does_not_block_the_event_loop(self):
+        mgr = _make_enabled_manager()
+        mgr.get_subscriptions = AsyncMock(
+            return_value=[{"endpoint": "https://push.example.com/slow", "keys": {"p256dh": "k", "auth": "a"}}]
+        )
+
+        release = threading.Event()
+        loop_ran = asyncio.Event()
+
+        def blocking_send(*_args, **_kwargs):
+            # Stands in for a blackholed push endpoint.
+            release.wait(5)
+
+        async def other_loop_work():
+            loop_ran.set()
+
+        with patch("src.web.push.webpush", side_effect=blocking_send):
+            send = asyncio.create_task(mgr.send_notification("Test", "Hello"))
+            await asyncio.wait_for(other_loop_work(), timeout=1)
+            # The loop stayed responsive while the send was in flight.
+            self.assertTrue(loop_ran.is_set())
+            release.set()
+            self.assertEqual(await asyncio.wait_for(send, timeout=5), 1)

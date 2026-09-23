@@ -15,8 +15,11 @@ Features:
 import asyncio
 import base64
 import logging
+import os
 import shutil
 import subprocess
+import tempfile
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -30,14 +33,86 @@ Image.MAX_IMAGE_PIXELS = 50_000_000
 ALLOWED_SIZES: set[int] = {64, 200, 400, 800}
 QUALITY_MAP: dict[int, int] = {64: 55, 200: 72, 400: 80, 800: 85}
 _MAX_SOURCE_BYTES = 50 * 1024 * 1024  # 50 MB
+# Peak decode memory follows pixel count, not compressed size, so the byte gate
+# above cannot bound it: a 12000x8000 PNG of flat colour is a few hundred KB on
+# disk and still costs roughly 390 MB to decode. Image.MAX_IMAGE_PIXELS above is
+# no help either, because Pillow only raises above TWICE that value, so anything
+# up to 100 MP proceeds after a warning nobody reads. Any Telegram contact can
+# send such a file, and the viewer decodes it on request.
+_MAX_SOURCE_PIXELS = 25_000_000
 
 _IMAGE_EXTENSIONS: set[str] = {
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff",
 }
 _VIDEO_EXTENSIONS: set[str] = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
-# Concurrency limiter: max 4 simultaneous thumbnail generations
+# Concurrency limiter: max 4 simultaneous thumbnail generations. Together with
+# _MAX_SOURCE_PIXELS this bounds peak thumbnail memory to a small multiple of one
+# capped decode instead of letting it grow with the request count.
 _THUMB_SEMAPHORE = asyncio.Semaphore(4)
+
+# Remember recent generation failures. Nothing is written when generation fails,
+# so without this an undecodable video re-runs ffmpeg (a 15s subprocess holding a
+# semaphore slot) on every request from every viewer. Time-bounded rather than
+# permanent, so a truncated download that later completes recovers on its own.
+_FAILURE_TTL_SECONDS = 300.0
+_MAX_FAILURE_ENTRIES = 1024
+_recent_failures: dict[tuple[int, str], float] = {}
+
+
+def _failure_cached(key: tuple[int, str]) -> bool:
+    """True when this (size, source) failed recently enough to skip retrying."""
+    expires_at = _recent_failures.get(key)
+    if expires_at is None:
+        return False
+    if expires_at <= time.monotonic():
+        _recent_failures.pop(key, None)
+        return False
+    return True
+
+
+def _record_failure(key: tuple[int, str]) -> None:
+    """Remember a failed generation for _FAILURE_TTL_SECONDS."""
+    now = time.monotonic()
+    if len(_recent_failures) >= _MAX_FAILURE_ENTRIES:
+        for stale in [k for k, expires_at in _recent_failures.items() if expires_at <= now]:
+            del _recent_failures[stale]
+        if len(_recent_failures) >= _MAX_FAILURE_ENTRIES:
+            # Dropping entries only costs a regeneration, never correctness.
+            _recent_failures.clear()
+    _recent_failures[key] = now + _FAILURE_TTL_SECONDS
+
+
+def _exceeds_pixel_cap(img: Image.Image) -> bool:
+    """True when the image Pillow is about to decode is over the pixel cap.
+
+    Call this BEFORE ``draft()``: draft rewrites ``img.size`` to the reduced
+    decode scale, so measuring afterwards reads the shrunken size and lets a
+    progressive or multi-scan JPEG — which still decodes at full size — slip
+    past the cap entirely.
+    """
+    width, height = img.size
+    return bool(width and height and width * height > _MAX_SOURCE_PIXELS)
+
+
+def _save_webp_atomic(img: Image.Image, dest: Path, quality: int) -> None:
+    """Write the WebP to a temp file in dest's directory, then os.replace() it.
+
+    Pillow streams straight into whatever path it is given, so writing the cache
+    path directly makes a half-written file visible to a concurrent request —
+    ``dest.exists()`` is the only completeness check there is, and the truncated
+    result would then be served with a 24h Cache-Control.
+    """
+    # Short fixed prefix: media names are already near the filesystem's
+    # per-component byte budget, so embedding one here could overflow it.
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=".thumb-", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        img.save(tmp_path, "WEBP", quality=quality)
+        os.replace(tmp_path, dest)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _is_image(filename: str) -> bool:
@@ -86,8 +161,17 @@ def _generate_sync(source: Path, dest: Path, size: int) -> bool:
         quality = QUALITY_MAP.get(size, 80)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with Image.open(source) as img:
+            if _exceeds_pixel_cap(img):
+                logger.warning(
+                    "Source exceeds the thumbnail pixel cap: %s (%sx%s)", source, img.size[0], img.size[1]
+                )
+                return False
+            # Baseline JPEGs can be decoded straight at a reduced scale, which is
+            # both faster and cheaper; every other format decodes in full.
+            if img.format == "JPEG":
+                img.draft("RGB", (size, size))
             img.thumbnail((size, size), Image.LANCZOS)
-            img.save(dest, "WEBP", quality=quality)
+            _save_webp_atomic(img, dest, quality)
         return True
     except Exception as e:
         logger.warning("Thumbnail generation failed for %s: %s", source, e)
@@ -149,7 +233,14 @@ def _generate_video_sync(source: Path, dest: Path, size: int) -> bool:
         dest.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
             [
-                "ffmpeg", "-i", str(source),
+                "ffmpeg",
+                # The lane is chosen by the sender-controlled filename extension
+                # and the byte gate cannot see pixel cost, so a 96 MP still
+                # renamed .mp4 would otherwise drive ffmpeg to allocate a frame
+                # of several hundred MB. -max_pixels makes the decoder itself
+                # refuse an oversized frame (non-zero exit, handled below).
+                "-max_pixels", str(_MAX_SOURCE_PIXELS),
+                "-i", str(source),
                 "-vframes", "1",
                 "-vf", f"scale={size}:{size}:force_original_aspect_ratio=decrease",
                 "-f", "image2pipe", "-vcodec", "webp",
@@ -162,7 +253,16 @@ def _generate_video_sync(source: Path, dest: Path, size: int) -> bool:
         if result.returncode != 0 or not result.stdout:
             logger.debug("ffmpeg failed for %s: %s", source, result.stderr[:200])
             return False
-        dest.write_bytes(result.stdout)
+        # Atomic for the same reason as the image lane: a concurrent request
+        # must never see (and then cache for 24h) a partially written file.
+        fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=".thumb-", suffix=".tmp")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            tmp_path.write_bytes(result.stdout)
+            os.replace(tmp_path, dest)
+        finally:
+            tmp_path.unlink(missing_ok=True)
         return True
     except Exception as e:
         logger.debug("Video thumbnail generation failed for %s: %s", source, e)
@@ -199,10 +299,17 @@ async def ensure_video_thumbnail(
     if not source.exists():
         return None
 
+    failure_key = (size, str(source))
+    if _failure_cached(failure_key):
+        return None
+
     loop = asyncio.get_running_loop()
     async with _THUMB_SEMAPHORE:
         ok = await loop.run_in_executor(None, _generate_video_sync, source, dest, size)
-    return dest if ok else None
+    if not ok:
+        _record_failure(failure_key)
+        return None
+    return dest
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +322,10 @@ def _generate_lqip_sync(source: Path, cache_file: Path) -> str | None:
         if source.stat().st_size > _MAX_SOURCE_BYTES:
             return None
         with Image.open(source) as img:
+            if _exceeds_pixel_cap(img):
+                return None
+            if img.format == "JPEG":
+                img.draft("RGB", (32, 32))
             img.thumbnail((32, 32), Image.LANCZOS)
             img = img.filter(ImageFilter.GaussianBlur(2))
             buf = BytesIO()

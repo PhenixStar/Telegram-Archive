@@ -3,6 +3,7 @@
 Handles all authentication and access-control related database operations.
 """
 
+import asyncio
 import hashlib
 import logging
 import secrets
@@ -382,9 +383,15 @@ class ViewerMixin:
             for record in result.scalars().all():
                 if record.expires_at and record.expires_at < datetime.utcnow():
                     continue
-                computed = hashlib.pbkdf2_hmac(
-                    "sha256", plaintext_token.encode(), bytes.fromhex(record.token_salt), 600_000
-                ).hex()
+                # 600k PBKDF2 rounds per stored token, so a login with several
+                # tokens on file would otherwise block the event loop — and with
+                # it every other viewer request — for a noticeable fraction of a
+                # second. Hash off-loop instead.
+                computed = await asyncio.to_thread(
+                    lambda salt=record.token_salt: hashlib.pbkdf2_hmac(
+                        "sha256", plaintext_token.encode(), bytes.fromhex(salt), 600_000
+                    ).hex()
+                )
                 if secrets.compare_digest(computed, record.token_hash):
                     record.last_used_at = datetime.utcnow()
                     record.use_count = (record.use_count or 0) + 1

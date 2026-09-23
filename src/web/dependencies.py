@@ -79,6 +79,10 @@ class ConnectionManager:
 
     _MAX_CONNECTIONS = 100
     _MAX_PER_IP = 5
+    # A client only ever watches the chats it has open, so a socket asking for
+    # thousands of subscriptions is either broken or hostile; without a cap it
+    # grows this dict unboundedly and widens every broadcast fan-out.
+    _MAX_SUBSCRIPTIONS_PER_SOCKET = 200
 
     def __init__(self):
         self.active_connections: dict[WebSocket, set[int]] = {}
@@ -140,7 +144,11 @@ class ConnectionManager:
             allowed = self._allowed_chats.get(websocket)
             if allowed is not None and chat_id not in allowed:
                 return
-            self.active_connections[websocket].add(chat_id)
+            subscribed = self.active_connections[websocket]
+            if chat_id not in subscribed and len(subscribed) >= self._MAX_SUBSCRIPTIONS_PER_SOCKET:
+                logger.warning("WebSocket subscription cap reached; ignoring subscribe for chat %s", chat_id)
+                return
+            subscribed.add(chat_id)
 
     def unsubscribe(self, websocket: WebSocket, chat_id: int):
         """Unsubscribe a connection from a specific chat."""
