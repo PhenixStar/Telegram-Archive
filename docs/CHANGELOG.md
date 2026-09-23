@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Fork port wave 3] - 2026-09-23
+
+### Fixed
+- **Nine media kinds no longer arrive as empty bubbles.** Venue, dice, invoice,
+  story, giveaway, giveaway results, live location, game and unsupported media are
+  message payloads rather than files, so the archive recognised none of them: the
+  message was stored with no text and no media and the viewer showed a blank
+  bubble where the official apps show a placeholder. They are now captured into
+  `raw_data`, the way polls already were, and the viewer renders a typed chip with
+  the useful detail — the venue and its address, the dice roll, the invoice amount
+  in its own currency, the live-location coordinates and duration, the giveaway
+  counts (upstream #401, adapted: stored without a media row, so these never look
+  like a pending download).
+
+  This applies to messages captured from now on. About 8,000 existing messages in
+  the archive have no text and no media; some are these kinds and would need a
+  re-fetch to fill in.
+
 ## [Fork port wave 2] - 2026-09-23
 
 Capture-side half of the semantic back-port from upstream v8.x. No schema change:

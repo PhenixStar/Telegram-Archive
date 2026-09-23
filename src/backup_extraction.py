@@ -19,7 +19,7 @@ from telethon.tl.types import (
 )
 from telethon.utils import get_peer_id
 
-from .message_utils import extract_webpage_preview, sender_display_name
+from .message_utils import extract_extended_media_details, extract_webpage_preview, sender_display_name
 from .telegram_stall_guard import TELEGRAM_CALL_TIMEOUT_SECONDS, with_call_timeout
 
 logger = logging.getLogger(__name__)
@@ -379,6 +379,19 @@ class BackupExtractionMixin:
             webpage_preview = extract_webpage_preview(message)
             if webpage_preview:
                 message_data["raw_data"]["webpage"] = webpage_preview
+
+            # Venue, dice, invoice, story, giveaway, giveaway results, live
+            # location, game and unsupported media (#401). None of these is a
+            # downloadable file, and _get_media_type does not recognise them, so
+            # the message was stored with no text and no media row and the viewer
+            # showed an empty bubble where the official apps show a placeholder.
+            # Stored in raw_data like polls already are, so the viewer can render
+            # a typed chip without a media row that would look like a pending
+            # download.
+            extended_media = extract_extended_media_details(message.media)
+            if extended_media is not None:
+                extended_kind, extended_details = extended_media
+                message_data["raw_data"][extended_kind] = extended_details
 
             # Handle Polls specially (store structure in raw_data, do not download)
             # v6.0.0: Poll type is detected by presence of raw_data['poll']

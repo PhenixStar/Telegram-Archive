@@ -2125,6 +2125,21 @@
                                         </div>
                                     </div>
 
+                                    <!-- Venue, dice, invoice, story, giveaway, live location, game and
+                                         unsupported media (#401). Telegram sends these as message
+                                         payloads rather than files, so they have no text and no media
+                                         row and used to render as an empty bubble. One typed chip,
+                                         built from raw_data the same way the poll block above is. -->
+                                    <div v-if="getExtendedMedia(msg)"
+                                        class="mb-2 inline-flex items-start gap-2 rounded-lg px-3 py-2 text-xs max-w-md"
+                                        style="background: var(--tg-hover); border-left: 2px solid var(--tg-accent);">
+                                        <i :class="getExtendedMedia(msg).icon" class="mt-0.5" style="color: var(--tg-accent);"></i>
+                                        <div class="min-w-0">
+                                            <div class="font-medium" style="color: var(--tg-text);">{{ getExtendedMedia(msg).label }}</div>
+                                            <div v-if="getExtendedMedia(msg).detail" class="mt-0.5 break-words" style="color: var(--tg-muted);">{{ getExtendedMedia(msg).detail }}</div>
+                                        </div>
+                                    </div>
+
                                     <!-- Media (show if media exists, even if not yet downloaded) -->
                                     <div v-if="msg.media?.file_path || msg.media?.type" class="mb-2 space-y-1">
                                         <!-- Placeholder for media not yet downloaded -->
@@ -8029,6 +8044,84 @@
 
                 // Link preview from raw_data
                 const _linkPreviewCache = new WeakMap()
+                // Typed chip for the media kinds Telegram sends as message payloads
+                // rather than files (#401). Each capture writes one raw_data key, so the
+                // first key present decides the chip; nothing here is ever rendered as
+                // HTML, so the values stay inert text.
+                const EXTENDED_MEDIA_KINDS = [
+                    { key: 'venue', icon: 'fas fa-map-marker-alt', label: 'Venue' },
+                    { key: 'dice', icon: 'fas fa-dice', label: 'Dice' },
+                    { key: 'invoice', icon: 'fas fa-file-invoice-dollar', label: 'Invoice' },
+                    { key: 'story', icon: 'fas fa-circle-play', label: 'Story' },
+                    { key: 'giveaway', icon: 'fas fa-gift', label: 'Giveaway' },
+                    { key: 'giveaway_results', icon: 'fas fa-trophy', label: 'Giveaway results' },
+                    { key: 'geo_live', icon: 'fas fa-location-crosshairs', label: 'Live location' },
+                    { key: 'game', icon: 'fas fa-gamepad', label: 'Game' },
+                    { key: 'unsupported', icon: 'fas fa-circle-question', label: 'Unsupported media' },
+                ]
+
+                const _extendedMediaCache = new WeakMap()
+                const getExtendedMedia = (msg) => {
+                    if (!msg || !msg.raw_data) return null
+                    if (_extendedMediaCache.has(msg)) return _extendedMediaCache.get(msg)
+                    const raw = getRawData(msg)
+                    let chip = null
+                    for (const kind of EXTENDED_MEDIA_KINDS) {
+                        const data = raw?.[kind.key]
+                        if (!data || typeof data !== 'object') continue
+                        chip = { icon: kind.icon, label: kind.label, detail: describeExtendedMedia(kind.key, data) }
+                        break
+                    }
+                    _extendedMediaCache.set(msg, chip)
+                    return chip
+                }
+
+                // Second line of the chip: whatever the capture stored that is worth
+                // reading. Every branch degrades to '' when its fields are missing, so a
+                // payload captured by an older or newer Telethon still shows its label.
+                const describeExtendedMedia = (kind, data) => {
+                    const coords = () => (data.lat != null && data.long != null)
+                        ? `${Number(data.lat).toFixed(5)}, ${Number(data.long).toFixed(5)}` : ''
+                    switch (kind) {
+                        case 'venue':
+                            return [data.title, data.address].filter(Boolean).join(' — ') || coords()
+                        case 'dice':
+                            return [data.emoticon, data.value != null ? `rolled ${data.value}` : ''].filter(Boolean).join(' ')
+                        case 'invoice': {
+                            const parts = [data.title].filter(Boolean)
+                            if (data.total_amount != null && data.currency) {
+                                // Telegram sends the amount in the currency's smallest unit;
+                                // Intl knows how many decimals each currency actually has
+                                // (JPY has none), so let it place the point.
+                                try {
+                                    const fmt = new Intl.NumberFormat(undefined, { style: 'currency', currency: data.currency })
+                                    const digits = fmt.resolvedOptions().maximumFractionDigits ?? 2
+                                    parts.push(fmt.format(data.total_amount / Math.pow(10, digits)))
+                                } catch (_) {
+                                    parts.push(`${data.total_amount} ${data.currency}`)
+                                }
+                            }
+                            if (data.test) parts.push('(test)')
+                            return parts.join(' — ')
+                        }
+                        case 'story':
+                            return data.story_id != null ? `Story #${data.story_id}` : ''
+                        case 'giveaway':
+                            return [
+                                data.quantity != null ? `${data.quantity} winner${data.quantity === 1 ? '' : 's'}` : '',
+                                data.months != null ? `${data.months} month${data.months === 1 ? '' : 's'}` : '',
+                            ].filter(Boolean).join(' · ')
+                        case 'giveaway_results':
+                            return data.winners_count != null ? `${data.winners_count} winner${data.winners_count === 1 ? '' : 's'}` : ''
+                        case 'geo_live':
+                            return [coords(), data.period != null ? `for ${Math.round(data.period / 60)} min` : ''].filter(Boolean).join(' · ')
+                        case 'game':
+                            return [data.title, data.description].filter(Boolean).join(' — ')
+                        default:
+                            return ''
+                    }
+                }
+
                 const getLinkPreview = (msg) => {
                     if (!msg.raw_data) return null
                     if (_linkPreviewCache.has(msg)) return _linkPreviewCache.get(msg)
@@ -9770,6 +9863,7 @@
                     getSenderInitial,
                     getForwardName,
                     getForwardMeta,
+                    getExtendedMedia,
                     showSenderName,
                     showDateSeparator,
                     // Album support

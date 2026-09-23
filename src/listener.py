@@ -39,6 +39,7 @@ from .db import DatabaseAdapter, create_adapter
 from .message_utils import (
     compute_file_hash,
     download_and_shard_media,
+    extract_extended_media_details,
     extract_topic_id,
     extract_webpage_preview,
     finalize_atomic_download,
@@ -992,6 +993,15 @@ class TelegramListener:
                 webpage_preview = extract_webpage_preview(message)
                 if webpage_preview:
                     message_data["raw_data"]["webpage"] = webpage_preview
+
+                # Venue, dice, invoice, story, giveaway and the rest of the
+                # metadata-only kinds (#401), same shape as the backfill writer:
+                # nothing to download, but without this the message arrives with
+                # no text and no media and renders as an empty bubble.
+                extended_media = extract_extended_media_details(message.media)
+                if extended_media is not None:
+                    extended_kind, extended_details = extended_media
+                    message_data["raw_data"][extended_kind] = extended_details
 
                 # v6.0.0: Detect media type for logging (download happens after message insert)
                 media_type = None
