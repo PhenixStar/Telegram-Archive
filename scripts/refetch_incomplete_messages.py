@@ -78,14 +78,21 @@ PROGRESS_KEY = "refetch_progress:{mode}"
 # while selecting targets so the repair can clear the file before re-downloading.
 EMPTY_FILE_PATHS: dict[tuple[int, int], str] = {}
 
+# A message is "blank" only when nothing at all renders for it: no text, no media
+# row, and no raw_data payload the viewer draws something from. Service markers,
+# polls, link previews and the metadata-only media kinds all render, so a message
+# carrying one of those is already repaired and must not be fetched again — the
+# earlier version of this query kept selecting them, which would have re-fetched
+# the same rows on every run forever.
+_RENDERABLE_RAW_DATA_KEYS = ("service_type", "poll", "webpage", *sorted(METADATA_ONLY_MEDIA_TYPES))
 BLANK_MESSAGES_SQL = """
     SELECT g.chat_id, g.id
     FROM messages g
     WHERE (g.text IS NULL OR g.text = '')
       AND NOT EXISTS (SELECT 1 FROM media m WHERE m.chat_id = g.chat_id AND m.message_id = g.id)
-      AND (g.raw_data IS NULL OR g.raw_data NOT LIKE '%service_type%')
+      AND (g.raw_data IS NULL OR ({renderable}))
     ORDER BY g.chat_id, g.id
-"""
+""".format(renderable=" AND ".join(f"g.raw_data NOT LIKE '%\"{key}\"%'" for key in _RENDERABLE_RAW_DATA_KEYS))
 
 DOWNLOADED_MEDIA_SQL = """
     SELECT chat_id, message_id, file_path, type
@@ -243,14 +250,23 @@ async def run(args: argparse.Namespace) -> int:
         return 0
 
     progress_key = PROGRESS_KEY.format(mode=args.mode)
-    done_before = 0
+    # Resume by the last chat id finished, not by a position in the list: the
+    # target set shrinks as rows are repaired, so an index would point somewhere
+    # different on every run and silently skip chats.
+    last_done: int | None = None
     if not args.restart:
         raw = await db.get_metadata(progress_key)
-        done_before = int(raw) if raw and raw.isdigit() else 0
-        if done_before:
-            logger.info("Resuming: %d chat(s) already processed (use --restart to start over)", done_before)
+        if raw:
+            try:
+                last_done = int(raw)
+            except ValueError:
+                last_done = None
+        if last_done is not None:
+            logger.info("Resuming after chat %s (use --restart to start over)", last_done)
 
-    chat_ids = sorted(targets)[done_before:]
+    chat_ids = sorted(targets)
+    if last_done is not None:
+        chat_ids = [cid for cid in chat_ids if cid > last_done]
     if args.max_chats:
         chat_ids = chat_ids[: args.max_chats]
 
@@ -269,7 +285,6 @@ async def run(args: argparse.Namespace) -> int:
     backup = TelegramBackup(config, db, client=client)
     repaired_total = 0
     unavailable_total = 0
-    processed_chats = done_before
 
     try:
         for index, chat_id in enumerate(chat_ids, start=1):
@@ -290,8 +305,7 @@ async def run(args: argparse.Namespace) -> int:
                     index, len(chat_ids), chat_id, repaired, unavailable,
                 )
 
-            processed_chats += 1
-            await db.set_metadata(progress_key, str(processed_chats))
+            await db.set_metadata(progress_key, str(chat_id))
     finally:
         await client.disconnect()
 

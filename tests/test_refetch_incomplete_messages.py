@@ -187,3 +187,19 @@ class TestClearEmptyFile:
 
     def test_a_missing_file_is_not_an_error(self, media_root):
         refetch._clear_empty_file("/data/backups/media/126/gone.jpg", str(media_root))
+
+
+class TestBlankSelectionExcludesRepairedRows:
+    """A message that now renders something is repaired, even if it still has no
+    text and no media row. Selecting it again would re-fetch the same rows on
+    every run, forever."""
+
+    def test_every_renderable_payload_is_excluded(self):
+        for key in ("service_type", "poll", "webpage", "geo_live", "venue", "dice", "story"):
+            assert f"""g.raw_data NOT LIKE '%"{key}"%'""" in refetch.BLANK_MESSAGES_SQL
+
+    def test_quoted_key_match_does_not_catch_a_message_mentioning_the_word(self):
+        # The patterns match the JSON key with its quotes, so a message whose text
+        # happens to contain "poll" is not mistaken for a poll payload.
+        assert """'%"poll"%'""" in refetch.BLANK_MESSAGES_SQL
+        assert """'%poll%'""" not in refetch.BLANK_MESSAGES_SQL
