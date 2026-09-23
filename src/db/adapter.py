@@ -156,8 +156,14 @@ class DatabaseAdapter(
 
     # ========== Metadata Operations ==========
 
+    @retry_on_locked()
     async def set_metadata(self, key: str, value: str) -> None:
-        """Set a metadata key-value pair."""
+        """Set a metadata key-value pair.
+
+        Retried on a locked database like every other write here: the backup now
+        stores its skip records through this, and a lost write there means the
+        cursor moves past a message nothing will look at again.
+        """
         async with self.db_manager.async_session_factory() as session:
             # Use upsert
             if self._is_sqlite:
@@ -169,6 +175,7 @@ class DatabaseAdapter(
             await session.execute(stmt)
             await session.commit()
 
+    @retry_on_locked()
     async def get_metadata(self, key: str) -> str | None:
         """Get a metadata value by key."""
         async with self.db_manager.async_session_factory() as session:

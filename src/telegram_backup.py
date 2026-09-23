@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from telethon import TelegramClient
 from telethon.errors import (
+    AuthKeyError,
     ChannelPrivateError,
     ChatForbiddenError,
     ChatIdInvalidError,
@@ -20,7 +21,9 @@ from telethon.errors import (
     FloodWaitError,
     PeerIdInvalidError,
     RPCError,
+    UnauthorizedError,
     UserBannedInChannelError,
+    UserDeactivatedError,
 )
 from telethon.tl.types import (
     Channel,
@@ -47,6 +50,13 @@ from .telegram_stall_guard import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A message that fails extraction is retried on later runs, but not forever: after
+# this many attempts its record is kept as a permanent marker so a genuinely
+# unreadable message stops costing an API call every run.
+_MAX_SKIP_ATTEMPTS = 3
+# One batched get_messages call per chat per run is enough to recover skips.
+_MAX_SKIP_RETRY_BATCH = 100
 
 
 class TelegramUnreachableError(ConnectionError):
@@ -1189,11 +1199,16 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         failed += 1
                         continue
 
+                    backup_path = None
                     try:
-                        # Delete corrupted file if exists
+                        # Move the suspect file aside rather than deleting it: the
+                        # re-download can still fail, and a partially readable file
+                        # is better than none. It is removed once a replacement is
+                        # safely on disk.
                         file_path = record.get("file_path")
                         if file_path and os.path.exists(file_path):
-                            os.remove(file_path)
+                            backup_path = f"{file_path}.verify-bak"
+                            os.replace(file_path, backup_path)
 
                         # Re-download using existing method
                         result = await self._process_media(msg, chat_id)
@@ -1202,12 +1217,16 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                             await self.db.insert_media(result)
                             redownloaded += 1
                             logger.debug(f"Re-downloaded media for message {msg_id}")
+                            if backup_path and os.path.exists(backup_path):
+                                os.remove(backup_path)
                         else:
                             failed += 1
                             logger.warning(f"Failed to re-download media for message {msg_id}")
+                            self._restore_verify_backup(backup_path, file_path)
                     except Exception as e:
                         failed += 1
                         logger.error(f"Error re-downloading media for message {msg_id}: {e}")
+                        self._restore_verify_backup(backup_path, record.get("file_path"))
 
             except Exception as e:
                 logger.error(f"Error processing chat {chat_id} for media verification: {e}")
@@ -1218,6 +1237,23 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         logger.info(f"Re-downloaded: {redownloaded} files")
         logger.info(f"Failed/Unrecoverable: {failed} files")
         logger.info("=" * 60)
+
+    @staticmethod
+    def _restore_verify_backup(backup_path: str | None, file_path: str | None) -> None:
+        """Put a set-aside file back when its re-download did not produce a replacement."""
+        if not backup_path or not file_path or not os.path.exists(backup_path):
+            return
+        if os.path.exists(file_path):
+            # A replacement did land, so the set-aside copy is redundant.
+            try:
+                os.remove(backup_path)
+            except OSError:
+                pass
+            return
+        try:
+            os.replace(backup_path, file_path)
+        except OSError as e:
+            logger.warning("Could not restore %s after a failed re-download: %s", file_path, e)
 
     async def _backup_dialog(self, dialog, is_archived: bool = False) -> int:
         """
@@ -1267,9 +1303,26 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         # Get last synced message ID for incremental backup
         last_message_id = await self.db.get_last_message_id(chat_id)
 
-        # Phase 3: Reverse-first fetch — newest messages first so they appear
-        # in the viewer immediately. Stop when we reach already-synced messages.
-        # On initial backup (last_message_id == 0), use forward order for efficiency.
+        # Messages an earlier run had to skip sit behind the cursor, so the sweep
+        # below will never see them again. Retry them first.
+        try:
+            await self._retry_skipped_messages(chat_id, entity)
+        except (FloodWaitError, FloodPremiumWaitError, ConnectionError, TimeoutError):
+            raise
+        except Exception as e:
+            logger.warning(f"Could not retry previously skipped messages for chat {chat_id}: {e}")
+
+        # Fetch oldest-first from just after the last synced message, for both the
+        # initial and the incremental run.
+        #
+        # This used to walk newest-first on the incremental path and break at the
+        # cursor. That made `running_max_id` the newest id in the chat from the very
+        # first message, so a mid-run checkpoint wrote a cursor ahead of everything
+        # the run had not committed yet: if the run then died, every message between
+        # the old cursor and the oldest committed batch was skipped forever, and
+        # gap-fill only notices holes larger than GAP_THRESHOLD. Ascending order
+        # makes the same checkpoint value a true monotonic cursor — it can only name
+        # messages already written — and it lets an aborted run keep its progress.
         batch_data: list[dict] = []
         batch_size = self.config.batch_size
         checkpoint_interval = self.config.checkpoint_interval
@@ -1277,51 +1330,42 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         uncheckpointed_count = 0
         batches_since_checkpoint = 0
         running_max_id = last_message_id
+        skipped_ids: list[int] = []
 
-        if last_message_id > 0:
-            # Incremental: fetch newest first, stop at last synced
-            async for message in iter_with_stall_timeout(self.client.iter_messages(entity)):
-                if message.id <= last_message_id:
-                    break
-                msg_data = await self._process_message(message, chat_id)
-                batch_data.append(msg_data)
+        async for message in iter_messages_with_flood_retry(
+            self.client, entity, min_id=last_message_id, reverse=True
+        ):
+            msg_data = await self._process_message_isolated(message, chat_id)
+            if msg_data is None:
+                # One unreadable message must not cost the rest of the chat. Record
+                # it for a retry next run and keep going; the cursor may still pass
+                # it, because the skip is durable.
+                skipped_ids.append(message.id)
                 running_max_id = max(running_max_id, message.id)
+                continue
+            batch_data.append(msg_data)
+            running_max_id = max(running_max_id, message.id)
 
-                if len(batch_data) >= batch_size:
-                    await self._commit_batch(batch_data, chat_id)
-                    count = len(batch_data)
-                    grand_total += count
-                    uncheckpointed_count += count
-                    batches_since_checkpoint += 1
-                    logger.info(f"  → Processed {grand_total} messages...")
-                    # Checkpoint sync_status every checkpoint_interval batches so a
-                    # crash only re-fetches since the last checkpoint, not the whole chat.
-                    if batches_since_checkpoint >= checkpoint_interval:
-                        await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
-                        uncheckpointed_count = 0
-                        batches_since_checkpoint = 0
-                    batch_data = []
-        else:
-            # Initial backup: forward order (old→new) for completeness
-            async for message in iter_messages_with_flood_retry(self.client, entity, min_id=0, reverse=True):
-                msg_data = await self._process_message(message, chat_id)
-                batch_data.append(msg_data)
-                running_max_id = max(running_max_id, message.id)
-
-                if len(batch_data) >= batch_size:
-                    await self._commit_batch(batch_data, chat_id)
-                    count = len(batch_data)
-                    grand_total += count
-                    uncheckpointed_count += count
-                    batches_since_checkpoint += 1
-                    logger.info(f"  → Processed {grand_total} messages...")
-                    # Checkpoint sync_status every checkpoint_interval batches so a
-                    # crash only re-fetches since the last checkpoint, not the whole chat.
-                    if batches_since_checkpoint >= checkpoint_interval:
-                        await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
-                        uncheckpointed_count = 0
-                        batches_since_checkpoint = 0
-                    batch_data = []
+            if len(batch_data) >= batch_size:
+                await self._commit_batch(batch_data, chat_id)
+                count = len(batch_data)
+                grand_total += count
+                uncheckpointed_count += count
+                batches_since_checkpoint += 1
+                logger.info(f"  → Processed {grand_total} messages...")
+                # Checkpoint sync_status every checkpoint_interval batches so a
+                # crash only re-fetches since the last checkpoint, not the whole chat.
+                if batches_since_checkpoint >= checkpoint_interval:
+                    # Persist the skips first: the cursor must never move past a
+                    # message whose skip record did not make it to disk, or that
+                    # message is lost silently. A failed write aborts the dialog,
+                    # leaving the cursor where it was, so the next run re-reads it.
+                    await self._persist_skipped_messages(chat_id, skipped_ids)
+                    skipped_ids = []
+                    await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
+                    uncheckpointed_count = 0
+                    batches_since_checkpoint = 0
+                batch_data = []
 
         # Flush remaining messages
         if batch_data:
@@ -1331,7 +1375,9 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             uncheckpointed_count += count
 
         # Final checkpoint: persist remaining un-checkpointed messages, or a
-        # cursor that advanced without persisting new messages.
+        # cursor that advanced without persisting new messages. Skips go first,
+        # for the same reason as at the mid-run checkpoint.
+        await self._persist_skipped_messages(chat_id, skipped_ids)
         if uncheckpointed_count > 0 or (grand_total == 0 and running_max_id > last_message_id):
             await self.db.update_sync_status(chat_id, running_max_id, uncheckpointed_count)
 
@@ -1343,6 +1389,110 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         await self._sync_pinned_messages(chat_id, entity)
 
         return grand_total
+
+    async def _process_message_isolated(self, message, chat_id: int) -> dict | None:
+        """Extract one message, returning None when only that message failed.
+
+        A single unreadable message used to abort the whole dialog and discard the
+        batch it was in. Most failures are specific to one message — a malformed
+        document, an expired media reference, an oddly shaped service action — so
+        they are contained here. Failures that say something about the run rather
+        than the message are re-raised, because continuing past them would either
+        hammer Telegram or quietly skip healthy messages:
+
+        - flood waits and connection loss: the next messages would fail the same way;
+        - auth failures: the session is gone, nothing further will succeed;
+        - stall-guard timeouts and cancellation: the guard is deliberately stopping us.
+        """
+        try:
+            return await self._process_message(message, chat_id)
+        except (
+            FloodWaitError,
+            FloodPremiumWaitError,
+            AuthKeyError,
+            UnauthorizedError,
+            UserDeactivatedError,
+            ConnectionError,
+            TimeoutError,
+            asyncio.CancelledError,
+        ):
+            raise
+        except Exception as e:
+            logger.warning(
+                "Skipping message %s in chat %s after an extraction error: %s", message.id, chat_id, e
+            )
+            return None
+
+    async def _persist_skipped_messages(self, chat_id: int, skipped_ids: list[int]) -> None:
+        """Record messages this run could not extract, so the next run can retry them.
+
+        Stored in the metadata key-value table rather than a new column, so this
+        needs no migration. Each id carries an attempt count; after
+        ``_MAX_SKIP_ATTEMPTS`` it is left in place as a permanent marker instead of
+        being retried forever.
+        """
+        if not skipped_ids:
+            return
+        key = f"skipped_messages:{chat_id}"
+        raw = await self.db.get_metadata(key)
+        try:
+            skips: dict[str, int] = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            skips = {}
+        for message_id in skipped_ids:
+            skips[str(message_id)] = min(skips.get(str(message_id), 0) + 1, _MAX_SKIP_ATTEMPTS)
+        await self.db.set_metadata(key, json.dumps(skips))
+        logger.warning(
+            "Recorded %d message(s) skipped in chat %s for retry on the next run", len(skipped_ids), chat_id
+        )
+
+    async def _retry_skipped_messages(self, chat_id: int, entity) -> int:
+        """Re-fetch messages an earlier run had to skip. Returns how many were recovered.
+
+        The cursor has already moved past these ids, so they are invisible to the
+        normal sweep and gap-fill only sees holes larger than its threshold.
+        """
+        key = f"skipped_messages:{chat_id}"
+        raw = await self.db.get_metadata(key)
+        if not raw:
+            return 0
+        try:
+            skips: dict[str, int] = json.loads(raw)
+        except (TypeError, ValueError):
+            return 0
+
+        pending = [int(mid) for mid, attempts in skips.items() if attempts < _MAX_SKIP_ATTEMPTS]
+        if not pending:
+            return 0
+
+        batch = pending[:_MAX_SKIP_RETRY_BATCH]
+        messages = await call_with_flood_retry(self.client.get_messages, entity, ids=batch)
+        # Pair by id, never by position: Telegram omits ids it will not return
+        # rather than leaving a None slot, so a positional pairing would process one
+        # message's content under another's id and drop the omitted one for good —
+        # exactly the loss these records exist to prevent.
+        by_id = {message.id: message for message in (messages or []) if message is not None}
+
+        recovered: list[dict] = []
+        for message_id in batch:
+            message = by_id.get(message_id)
+            if message is None:
+                # Omitted, deleted upstream, or still unavailable. Count it rather
+                # than condemning it immediately; the attempt bound ends it.
+                skips[str(message_id)] = min(skips.get(str(message_id), 0) + 1, _MAX_SKIP_ATTEMPTS)
+                continue
+            msg_data = await self._process_message_isolated(message, chat_id)
+            if msg_data is None:
+                skips[str(message_id)] = min(skips.get(str(message_id), 0) + 1, _MAX_SKIP_ATTEMPTS)
+                continue
+            recovered.append(msg_data)
+            skips.pop(str(message_id), None)
+
+        if recovered:
+            await self._commit_batch(recovered, chat_id)
+            logger.info("Recovered %d previously skipped message(s) in chat %s", len(recovered), chat_id)
+        await self.db.set_metadata(key, json.dumps(skips))
+        return len(recovered)
 
     async def _commit_batch(self, batch_data: list[dict], chat_id: int) -> None:
         """Persist a batch of processed messages, their media and reactions to the DB."""
