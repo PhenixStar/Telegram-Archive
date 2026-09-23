@@ -11,19 +11,17 @@
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <title>Telegram Archive</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-    <link rel="preconnect" href="https://unpkg.com">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.43/moment-timezone-with-data-1970-2030.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- All third-party assets below are vendored locally under /static/vendor/ (#342) —
+         nothing here loads from an external CDN at runtime. -->
+    <script src="/static/vendor/tailwind/tailwind.js"></script>
+    <script src="/static/vendor/vue/vue.global.prod.js"></script>
+    <script src="/static/vendor/moment/moment.min.js"></script>
+    <script src="/static/vendor/moment/moment-timezone-with-data-1970-2030.min.js"></script>
+    <link href="/static/vendor/fonts/inter/inter.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css">
     <!-- Flatpickr for date picker -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <link rel="stylesheet" href="/static/vendor/flatpickr/flatpickr.min.css">
+    <script src="/static/vendor/flatpickr/flatpickr.min.js"></script>
     <script>
         /* Apply saved theme before paint to prevent flash + set mobile viewport height */
         (function() {
@@ -1158,7 +1156,7 @@
                     </div>
 
                     <div class="relative mb-3">
-                        <input v-model="searchQuery" @input="onSearchInput" type="text" placeholder="Search all chats..."
+                        <input v-model="searchQuery" @input="onSearchInput" @paste="onSearchPaste" type="text" placeholder="Search all chats..."
                             class="w-full rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border"
                             style="background: color-mix(in srgb, var(--tg-sidebar) 85%, black); border-color: color-mix(in srgb, var(--tg-border) 65%, black); color: var(--tg-text);">
                         <svg class="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor"
@@ -5518,12 +5516,90 @@
                     }
                 }
                 
+                // #399: parse a pasted Telegram deep link (private "/c/<internal>/<msg>"
+                // or public "/<username>/<msg>", optionally with a forum topic segment in
+                // between) into a local chat id / username plus target message id. The
+                // internal-id -> marked-chat-id formula mirrors the one main.py already
+                // uses for DISPLAY_CHAT_IDS normalisation (-1000000000000 - internalId).
+                const parseTmeLink = (text) => {
+                    const trimmed = (text || '').trim()
+                    const priv = trimmed.match(/^(?:https?:\/\/)?(?:www\.)?t\.me\/c\/(\d+)\/(\d+)(?:\/(\d+))?\/?(?:\?.*)?$/i)
+                    if (priv) {
+                        const msgId = priv[3] ? parseInt(priv[3], 10) : parseInt(priv[2], 10)
+                        return { chatId: -1000000000000 - parseInt(priv[1], 10), msgId }
+                    }
+                    // "/s/<username>/<msg>" is Telegram's web-preview link form — same target,
+                    // optional "s/" prefix.
+                    const pub = trimmed.match(/^(?:https?:\/\/)?(?:www\.)?t\.me\/(?:s\/)?([A-Za-z0-9_]{5,32})\/(\d+)(?:\/(\d+))?\/?(?:\?.*)?$/i)
+                    if (pub) {
+                        const msgId = pub[3] ? parseInt(pub[3], 10) : parseInt(pub[2], 10)
+                        return { username: pub[1], msgId }
+                    }
+                    return null
+                }
+
+                // Resolve a parsed t.me link to a local chat and jump straight to the
+                // message via the same selectChat() context-mode path used by permalinks
+                // (?msg=) and global message-search results — no separate message engine.
+                const jumpToTmeLink = async (parsed) => {
+                    let chat = null
+                    try {
+                        if (parsed.chatId != null) {
+                            chat = chats.value.find(c => c.id === parsed.chatId)
+                            if (!chat) {
+                                const res = await fetch(`/api/chats/${parsed.chatId}`, { credentials: 'include' })
+                                if (res.ok) chat = await res.json()
+                            }
+                        } else if (parsed.username) {
+                            const uname = parsed.username.toLowerCase()
+                            chat = chats.value.find(c => (c.username || '').toLowerCase() === uname)
+                            if (!chat) {
+                                const res = await fetch(`/api/chats?search=${encodeURIComponent(parsed.username)}&limit=50`, { credentials: 'include' })
+                                if (res.ok) {
+                                    const data = await res.json()
+                                    chat = (data.chats || []).find(c => (c.username || '').toLowerCase() === uname)
+                                }
+                            }
+                        }
+                    } catch (e) { console.error('t.me link resolution failed:', e) }
+
+                    if (!chat) {
+                        showToast('Chat not found or access denied', 'error')
+                        return false
+                    }
+                    await selectChat(chat, Number.isFinite(parsed.msgId) ? { targetMsgId: parsed.msgId } : {})
+                    return true
+                }
+
+                // #399: pasting a t.me link into the search box jumps straight to the
+                // archived chat/message instead of running a text search on it. Checked
+                // only on paste (not on every keystroke) so typing out a link character by
+                // character doesn't jump mid-type and wipe the field.
+                const onSearchPaste = (e) => {
+                    const pasted = (e.clipboardData || window.clipboardData)?.getData('text') || ''
+                    const tmeLink = parseTmeLink(pasted)
+                    if (!tmeLink) return
+                    e.preventDefault()
+                    if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+                    searchResults.value = []
+                    globalMessageResults.value = []
+                    globalSearchTotal.value = 0
+                    searchLoading.value = true
+                    jumpToTmeLink(tmeLink).catch((e) => {
+                        console.error('t.me link jump failed:', e)
+                        showToast('Could not open that link', 'error')
+                    }).finally(() => {
+                        searchLoading.value = false
+                        searchQuery.value = ''
+                    })
+                }
+
                 // Server-side search with debounce
                 const onSearchInput = () => {
                     if (searchDebounceTimer) {
                         clearTimeout(searchDebounceTimer)
                     }
-                    
+
                     const query = searchQuery.value.trim().replace(/^@/, '')
 
                     if (!query) {
@@ -9799,6 +9875,7 @@
                     searchResults,
                     searchLoading,
                     onSearchInput,
+                    onSearchPaste,
                     globalMessageResults,
                     navigateToMessage,
                     // Loading states

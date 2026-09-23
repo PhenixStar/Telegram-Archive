@@ -4,6 +4,53 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Fork port wave 1] - 2026-09-23
+
+Viewer-side batch of a semantic back-port from upstream v8.x (upstream is on the
+v8 multi-account rewrite, which is deliberately not adopted here). Capture-side
+items follow in a second wave.
+
+### Fixed
+- **Media from a moved archive is served again** — about 29% of media rows store
+  paths under a root the archive no longer lives at, and the gallery silently
+  dropped them even though every file was present. Stored paths are now
+  re-anchored on the current media root when they are read, with no database
+  rewrite (upstream #436).
+- **Per-chat media access control** — the media and thumbnail routes parsed the
+  chat id from the raw request path and ignored a parse failure, so a path whose
+  first component was not a chat id skipped the check while still resolving into
+  a real chat folder. A restricted share-token viewer could therefore read other
+  chats' media. The traversal check now runs first and the check applies to the
+  path that is actually read (upstream #290).
+- **Thumbnail decode memory and atomicity** — a source is refused above a pixel
+  cap measured on its declared size (so a progressive JPEG cannot slip past),
+  ffmpeg gets the same cap, thumbnails are written atomically instead of being
+  streamed into the cache path, and a failed video thumbnail is remembered
+  briefly instead of re-running ffmpeg on every request (upstream #287, #450).
+- **Share-token login no longer stalls the viewer** — token verification ran
+  600k PBKDF2 rounds per stored token on the event loop; it now hashes in a
+  thread (upstream #324).
+- **Web push cannot freeze the viewer** — sends ran synchronously with no
+  timeout on the event loop, so one unreachable endpoint blocked every other
+  request. They now run off-loop with a timeout and bounded concurrency
+  (upstream #287).
+
+### Added
+- **Per-socket subscription cap** alongside the existing global and per-IP
+  connection caps (upstream #341).
+- **Pasting a t.me link jumps to the archived message** — private, public and
+  preview link forms are recognised in the search field and resolve through the
+  existing chat-selection path (upstream #399). Per-message "Copy Link" and
+  `?msg=` permalinks already existed.
+
+### Changed
+- **Front-end assets are vendored** — Vue, Tailwind's JIT runtime, moment and
+  moment-timezone, Font Awesome, flatpickr and the Inter webfont are served from
+  `/static/vendor` instead of five public CDNs, and the Content-Security-Policy
+  no longer allow-lists any external origin. The viewer is internet-exposed, so
+  this removes both a third-party script-execution path and the viewer-IP leak
+  (upstream #342).
+
 ## [Fork port] - 2026-08-03
 
 Semantic back-port of a batch of upstream (GeiserX/Telegram-Archive, up to v7.33.4)

@@ -538,14 +538,21 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Every front-end asset is now vendored under /static/vendor, so no external
+    # origin is allow-listed: a compromised CDN can no longer run script in a
+    # viewer session, and no viewer IP leaks to one. 'unsafe-eval' stays because
+    # the page ships the full Vue build, which compiles its in-DOM template with
+    # new Function at runtime, as does Tailwind's browser JIT. 'unsafe-inline'
+    # stays for the page's own inline script and style blocks, which cannot move
+    # out without splitting index.html.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
         "media-src 'self' blob:; "
         "connect-src 'self' ws: wss:; "
-        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com"
+        "font-src 'self'"
     )
     return response
 
