@@ -17,6 +17,15 @@ logger = logging.getLogger(__name__)
 # Audio types that Whisper can handle
 SUPPORTED_EXTENSIONS = {".ogg", ".mp3", ".wav", ".m4a", ".flac", ".opus", ".webm"}
 
+# The pending query selects every voice note whose ocr_text is still NULL, newest
+# first, so a note that can never be transcribed — a zero-byte download, or audio
+# the service rejects outright — stays at the head of the batch and is re-sent on
+# every poll forever. Mirrors the OCR worker: count failures, and after a few give
+# the row a sentinel so the queue moves on. A transient outage still retries,
+# because the count is in memory and resets when the worker restarts.
+_TRANSCRIPTION_FAILED_SENTINEL = "[transcription_failed]"
+_MAX_TRANSCRIPTION_ATTEMPTS = 3
+
 
 class TranscriptionWorker:
     """Async background worker that transcribes voice notes via Whisper."""
@@ -26,6 +35,7 @@ class TranscriptionWorker:
         self.config = config
         self._task: asyncio.Task | None = None
         self._running = False
+        self._failure_counts: dict[tuple[int, int], int] = {}
 
     async def start(self):
         """Start the background worker loop."""
@@ -111,15 +121,34 @@ class TranscriptionWorker:
             abs_path = os.path.join(self.config.backup_path, rel)
         return abs_path if os.path.exists(abs_path) else None
 
+    async def _mark_failed(self, item: dict, reason: str) -> None:
+        """Count a failure and, once it is clearly permanent, stop re-queuing the row."""
+        key = (item["chat_id"], item["message_id"])
+        self._failure_counts[key] = self._failure_counts.get(key, 0) + 1
+        if self._failure_counts[key] >= _MAX_TRANSCRIPTION_ATTEMPTS:
+            await self.db.update_ocr_text(item["chat_id"], item["message_id"], _TRANSCRIPTION_FAILED_SENTINEL)
+            self._failure_counts.pop(key, None)
+            logger.info(
+                "Transcription: marked as failed after %d attempts (%s): chat=%s msg=%s",
+                _MAX_TRANSCRIPTION_ATTEMPTS, reason, key[0], key[1],
+            )
+
     async def _process_one(self, client: httpx.AsyncClient, item: dict, api_url: str) -> bool:
         """Transcribe a single voice note. Returns True on success."""
         abs_path = self._resolve_path(item["file_path"])
         if not abs_path:
+            await self._mark_failed(item, "file missing")
             return False
 
         # Verify it's an audio file
         ext = os.path.splitext(abs_path)[1].lower()
         if ext not in SUPPORTED_EXTENSIONS:
+            return False
+
+        # An interrupted download can leave a zero-byte file that the DB still
+        # reports as complete; the service can only answer 400 to it.
+        if os.path.getsize(abs_path) == 0:
+            await self._mark_failed(item, "empty file")
             return False
 
         try:
@@ -129,6 +158,11 @@ class TranscriptionWorker:
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
             logger.warning(f"Transcription API error ({api_url}): {e}")
+            # 4xx means this audio will be rejected again no matter how often it
+            # is retried; 429 and 5xx are worth retrying, so leave them alone.
+            status = e.response.status_code if e.response is not None else 0
+            if 400 <= status < 500 and status != 429:
+                await self._mark_failed(item, f"HTTP {status}")
             return False
         except Exception as e:
             logger.warning(f"Transcription request failed: {e}")

@@ -78,6 +78,16 @@ def _newer_edit_date(current: datetime | None, incoming: datetime | None) -> boo
 
 logger = logging.getLogger(__name__)
 
+# The OCR and transcription workers park a sentinel in ocr_text so a row they can
+# never process stops coming back in the pending queue. It is bookkeeping, not a
+# result, so the viewer must not render it as one.
+_OCR_FAILURE_SENTINELS = frozenset({"[ocr_failed]", "[transcription_failed]"})
+
+
+def _visible_ocr_text(value: str | None) -> str | None:
+    """Return ocr_text for display, hiding the workers' failure sentinels."""
+    return None if value in _OCR_FAILURE_SENTINELS else value
+
 
 class MessageMixin:
     """Mixin providing message CRUD and query operations.
@@ -1035,7 +1045,7 @@ class MessageMixin:
             "is_deleted": int(is_deleted),
             "deleted_at": deleted_at,
             "ai_comment": message.ai_comment,
-            "ocr_text": message.ocr_text,
+            "ocr_text": _visible_ocr_text(message.ocr_text),
         }
 
     def _message_version_to_dict(self, row: MessageVersion) -> dict[str, Any]:
