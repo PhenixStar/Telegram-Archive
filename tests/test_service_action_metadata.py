@@ -45,6 +45,7 @@ def _mock_message(**overrides):
         action=None,
         fwd_from=None,
         post_author=None,
+        entities=None,
     )
     base.update(overrides)
     return SimpleNamespace(**base)

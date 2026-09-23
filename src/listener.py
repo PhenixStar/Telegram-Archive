@@ -40,6 +40,7 @@ from .message_utils import (
     compute_file_hash,
     download_and_shard_media,
     extract_topic_id,
+    extract_webpage_preview,
     finalize_atomic_download,
     sanitize_media_filename,
     sender_display_name,
@@ -391,9 +392,12 @@ class TelegramListener:
             self._tracked_chat_ids |= self._followed_live
             logger.info(f"Tracking {len(self._tracked_chat_ids)} chats for real-time updates")
         except Exception as e:
-            logger.warning(f"Could not load tracked chats: {e}")
-            self._tracked_chat_ids = set()
-            self._followed_live = set()
+            # Keep the last good set (#339): the scheduler reloads this after
+            # every backup, so blanking it on a transient SQLite lock blip
+            # would make the listener archive nothing until the next reload.
+            logger.warning(
+                f"Could not reload tracked chats, keeping {len(self._tracked_chat_ids)} previously tracked: {e}"
+            )
 
     async def _load_followed_migration_ids(self) -> set[int]:
         """Read adopted-supergroup ids from the metadata KV (#228).
@@ -981,6 +985,13 @@ class TelegramListener:
                 # Capture grouped_id for album detection (multiple photos/videos sent together)
                 if message.grouped_id:
                     message_data["raw_data"]["grouped_id"] = str(message.grouped_id)
+
+                # Link-preview cards (#323), same shape as the backfill writer
+                # in backup_extraction.py — pure metadata already resolved by
+                # Telegram, no extra download or API call needed.
+                webpage_preview = extract_webpage_preview(message)
+                if webpage_preview:
+                    message_data["raw_data"]["webpage"] = webpage_preview
 
                 # v6.0.0: Detect media type for logging (download happens after message insert)
                 media_type = None

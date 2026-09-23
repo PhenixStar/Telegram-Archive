@@ -13,12 +13,13 @@ from telethon.tl.types import (
     MessageMediaPoll,
     PeerChannel,
     PeerChat,
+    PeerUser,
     TextWithEntities,
     User,
 )
 from telethon.utils import get_peer_id
 
-from .message_utils import sender_display_name
+from .message_utils import extract_webpage_preview, sender_display_name
 from .telegram_stall_guard import TELEGRAM_CALL_TIMEOUT_SECONDS, with_call_timeout
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,25 @@ def _service_action_type(action: object) -> str:
     """
     name = type(action).__name__.removeprefix("MessageAction")
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+# Two Telethon class names do not snake_case into the name the stored format uses.
+# The stored vocabulary follows Telegram's own Bot API names, which is what the
+# viewer renders against: MessageEntityStrike is "strikethrough" there, and a
+# mention by user id is displayed exactly like a plain mention.
+_ENTITY_TYPE_ALIASES = {"strike": "strikethrough", "mention_name": "mention"}
+
+
+def _entity_type(entity: object) -> str:
+    """Normalize a Telethon ``MessageEntity`` class name to the stored type (#402).
+
+    ``MessageEntityTextUrl`` -> ``"text_url"``, ``MessageEntityBold`` ->
+    ``"bold"`` — mirrors ``_service_action_type`` above, then applies the
+    aliases above so the stored name matches what the viewer renders.
+    """
+    name = type(entity).__name__.removeprefix("MessageEntity")
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    return _ENTITY_TYPE_ALIASES.get(snake, snake)
 
 
 class BackupExtractionMixin:
@@ -74,6 +94,150 @@ class BackupExtractionMixin:
             return peer.chat_id
 
         return None
+
+    def _extract_fwd_from(self, message: Message) -> dict | None:
+        """Build the raw_data.fwd_from provenance dict for a forward (#400).
+
+        Structural fields read straight off ``message.fwd_from`` — unlike the
+        ``forward_from_name`` resolution done by ``_resolve_forward_source_name``,
+        none of this costs an API call. Keys absent on this particular forward
+        are omitted rather than stored as null, per the wave-2 capture contract.
+        """
+        fwd = message.fwd_from
+        data: dict[str, object] = {}
+
+        from_id = self._extract_forward_from_id(message)
+        if from_id is not None:
+            data["from_id"] = from_id
+        if fwd.from_name:
+            data["from_name"] = fwd.from_name
+        if fwd.channel_post is not None:
+            data["channel_post"] = fwd.channel_post
+        if fwd.post_author:
+            data["post_author"] = fwd.post_author
+        if fwd.date is not None:
+            data["date"] = fwd.date.isoformat()
+        saved_from_peer = getattr(fwd, "saved_from_peer", None)
+        if saved_from_peer is not None:
+            try:
+                data["saved_from_peer"] = get_peer_id(saved_from_peer)
+            except (TypeError, ValueError):
+                pass
+
+        return data or None
+
+    async def _resolve_forward_source_name(self, message: Message) -> str | None:
+        """Resolve a forward's source display name with minimal API cost (#383).
+
+        Order: the message's own ``from_name`` (set for hidden/deleted
+        accounts, no lookup needed) -> our local users/chats tables -> at
+        most one ``get_entity`` call per distinct source for the lifetime of
+        this backup run. A source that can't be resolved is remembered in a
+        negative cache, so a forward-heavy channel doesn't retry the same
+        failing (and FloodWait-risky) lookup on every message.
+        """
+        fwd = message.fwd_from
+        if fwd.from_name:
+            return fwd.from_name
+        peer = fwd.from_id
+        if peer is None:
+            return None
+
+        # Lazily attached per-run caches: TelegramBackup is instantiated once
+        # per backup_all()/fill_gaps() run (see connection.py's run_backup),
+        # so plain instance attributes are already scoped to "this run"
+        # without needing a constructor change in the file the lead owns.
+        if not hasattr(self, "_fwd_source_name_cache"):
+            self._fwd_source_name_cache: dict[int, str] = {}
+            self._fwd_source_unresolved: set[int] = set()
+
+        try:
+            marked_id = get_peer_id(peer)
+        except (TypeError, ValueError):
+            return None
+
+        if marked_id in self._fwd_source_name_cache:
+            return self._fwd_source_name_cache[marked_id]
+        if marked_id in self._fwd_source_unresolved:
+            return None
+
+        name = await self._lookup_forward_source_locally(peer)
+        if name is None:
+            name = await self._lookup_forward_source_via_api(peer)
+
+        if name:
+            self._fwd_source_name_cache[marked_id] = name
+        else:
+            self._fwd_source_unresolved.add(marked_id)
+        return name
+
+    async def _lookup_forward_source_locally(self, peer) -> str | None:
+        """Look up a forward source's name in our own users/chats tables.
+
+        Costs a local DB read, not a Telegram API call, so it's safe to try
+        for every distinct source instead of budgeting it like get_entity.
+        Neither lookup carries ``@retry_on_locked``, and unlike the previous
+        code (whose only I/O here was a `get_entity` wrapped in `except
+        Exception: pass`), a raised error must not escape into
+        `_process_message` — that would abort the whole dialog per the wave-2
+        isolation design note, over a lookup that's meant to be an
+        optimization, not a hard dependency. A DB error here just means "try
+        the API instead," same as "not found locally."
+        """
+        try:
+            if isinstance(peer, PeerUser):
+                user = await self.db.get_user_by_id(peer.user_id)
+                if not user:
+                    return None
+                name = " ".join(part for part in (user.get("first_name"), user.get("last_name")) if part)
+                return name.strip() or user.get("username") or None
+            if isinstance(peer, (PeerChannel, PeerChat)):
+                chat = await self.db.get_chat_by_id(get_peer_id(peer))
+                if not chat:
+                    return None
+                return chat.get("title") or chat.get("username") or None
+        except Exception as e:
+            logger.debug(f"Local forward-source lookup failed, falling back to API: {type(e).__name__}: {e}")
+            return None
+        return None
+
+    async def _lookup_forward_source_via_api(self, peer) -> str | None:
+        """Resolve a forward source's name via a single Telegram API call.
+
+        Only reached once per distinct source per run (see
+        ``_resolve_forward_source_name``'s caches).
+        """
+        try:
+            entity = await with_call_timeout(self.client.get_entity(peer), TELEGRAM_CALL_TIMEOUT_SECONDS)
+        except Exception:
+            # Can't resolve - will fall back to ID in viewer
+            return None
+        if hasattr(entity, "title"):
+            return entity.title
+        if hasattr(entity, "first_name"):
+            name = entity.first_name or ""
+            if entity.last_name:
+                name += " " + entity.last_name
+            return name.strip() or None
+        return None
+
+    def _extract_entity(self, entity: object) -> dict:
+        """Convert one Telethon ``MessageEntity`` to the raw_data.entities shape (#402)."""
+        data: dict[str, object] = {
+            "type": _entity_type(entity),
+            "offset": entity.offset,
+            "length": entity.length,
+        }
+        url = getattr(entity, "url", None)
+        if url:
+            data["url"] = url
+        user_id = getattr(entity, "user_id", None)
+        if user_id is not None:
+            data["user_id"] = user_id
+        language = getattr(entity, "language", None)
+        if language:
+            data["language"] = language
+        return data
 
     def _text_with_entities_to_string(self, text_obj) -> str:
         """
@@ -169,43 +333,53 @@ class BackupExtractionMixin:
         if message.grouped_id:
             message_data["raw_data"]["grouped_id"] = str(message.grouped_id)
 
-        # Capture forwarded message info (name of original sender)
+        # Capture forwarded message info: sender name (#383 cache, minimizes
+        # FloodWait-risky get_entity calls) plus raw provenance (#400).
         if message.fwd_from:
-            fwd = message.fwd_from
-            # fwd_from.from_name is set when forwarding from hidden users or deleted accounts
-            if fwd.from_name:
-                message_data["raw_data"]["forward_from_name"] = fwd.from_name
-            elif fwd.from_id:
-                # Try to resolve the name from the entity
-                try:
-                    fwd_entity = await with_call_timeout(
-                        self.client.get_entity(fwd.from_id), TELEGRAM_CALL_TIMEOUT_SECONDS
-                    )
-                    if hasattr(fwd_entity, "title"):
-                        message_data["raw_data"]["forward_from_name"] = fwd_entity.title
-                    elif hasattr(fwd_entity, "first_name"):
-                        name = fwd_entity.first_name or ""
-                        if fwd_entity.last_name:
-                            name += " " + fwd_entity.last_name
-                        message_data["raw_data"]["forward_from_name"] = name.strip()
-                except Exception:
-                    # Can't resolve - will fall back to ID in viewer
-                    pass
+            forward_name = await self._resolve_forward_source_name(message)
+            if forward_name:
+                message_data["raw_data"]["forward_from_name"] = forward_name
+            fwd_from_data = self._extract_fwd_from(message)
+            if fwd_from_data:
+                message_data["raw_data"]["fwd_from"] = fwd_from_data
 
         # Capture channel post author (signature) if available
         if hasattr(message, "post_author") and message.post_author:
             message_data["raw_data"]["post_author"] = message.post_author
 
-        # Get reply text if this is a reply
+        # Get quoted-reply excerpt if the sender selected specific text to
+        # quote (#362). ``message.reply_to`` is a ``MessageReplyHeader``,
+        # which has no ``.message`` attribute — the previous
+        # ``hasattr(reply_msg, "message")`` check could therefore never be
+        # true, and quote excerpts were silently dropped. A plain reply with
+        # no explicit quote leaves ``quote_text`` unset; Telegram does not
+        # backfill it with the full replied-to message text.
         if message.reply_to_msg_id and message.reply_to:
-            reply_msg = message.reply_to
-            if hasattr(reply_msg, "message"):
+            quote_text = getattr(message.reply_to, "quote_text", None)
+            if quote_text:
                 # Truncate to first 100 chars like Telegram does
-                reply_text = (reply_msg.message or "")[:100]
-                message_data["reply_to_text"] = reply_text
+                message_data["reply_to_text"] = quote_text[:100]
+
+        # Capture formatting entities (bold/italic/links/spoilers/code/etc.)
+        # for later rendering (#402). Entity offsets are UTF-16 code units
+        # into ``message.raw_text`` (the unmodified server text), NOT the
+        # markdown-rendered ``text`` column set above, so raw_text is stored
+        # alongside the entities rather than changing what ``text`` means.
+        if message.entities:
+            message_data["raw_data"]["raw_text"] = message.raw_text
+            message_data["raw_data"]["entities"] = [self._extract_entity(entity) for entity in message.entities]
 
         # Handle media
         if message.media:
+            # Link-preview cards (#323): pure metadata Telegram already
+            # resolved when the message was sent, so this always runs here
+            # regardless of the poll/download branch below. It's a no-op for
+            # any non-webpage media — _process_media/_get_media_type already
+            # treat MessageMediaWebPage as an unrecognized media type.
+            webpage_preview = extract_webpage_preview(message)
+            if webpage_preview:
+                message_data["raw_data"]["webpage"] = webpage_preview
+
             # Handle Polls specially (store structure in raw_data, do not download)
             # v6.0.0: Poll type is detected by presence of raw_data['poll']
             if isinstance(message.media, MessageMediaPoll):

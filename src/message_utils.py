@@ -389,6 +389,56 @@ async def download_and_shard_media(
     return shared_file_path, content_hash
 
 
+def extract_webpage_preview(message: object) -> dict | None:
+    """Extract a link-preview payload from a message's WebPage media (#323).
+
+    Telegram resolves link previews server-side and attaches the result to
+    the message as ``MessageMediaWebPage``; reading title/site_name/
+    description back off it costs nothing, unlike a photo/video attachment.
+    The preview's own photo is a Telegram-hosted ``Photo`` object, not a
+    fetchable URL, and downloading webpage-preview media is out of scope for
+    this port (see the port triage's #403 note: it needs this writer first),
+    so the returned dict never carries a ``photo`` key.
+
+    Returns None when the message has no webpage media, when Telegram is
+    still resolving or failed to resolve it (``WebPagePending``/
+    ``WebPageEmpty``), when there's nothing worth showing (no title and no
+    site name), or when the URL isn't http(s) — the viewer opens `.url` in a
+    new tab, so a `tg://`-or-other custom scheme here must not be treated as
+    clickable.
+    """
+    # Imported here rather than at module scope: this module also ships in the
+    # viewer image, whose Dockerfile states it is stdlib-only so the
+    # internet-facing container need not carry telethon. Only the capture side
+    # calls this function, so the import stays out of the viewer's path.
+    from telethon.tl.types import MessageMediaWebPage, WebPage
+
+    media = getattr(message, "media", None)
+    if not isinstance(media, MessageMediaWebPage):
+        return None
+    webpage = media.webpage
+    if not isinstance(webpage, WebPage):
+        return None
+
+    url = webpage.url
+    if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+        return None
+
+    title = webpage.title
+    site_name = webpage.site_name
+    if not title and not site_name:
+        return None
+
+    preview: dict[str, str] = {"url": url}
+    if site_name:
+        preview["site_name"] = site_name
+    if title:
+        preview["title"] = title
+    if webpage.description:
+        preview["description"] = webpage.description
+    return preview
+
+
 def extract_topic_id(message: object) -> int | None:
     """Extract forum topic ID from a Telegram message's reply_to metadata.
 

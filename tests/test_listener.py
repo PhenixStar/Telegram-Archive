@@ -70,6 +70,18 @@ class TestTelegramListener:
         assert listener._tracked_chat_ids == {-1001234567890, 123456789, -987654321}
         mock_db.get_all_chats.assert_called_once()
 
+    def test_load_tracked_chats_keeps_last_good_set_on_db_error(self, mock_config, mock_db):
+        """A transient DB error during reload must not blank tracked chats (#339)."""
+        listener = TelegramListener(mock_config, mock_db)
+        listener._tracked_chat_ids = {-1001234567890, 123456789}
+        listener._followed_live = {123456789}
+        mock_db.get_all_chats = AsyncMock(side_effect=RuntimeError("database is locked"))
+
+        asyncio.run(listener._load_tracked_chats())
+
+        assert listener._tracked_chat_ids == {-1001234567890, 123456789}
+        assert listener._followed_live == {123456789}
+
     def test_should_process_chat_tracked(self, mock_config, mock_db):
         """Test _should_process_chat returns True for tracked chats."""
         listener = TelegramListener(mock_config, mock_db)
@@ -397,6 +409,54 @@ class TestEventHandlers:
         assert listener.stats["new_messages_saved"] == 1
         listener.db.insert_message.assert_called_once()
         listener.db.upsert_chat.assert_called_once()
+
+    def test_on_new_message_captures_webpage_preview(self, listener_with_handlers, full_config):
+        """A message with a resolved link preview writes raw_data.webpage (#323)."""
+        from datetime import datetime
+
+        from telethon.tl.types import MessageMediaWebPage, WebPage
+
+        listener, handlers = listener_with_handlers
+        handler = handlers[events.NewMessage]
+
+        event = MagicMock()
+        event.chat_id = -1001234567890
+
+        webpage = WebPage(
+            id=1,
+            url="https://example.com/article",
+            display_url="example.com/article",
+            hash=0,
+            site_name="Example",
+            title="An Article",
+            description="Article summary",
+        )
+
+        msg = MagicMock()
+        msg.reply_to = None
+        msg.id = 42
+        msg.sender_id = 111
+        msg.date = datetime(2025, 1, 1, tzinfo=UTC)
+        msg.text = "https://example.com/article"
+        msg.reply_to_msg_id = None
+        msg.edit_date = None
+        msg.out = False
+        msg.grouped_id = None
+        msg.media = MessageMediaWebPage(webpage=webpage)
+        msg.sender = None
+        event.message = msg
+        event.get_chat = AsyncMock(return_value=None)
+
+        asyncio.run(handler(event))
+
+        listener.db.insert_message.assert_called_once()
+        saved = listener.db.insert_message.call_args[0][0]
+        assert saved["raw_data"]["webpage"] == {
+            "url": "https://example.com/article",
+            "site_name": "Example",
+            "title": "An Article",
+            "description": "Article summary",
+        }
 
     def test_on_new_message_adds_untracked_chat_to_tracking(self, listener_with_handlers, full_config):
         """Test new message from untracked-but-included chat gets added to tracking."""
