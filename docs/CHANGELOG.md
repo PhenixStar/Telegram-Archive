@@ -4,6 +4,63 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Fork port wave 2] - 2026-09-23
+
+Capture-side half of the semantic back-port from upstream v8.x. No schema change:
+the new per-message data goes into the existing `raw_data` extras column, and the
+backup's skip records go into the metadata key-value table.
+
+### Fixed
+- **A run that ends early no longer loses the messages it had not saved.** The
+  incremental sweep walked newest-first and stopped at the sync cursor, so the
+  cursor value became the newest id in the chat as soon as the first message was
+  read, and every mid-run checkpoint wrote a cursor ahead of uncommitted work. If
+  the run then ended, the next one started past those messages and never fetched
+  them, and gap-fill did not cover it because it only reacts to holes larger than
+  `GAP_THRESHOLD`. Both paths now iterate oldest-first from the cursor, which makes
+  the checkpoint a true high-water mark and lets an aborted run keep its progress.
+  The incremental path also gains the flood-wait retry only the initial path had
+  (upstream #286, #292, #297, redesigned for this fork's sweep order).
+- **One unreadable message no longer costs the rest of the chat.** Extraction
+  failures specific to a single message are contained and that message is recorded
+  for retry by the next run that visits the chat, while failures describing the run
+  — flood waits, lost connections, dead sessions, stall-guard timeouts,
+  cancellation — still stop it. Skip records are written before the cursor moves,
+  so a failed write aborts the dialog rather than stepping over a message nothing
+  would look at again. Retries stop after three attempts or once Telegram reports
+  the message gone.
+- **Quoted replies are captured.** The check for the quoted excerpt tested an
+  attribute the reply header does not have, so every quote was dropped
+  (upstream #362).
+- **Forward senders cost far fewer API calls.** Resolving a forward's source called
+  `get_entity` once per forwarded message; sources now resolve from local tables
+  first, then at most one call per distinct source per run (upstream #383).
+- **The listener keeps tracking chats through a database hiccup** instead of
+  emptying its tracked set and going silent until the next backup (upstream #339).
+- **Media verification sets a suspect file aside** instead of deleting it before
+  re-downloading, and restores it if no replacement arrives (upstream #325).
+
+### Added
+- **Link previews are stored**, so the preview card the viewer already had
+  something to render (upstream #323).
+- **Message formatting survives.** Formatting entities and the unformatted text
+  their offsets refer to are captured, and the viewer renders bold, italic,
+  underline, strikethrough, spoilers, code, pre blocks, blockquotes and links.
+  Rendering escapes first and emits only generated tags, link hrefs are limited to
+  http(s), and a message without entities renders exactly as before (upstream
+  #402, #400).
+- **Forward provenance**: where a forward came from, including the channel-post
+  signature and original date, shown in the existing forwarded-message box.
+
+### Changed
+- **telethon 1.43.2 to 1.45.0**, which fixes server-salt timeouts, high CPU when
+  the peer closes a connection, and a reconnect-during-reconnect case.
+- **Voice notes that can never be transcribed leave the queue.** An unprocessable
+  file stayed at the head of the pending batch and was re-sent to the
+  transcription service on every poll; failures are now counted and the row is
+  marked after three attempts. A zero-byte file is recognised before the request,
+  and only 4xx other than 429 counts as permanent.
+
 ## [Fork port wave 1] - 2026-09-23
 
 Viewer-side batch of a semantic back-port from upstream v8.x (upstream is on the
