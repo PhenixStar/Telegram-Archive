@@ -35,6 +35,51 @@ async def serve_service_worker():
     return FileResponse(sw_path, media_type="application/javascript", headers={"Service-Worker-Allowed": "/"})
 
 
+def _checked_media_request_path(path: str) -> str:
+    """Reject a request path with a ".." segment or a leading "/", before anything else runs.
+
+    The ASGI server percent-decodes the URL before routing, so ``%2e%2e``
+    reaches a ``{folder:path}`` route as a real ``..`` segment. The ACL below
+    keys off the path's first component, and the eventual file read
+    (``_validate_traversal``) only checks that the RESOLVED path stays inside
+    the media root, not which chat folder it lands in — so an encoded ``..``
+    used to let the ACL see one (often unparseable, so silently skipped)
+    folder while the resolve()-based containment check happily served a
+    different, real chat's folder that was never authorized. Checking first,
+    on the exact string both the ACL and the file lookup then use unchanged,
+    closes that gap.
+    """
+    if path.startswith("/") or ".." in path.split("/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    return path
+
+
+def _enforce_restricted_chat_acl(path: str, user: UserContext) -> None:
+    """Apply the per-chat ACL to the path's own first component.
+
+    Avatars stay available for UI chrome for every account. For a RESTRICTED
+    account (``get_user_chat_ids`` returns a set, i.e. a share-token or
+    chat-limited viewer), any other folder that fails to parse as a chat id —
+    including ``_shared/...``, the dedup store that holds blobs pooled across
+    every chat — is now DENIED outright instead of silently passed through:
+    only a real chat id can ever be proven to be on the allow-list, so a
+    folder that isn't one can never be proven safe for a restricted account.
+    """
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is None:
+        return  # master, or a viewer with no chat restriction
+
+    folder = path.split("/", 1)[0]
+    if folder == "avatars":
+        return
+    try:
+        media_chat_id = int(folder)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if media_chat_id not in user_chat_ids:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
 @router.get("/media/thumb/{size}/{folder:path}/{filename}")
 async def serve_thumbnail(
     size: int, folder: str, filename: str,
@@ -45,14 +90,11 @@ async def serve_thumbnail(
     if not deps._media_root:
         raise HTTPException(status_code=404, detail="Media directory not configured")
 
-    user_chat_ids = get_user_chat_ids(user)
-    if user_chat_ids is not None:
-        try:
-            media_chat_id = int(folder.split("/")[0])
-            if media_chat_id not in user_chat_ids:
-                raise HTTPException(status_code=403, detail="Access denied")
-        except ValueError:
-            pass
+    # Traversal check FIRST, then the ACL on the checked path's resolved first
+    # component — the ACL must authorize the exact string the file lookup
+    # below uses, or the two can disagree (see _checked_media_request_path).
+    requested = _checked_media_request_path(f"{folder}/{filename}")
+    _enforce_restricted_chat_acl(requested, user)
 
     from .thumbnails import _is_video, ensure_thumbnail, ensure_video_thumbnail
 
@@ -76,14 +118,10 @@ async def serve_lqip(folder: str, filename: str, user: UserContext = Depends(req
     if not deps._media_root:
         return JSONResponse({"blur": None})
 
-    user_chat_ids = get_user_chat_ids(user)
-    if user_chat_ids is not None:
-        try:
-            media_chat_id = int(folder.split("/")[0])
-            if media_chat_id not in user_chat_ids:
-                raise HTTPException(status_code=403, detail="Access denied")
-        except ValueError:
-            pass
+    # Same order as the thumbnail route: traversal check first, then the ACL on
+    # the checked path, so the authorized string is the one that is read.
+    requested = _checked_media_request_path(f"{folder}/{filename}")
+    _enforce_restricted_chat_acl(requested, user)
 
     from .thumbnails import generate_lqip_base64
 
@@ -107,8 +145,8 @@ async def serve_media(path: str, download: int = Query(0), user: UserContext = D
     if user.no_download and download:
         raise HTTPException(status_code=403, detail="Downloads disabled for this account")
 
-    if ".." in path.split("/") or path.startswith("/"):
-        raise HTTPException(status_code=403, detail="Access denied")
+    path = _checked_media_request_path(path)
+    _enforce_restricted_chat_acl(path, user)
 
     candidate = deps._media_root / path
     try:
@@ -117,17 +155,6 @@ async def serve_media(path: str, download: int = Query(0), user: UserContext = D
         raise HTTPException(status_code=404, detail="File not found")
     if not resolved.is_relative_to(deps._media_root):
         raise HTTPException(status_code=403, detail="Access denied")
-
-    user_chat_ids = get_user_chat_ids(user)
-    if user_chat_ids is not None:
-        parts = path.split("/")
-        if len(parts) >= 2 and parts[0] != "avatars":
-            try:
-                media_chat_id = int(parts[0])
-                if media_chat_id not in user_chat_ids:
-                    raise HTTPException(status_code=403, detail="Access denied")
-            except ValueError:
-                pass
 
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail="File not found")

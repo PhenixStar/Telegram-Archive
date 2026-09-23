@@ -4,10 +4,91 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import stat
 from datetime import UTC, datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# A drive-qualified Windows path: "C:/x", "C:\\x" or the drive-relative "C:x".
+# Rows are never written by a Windows install in this deployment, but the
+# normalizer below is lexical and cheap, so it stays general rather than
+# assuming the two stale-root shapes seen once in production are the only
+# ones a moved/renamed archive can ever produce.
+_WINDOWS_DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+
+
+def normalize_media_path(file_path: str | None, media_root: str | Path | None) -> str | None:
+    """Normalize a stored media path to a path relative to the CURRENT media root.
+
+    Media rows store whatever the machine/moment that wrote them used:
+
+    - a well-formed relative path (the healthy, common case);
+    - an absolute path under the current media root (older rows, pre-refactor);
+    - an absolute OR ``./``-prefixed relative path under a DIFFERENT root — the
+      archive was moved to another directory, or a stale root was left behind
+      by a past migration (production has both: 17.9k rows under an old
+      ``/home/dgx/...`` mount and 930 rows stored as ``./data/backups/...``).
+
+    The media directory is always named after the configured root's own last
+    path component (``Config.media_path`` builds it as ``<BACKUP_PATH>/media``),
+    so whatever follows that component in the stored path is the tail the
+    current root expects, and a moved/renamed archive keeps working without
+    rewriting a single row in the database.
+
+    Deliberately lexical: no filesystem call. This runs for every media row of
+    every gallery/message page, and the media root can be a network or FUSE
+    mount on some installs, where a single ``Path.resolve()`` easily costs
+    orders of magnitude more than a string compare. Nothing here is a security
+    boundary — containment is enforced separately, where the bytes are
+    actually read (the media-serving routes and the thumbnail generator both
+    resolve the joined path and re-check it against the root).
+
+    Returns the root-relative POSIX path (e.g. ``"126/file.jpg"``), or None
+    when the row is empty or the path cannot be anchored to a known root at
+    all (in which case the caller must treat the row as unresolvable, exactly
+    as an absolute path with no matching root always has been).
+    """
+    if not file_path:
+        return None
+
+    # A stored file NAME never contains a backslash (sanitize_media_filename
+    # collapses one before writing), so any backslash here is a directory
+    # separator, whichever platform wrote the row.
+    path = file_path.replace("\\", "/")
+    if path.startswith("./"):
+        path = path[2:]
+
+    is_absolute = path.startswith("/") or bool(_WINDOWS_DRIVE_PREFIX.match(path))
+
+    root = Path(media_root) if media_root else None
+    if root is not None:
+        root_posix = root.as_posix()
+        root_name = root.name
+        if is_absolute and path.startswith(root_posix + "/"):
+            path = path[len(root_posix) + 1 :]
+        elif root_name:
+            # Anchor on the LAST occurrence of "/<media dir name>/": a moved
+            # archive's old root can itself contain arbitrarily many path
+            # segments, but the tail after its own media/ directory is what
+            # the current root expects.
+            anchor = "/" + root_name + "/"
+            cut = path.rfind(anchor)
+            if cut >= 0:
+                path = path[cut + len(anchor) :]
+            elif is_absolute:
+                # Absolute and no trace of a media directory: cannot anchor.
+                return None
+        elif is_absolute:
+            return None
+    elif is_absolute:
+        # No media root configured: an absolute row can't be verified at all.
+        return None
+
+    if not path or path.startswith("/") or ".." in path.split("/"):
+        return None
+    return path
 
 
 def utcnow_naive() -> datetime:

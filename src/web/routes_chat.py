@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from ..message_utils import normalize_media_path
 from . import dependencies as deps
 from .dependencies import (
     UserContext,
@@ -684,18 +685,13 @@ async def get_chat_media(
             before_id=before_id or None,
         )
         for item in result["items"]:
-            file_path = item.get("file_path", "") or ""
-            # Strip media root prefix for absolute paths stored in DB.
-            if deps._media_root and file_path.startswith("/"):
-                media_root_str = str(deps._media_root) + "/"
-                if file_path.startswith(media_root_str):
-                    file_path = file_path[len(media_root_str):]
-                else:
-                    item["thumb_url"] = None
-                    item.pop("file_path", None)
-                    continue
-            # Path-traversal guard: reject "../" segments and absolute paths.
-            if ".." in file_path.split("/") or file_path.startswith("/"):
+            raw_file_path = item.get("file_path", "") or ""
+            # Normalize whatever root the row was written under (current root,
+            # a stale absolute root, or a "./"-relative legacy path) to a path
+            # relative to the CURRENT media root. Also rejects traversal and
+            # unanchored absolute paths (see normalize_media_path docstring).
+            file_path = normalize_media_path(raw_file_path, deps._media_root)
+            if file_path is None:
                 item["thumb_url"] = None
                 item.pop("file_path", None)
                 continue
