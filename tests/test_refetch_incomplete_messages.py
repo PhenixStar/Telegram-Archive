@@ -117,3 +117,53 @@ class TestSelection:
         targets = await refetch._select_targets(object(), config, "media")
 
         assert targets == {126: [2]}
+
+
+class TestClearEmptyFile:
+    """Deduplication makes the chat-directory entry a symlink into a shared store,
+    and the download short-circuits when that link exists. An empty file therefore
+    has to be removed before a repair can fetch anything."""
+
+    def test_empty_link_and_its_empty_target_are_removed(self, media_root):
+        shared = media_root / "_shared"
+        shared.mkdir()
+        target = shared / "blob.jpg"
+        target.touch()
+        chat_dir = media_root / "126"
+        chat_dir.mkdir()
+        link = chat_dir / "blob.jpg"
+        link.symlink_to(target)
+
+        refetch._clear_empty_file("/data/backups/media/126/blob.jpg", str(media_root))
+
+        assert not link.exists() and not link.is_symlink()
+        assert not target.exists()
+
+    def test_a_file_with_real_bytes_is_never_removed(self, media_root):
+        chat_dir = media_root / "126"
+        chat_dir.mkdir()
+        real = chat_dir / "photo.jpg"
+        real.write_bytes(b"real bytes")
+
+        refetch._clear_empty_file("/data/backups/media/126/photo.jpg", str(media_root))
+
+        assert real.exists()
+
+    def test_a_shared_target_with_bytes_survives_even_if_the_link_is_empty(self, media_root):
+        # The shared blob is referenced by every chat that received the same file,
+        # so it must not be removed on the strength of one bad link.
+        shared = media_root / "_shared"
+        shared.mkdir()
+        target = shared / "blob.jpg"
+        target.write_bytes(b"real bytes")
+        chat_dir = media_root / "126"
+        chat_dir.mkdir()
+        link = chat_dir / "blob.jpg"
+        link.symlink_to(target)
+
+        refetch._clear_empty_file("/data/backups/media/126/blob.jpg", str(media_root))
+
+        assert target.exists()
+
+    def test_a_missing_file_is_not_an_error(self, media_root):
+        refetch._clear_empty_file("/data/backups/media/126/gone.jpg", str(media_root))

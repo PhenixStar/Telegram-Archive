@@ -17,8 +17,9 @@ Two repairs, both opt-in and both read-only against Telegram:
     outage produced a batch of them.
 
 Both modes reuse the live capture code, so a repaired row is written exactly as a
-normal backup would write it. Nothing is deleted: a media repair downloads to the
-usual path and updates the row, and a blank-message repair upserts the message.
+normal backup would write it. The only thing ever deleted is a ZERO-BYTE media
+file (and its equally empty deduplication target), which has to go before the
+download will run again — a file with real bytes in it is never touched.
 
 SAFETY
     Dry-run by default. Pass --apply to write. Every Telegram call goes through
@@ -73,6 +74,10 @@ logger = logging.getLogger("refetch")
 ID_BATCH = 100
 PROGRESS_KEY = "refetch_progress:{mode}"
 
+# Stored path of each empty media file, keyed by (chat_id, message_id), filled in
+# while selecting targets so the repair can clear the file before re-downloading.
+EMPTY_FILE_PATHS: dict[tuple[int, int], str] = {}
+
 BLANK_MESSAGES_SQL = """
     SELECT g.chat_id, g.id
     FROM messages g
@@ -99,6 +104,40 @@ async def _rows(db: DatabaseAdapter, sql: str) -> list[tuple]:
         return list(result.all())
 
 
+def _clear_empty_file(stored_path: str, media_root: str) -> None:
+    """Remove an empty media file so the download actually re-runs.
+
+    Media downloads are deduplicated: the chat directory holds a symlink into a
+    shared store, and ``_process_media`` short-circuits when that link already
+    exists, so re-processing a message whose file is empty would re-commit the
+    row and never fetch a byte. Both the link and its empty target have to go
+    first. Only zero-byte files are removed, so a real file is never destroyed
+    on the strength of a bad path.
+    """
+    relative = normalize_media_path(stored_path, media_root)
+    if relative is None:
+        return
+    link = os.path.join(media_root, relative)
+
+    target = None
+    if os.path.islink(link):
+        target = os.path.realpath(link)
+
+    for path in (link, target):
+        if not path:
+            continue
+        try:
+            if os.path.getsize(path) == 0:
+                os.remove(path)
+        except OSError:
+            # Missing already, or unreadable: the download path handles both.
+            try:
+                if os.path.islink(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+
 def _empty_on_disk(stored_path: str, media_root: str) -> bool:
     """True when a row claims a downloaded file that is missing or zero bytes."""
     relative = normalize_media_path(stored_path, media_root)
@@ -123,6 +162,7 @@ async def _select_targets(db: DatabaseAdapter, config: Config, mode: str) -> dic
     for chat_id, message_id, file_path in await _rows(db, DOWNLOADED_MEDIA_SQL):
         if _empty_on_disk(file_path, media_root):
             targets.setdefault(chat_id, []).append(message_id)
+            EMPTY_FILE_PATHS[(chat_id, message_id)] = file_path
     return targets
 
 
@@ -148,6 +188,12 @@ async def _repair_chat(
             if message is None:
                 unavailable += 1
                 continue
+            if mode == "media":
+                # Clear the empty file first, or deduplication short-circuits the
+                # download and the row is re-committed with no bytes behind it.
+                stored = EMPTY_FILE_PATHS.get((chat_id, message_id))
+                if stored:
+                    _clear_empty_file(stored, str(backup.config.media_path))
             data = await backup._process_message_isolated(message, chat_id)
             if data is None:
                 unavailable += 1
