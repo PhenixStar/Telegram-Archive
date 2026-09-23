@@ -847,6 +847,52 @@
         [data-theme^="light"] .smart-badge-email { background: #ede9fe; color: #5b21b6; }
         [data-theme^="light"] .smart-badge-date { background: #fef3c7; color: #92400e; }
 
+        /* Telegram formatting entities (#402) — bold/italic/underline/strike
+           use native <strong>/<em>/<u>/<s>, styled here only where a plain
+           tag isn't enough. */
+        .tg-code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            padding: 1px 4px;
+            font-size: 0.9em;
+        }
+        .tg-pre {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin: 4px 0;
+            overflow-x: auto;
+            white-space: pre;
+            font-size: 0.85em;
+        }
+        .tg-blockquote {
+            border-left: 3px solid var(--tg-accent, #3b82f6);
+            padding: 2px 8px;
+            margin: 4px 0;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.15);
+        }
+        .tg-spoiler {
+            filter: blur(4px);
+            cursor: pointer;
+            border-radius: 3px;
+            transition: filter 0.15s ease;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .tg-spoiler-revealed {
+            filter: none;
+            cursor: text;
+            -webkit-user-select: text;
+            user-select: text;
+        }
+        .tg-mention { color: var(--tg-accent, #60a5fa); }
+        [data-theme^="light"] .tg-code,
+        [data-theme^="light"] .tg-pre { background: rgba(0, 0, 0, 0.08); }
+        [data-theme^="light"] .tg-blockquote { background: rgba(0, 0, 0, 0.04); }
+
         /* PWA install banner */
         .pwa-install-banner {
             background: linear-gradient(135deg, #1e40af 0%, #7c3aed 100%);
@@ -2027,11 +2073,16 @@
                                         <div class="truncate opacity-70">{{ msg.reply_to_text || 'Message' }}</div>
                                     </div>
 
-                                    <!-- Forwarded Message Info -->
+                                    <!-- Forwarded Message Info. #400 extends this box (rather than
+                                         adding a second indicator) with a channel-post signature and
+                                         the original send date once raw_data.fwd_from is populated;
+                                         legacy forward_from_id / raw_data.forward_from_name keep
+                                         rendering exactly as before on rows without it. -->
                                     <div v-if="msg.forward_from_id || getForwardName(msg)"
                                         class="border-l-2 border-green-400/50 pl-2 mb-2 text-xs bg-black/20 rounded p-2">
                                         <div class="font-semibold text-green-400 mb-0.5">Forwarded from</div>
                                         <div class="truncate opacity-90">{{ getForwardName(msg) }}</div>
+                                        <div v-if="getForwardMeta(msg)" class="truncate opacity-60 mt-0.5">{{ getForwardMeta(msg) }}</div>
                                     </div>
 
                                     <!-- Polls: v6.0.0 - detected by presence of raw_data.poll -->
@@ -2301,11 +2352,17 @@
                                         </a>
                                     </div>
 
-                                    <!-- Text with clickable links + smart highlights -->
+                                    <!-- Text with clickable links + smart highlights. #402: when
+                                         raw_data.entities is present, renderMessageHtml formats
+                                         raw_data.raw_text (bold/italic/.../spoiler/links) instead of
+                                         the flattened msg.text; rows without entities fall through to
+                                         the same linkifyText call as before, byte-for-byte. -->
                                     <div class="whitespace-pre-wrap break-words message-text"
                                         :class="{ 'opacity-50': msg.is_deleted }"
                                         @contextmenu="handleTextContextMenu($event, msg)"
-                                        v-html="linkifyText(msg.text, searchHighlightTerm)"></div>
+                                        @click="handleSpoilerActivate($event)"
+                                        @keydown="handleSpoilerActivate($event)"
+                                        v-html="renderMessageHtml(msg, searchHighlightTerm)"></div>
 
                                     <!-- Link preview card from raw_data -->
                                     <div v-if="getLinkPreview(msg)" class="link-preview-card"
@@ -7674,17 +7731,66 @@
                     return name ? name.charAt(0).toUpperCase() : '?'
                 }
 
-                // Get name for forwarded message source
+                // raw_data is normally already a parsed object; a minority of rows can
+                // still hold the JSON-string form (see getLinkPreview below). Parse once
+                // and cache per message object so repeated renders don't re-parse.
+                const _rawDataCache = new WeakMap()
+                const getRawData = (msg) => {
+                    const rd = msg && msg.raw_data
+                    if (!rd) return null
+                    if (typeof rd !== 'string') return rd
+                    if (_rawDataCache.has(msg)) return _rawDataCache.get(msg)
+                    let parsed = null
+                    try { parsed = JSON.parse(rd) } catch (_) {}
+                    _rawDataCache.set(msg, parsed)
+                    return parsed
+                }
+
+                // Get name for forwarded message source. raw_data.fwd_from (#400) is the
+                // richer capture going forward: from_name mirrors the legacy field for
+                // hidden/deleted senders, post_author covers channel-post signatures, and
+                // from_id is the numeric peer id when nothing readable was captured. No
+                // existing row carries fwd_from yet, so the legacy checks below keep
+                // driving every current message unchanged.
                 const getForwardName = (msg) => {
+                    const fwd = getRawData(msg)?.fwd_from
+                    if (fwd?.from_name) return fwd.from_name
                     // First check raw_data for the resolved name
                     if (msg.raw_data && msg.raw_data.forward_from_name) {
                         return msg.raw_data.forward_from_name
                     }
+                    if (fwd?.post_author) return fwd.post_author
                     // Fall back to ID if we have one
                     if (msg.forward_from_id) {
                         return `ID: ${msg.forward_from_id}`
                     }
+                    if (fwd?.from_id) return `ID: ${fwd.from_id}`
+                    if (fwd?.channel_post) return 'Forwarded channel post'
                     return null
+                }
+
+                // fwd.date is the ORIGINAL send time, not this message's own timestamp.
+                // The capture side may serialize it as epoch seconds or an ISO string;
+                // handle both and degrade to '' rather than showing "Invalid date".
+                const formatForwardDate = (val) => {
+                    if (val == null) return ''
+                    const iso = typeof val === 'number' ? new Date(val * 1000).toISOString() : String(val)
+                    return moment.utc(iso).isValid() ? formatMessageVersionDate(iso) : ''
+                }
+
+                // Secondary line under the forward name: the channel-post signature
+                // (only when it isn't already the displayed name) and the original
+                // send date. Both come solely from raw_data.fwd_from, so this renders
+                // nothing for any row captured before #400 — same box, no new indicator.
+                const getForwardMeta = (msg) => {
+                    const fwd = getRawData(msg)?.fwd_from
+                    if (!fwd) return null
+                    const name = getForwardName(msg)
+                    const parts = []
+                    if (fwd.post_author && fwd.post_author !== name) parts.push(`Signed: ${fwd.post_author}`)
+                    const when = formatForwardDate(fwd.date)
+                    if (when) parts.push(when)
+                    return parts.length ? parts.join(' · ') : null
                 }
 
                 const isDeletedChat = (chat) => {
@@ -8915,6 +9021,142 @@
                     return result
                 }
 
+                // Telegram formatting entities (#402): escape-first HTML off raw_data.raw_text,
+                // never off the flattened msg.text (offsets are computed against the wire text).
+                //
+                // Composition with linkifyText (deliberate choice, not upstream's — upstream has
+                // no search highlighting): each PLAIN-TEXT run between/inside entities is
+                // rendered through linkifyText itself (escape + smart badges + search highlight),
+                // so highlighting and money/date/phone badges keep working inside bold/italic/
+                // spoiler/blockquote text exactly as in an unformatted message. Entities whose own
+                // content must stay literal — code, pre, and the label text of url/text_url links
+                // — render escape-only instead, so a link's visible text is never re-linkified or
+                // highlighted (mirrors upstream 3cb4ec3; avoids a <mark> or <a> landing inside
+                // another entity's markup). Entities themselves never run through linkifyText, so
+                // there is no double-wrapping. The one accepted gap: a highlight term that spans
+                // an entity boundary (half plain text, half inside a <strong>) won't match, since
+                // each side is escaped/highlighted independently — same limitation the nesting
+                // forest already has for any per-node boundary.
+                //
+                // Entity offsets/lengths are UTF-16 code units (Telegram's MessageEntity spec) —
+                // exactly how JS indexes strings — so they slice raw_text directly.
+                const isHttpUrl = (url) => typeof url === 'string' && /^https?:\/\//i.test(url)
+
+                // escapeHtml (above) is safe for TEXT NODES: the browser's textContent ->
+                // innerHTML round-trip escapes & < > but NOT quote characters, since quotes are
+                // inert outside an attribute. An entity href lands inside a quoted attribute, so
+                // it needs quotes escaped too, or a `"` in a hostile URL breaks out of href="...".
+                const escapeAttr = (str) => escapeHtml(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+
+                // These wrap their nested runs escape-only: code/pre must keep their characters
+                // literal, and a link's label must not be re-linkified or search-highlighted.
+                const ESCAPE_ONLY_ENTITY_TYPES = new Set(['code', 'pre', 'url', 'text_url'])
+
+                const wrapEntity = (node, inner, text) => {
+                    switch (node.type) {
+                        case null: return inner
+                        case 'bold': return `<strong>${inner}</strong>`
+                        case 'italic': return `<em>${inner}</em>`
+                        case 'underline': return `<u>${inner}</u>`
+                        case 'strikethrough': return `<s>${inner}</s>`
+                        case 'code': return `<code class="tg-code">${inner}</code>`
+                        case 'pre': return `<pre class="tg-pre"><code>${inner}</code></pre>`
+                        case 'blockquote': return `<blockquote class="tg-blockquote">${inner}</blockquote>`
+                        case 'spoiler': return `<span class="tg-spoiler" role="button" tabindex="0" aria-label="Spoiler, activate to reveal">${inner}</span>`
+                        case 'text_url': {
+                            // node.url is entity-supplied, independent of the visible label text.
+                            // Only http(s) survives as a live href — no javascript:, data:, or a
+                            // protocol-relative //host (which would inherit this page's scheme).
+                            return isHttpUrl(node.url)
+                                ? `<a href="${escapeAttr(node.url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+                                : inner
+                        }
+                        case 'url': {
+                            const raw = text.slice(node.offset, node.end)
+                            return isHttpUrl(raw)
+                                ? `<a href="${escapeAttr(raw)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+                                : inner
+                        }
+                        case 'mention':
+                        case 'hashtag':
+                            return `<span class="tg-mention">${inner}</span>`
+                        default:
+                            // Unknown/unsupported entity type (e.g. bot_command, custom_emoji):
+                            // degrade to plain rendered text, no wrapper.
+                            return inner
+                    }
+                }
+
+                // Builds a proper nesting forest out of a flat, possibly-overlapping entity
+                // list, then renders it depth-first. A partially-overlapping entity is clipped
+                // to its open parent's end so the output is always well-formed HTML.
+                const renderEntityHtml = (text, entityList, highlight) => {
+                    const len = text.length
+                    const valid = entityList
+                        .filter(e => e && Number.isInteger(e.offset) && Number.isInteger(e.length)
+                            && e.offset >= 0 && e.length > 0 && e.offset < len)
+                        .map(e => ({ type: e.type, url: e.url, offset: e.offset, end: Math.min(e.offset + e.length, len), children: [] }))
+                        .sort((a, b) => a.offset - b.offset || b.end - a.end)
+                    const root = { type: null, offset: 0, end: len, children: [] }
+                    const stack = [root]
+                    for (const node of valid) {
+                        while (node.offset >= stack[stack.length - 1].end && stack.length > 1) stack.pop()
+                        const parent = stack[stack.length - 1]
+                        if (node.end > parent.end) node.end = parent.end
+                        if (node.end <= node.offset) continue
+                        parent.children.push(node)
+                        stack.push(node)
+                    }
+                    const renderLeaf = (raw, escapeOnly) => escapeOnly ? escapeHtml(raw) : linkifyText(raw, highlight)
+                    const renderNode = (node, escapeOnly) => {
+                        const escapeHere = escapeOnly || ESCAPE_ONLY_ENTITY_TYPES.has(node.type)
+                        let inner = ''
+                        let cursor = node.offset
+                        for (const child of node.children) {
+                            if (child.offset > cursor) inner += renderLeaf(text.slice(cursor, child.offset), escapeHere)
+                            inner += renderNode(child, escapeHere)
+                            cursor = child.end
+                        }
+                        if (cursor < node.end) inner += renderLeaf(text.slice(cursor, node.end), escapeHere)
+                        return wrapEntity(node, inner, text)
+                    }
+                    return renderNode(root, false)
+                }
+
+                // Entry point used by the message bubble. Rows without entities (every
+                // capture before #402) fall through to plain linkifyText(msg.text, highlight) —
+                // byte-for-byte the same call the template made before this port. Rows with
+                // entities render raw_data.raw_text instead of msg.text, since offsets are only
+                // valid against the wire text; a malformed payload degrades to the old behavior
+                // rather than throwing.
+                const renderMessageHtml = (msg, highlight = '') => {
+                    const rd = getRawData(msg)
+                    const entities = Array.isArray(rd?.entities) ? rd.entities : null
+                    const rawText = rd?.raw_text
+                    if (!entities || !entities.length || typeof rawText !== 'string') {
+                        return linkifyText(msg?.text, highlight)
+                    }
+                    try {
+                        return renderEntityHtml(rawText, entities, highlight)
+                    } catch (e) {
+                        return linkifyText(msg?.text, highlight)  // malformed payload: degrade to today's output
+                    }
+                }
+
+                // Spoiler entities are injected via v-html, so Vue's template bindings never
+                // reach them directly; delegate through the message-text container (which IS
+                // template-bound) instead of a document-wide listener. Concealed: first
+                // click/Enter/Space reveals. Revealed: the span is inert forever afterward
+                // (official apps don't re-conceal), so a link or mention inside it then works.
+                const handleSpoilerActivate = (event) => {
+                    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return
+                    const spoiler = event.target.closest ? event.target.closest('.tg-spoiler') : null
+                    if (!spoiler) return
+                    if (spoiler.classList.contains('tg-spoiler-revealed')) return
+                    event.preventDefault()
+                    spoiler.classList.add('tg-spoiler-revealed')
+                }
+
                 const scrollToMessage = (msgId) => {
                     const exists = sortedMessages.value.some(m => m.id === msgId)
                     if (exists) {
@@ -9527,6 +9769,7 @@
                     getSenderName,
                     getSenderInitial,
                     getForwardName,
+                    getForwardMeta,
                     showSenderName,
                     showDateSeparator,
                     // Album support
@@ -9568,6 +9811,8 @@
                     isLightboxImage,
                     isLightboxVideo,
                     linkifyText,
+                    renderMessageHtml,
+                    handleSpoilerActivate,
                     scrollToMessage,
                     messagesContainer,
                     scrollAnchor,
