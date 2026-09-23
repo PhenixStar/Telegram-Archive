@@ -64,7 +64,7 @@ from telethon import TelegramClient  # noqa: E402
 
 from src.config import Config, build_telegram_client_kwargs  # noqa: E402
 from src.db import DatabaseAdapter, init_database  # noqa: E402
-from src.message_utils import normalize_media_path  # noqa: E402
+from src.message_utils import METADATA_ONLY_MEDIA_TYPES, normalize_media_path  # noqa: E402
 from src.telegram_backup import TelegramBackup, call_with_flood_retry  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -88,7 +88,7 @@ BLANK_MESSAGES_SQL = """
 """
 
 DOWNLOADED_MEDIA_SQL = """
-    SELECT chat_id, message_id, file_path
+    SELECT chat_id, message_id, file_path, type
     FROM media
     WHERE downloaded = 1 AND file_path IS NOT NULL
     ORDER BY chat_id, message_id
@@ -159,7 +159,12 @@ async def _select_targets(db: DatabaseAdapter, config: Config, mode: str) -> dic
         return targets
 
     media_root = str(config.media_path)
-    for chat_id, message_id, file_path in await _rows(db, DOWNLOADED_MEDIA_SQL):
+    for chat_id, message_id, file_path, media_type in await _rows(db, DOWNLOADED_MEDIA_SQL):
+        if media_type in METADATA_ONLY_MEDIA_TYPES:
+            # A location, contact or poll is a message payload, not a file. Some
+            # rows carry a file_path anyway, but there is nothing to download and
+            # re-fetching them would only spend API calls.
+            continue
         if _empty_on_disk(file_path, media_root):
             targets.setdefault(chat_id, []).append(message_id)
             EMPTY_FILE_PATHS[(chat_id, message_id)] = file_path
@@ -206,7 +211,19 @@ async def _repair_chat(
 
         if processed:
             await backup._commit_batch(processed, chat_id)
-            repaired += len(processed)
+            if mode != "media":
+                repaired += len(processed)
+            else:
+                # A committed row is not a repair: only a file with bytes behind
+                # it is. Anything still empty is counted as unrecovered, so the
+                # run reports what actually changed on disk.
+                media_root = str(backup.config.media_path)
+                for data in processed:
+                    stored = (data.get("_media_data") or {}).get("file_path")
+                    if stored and not _empty_on_disk(stored, media_root):
+                        repaired += 1
+                    else:
+                        unavailable += 1
 
         if sleep_seconds:
             await asyncio.sleep(sleep_seconds)

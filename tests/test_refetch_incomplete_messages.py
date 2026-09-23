@@ -107,8 +107,8 @@ class TestSelection:
 
         async def fake_rows(_db, sql):
             return [
-                (126, 1, "/data/backups/media/126/good.jpg"),
-                (126, 2, "/data/backups/media/126/empty.jpg"),
+                (126, 1, "/data/backups/media/126/good.jpg", "photo"),
+                (126, 2, "/data/backups/media/126/empty.jpg", "photo"),
             ]
 
         monkeypatch.setattr(refetch, "_rows", fake_rows)
@@ -117,6 +117,26 @@ class TestSelection:
         targets = await refetch._select_targets(object(), config, "media")
 
         assert targets == {126: [2]}
+
+    @pytest.mark.asyncio
+    async def test_metadata_only_kinds_are_never_targeted(self, monkeypatch, media_root):
+        # A location or contact is a message payload, not a file. Some rows carry
+        # a file_path anyway; re-fetching them would spend API calls for nothing.
+        from types import SimpleNamespace
+
+        async def fake_rows(_db, sql):
+            return [
+                (126, 1, "/data/backups/media/126/place.jpg", "geo"),
+                (126, 2, "/data/backups/media/126/card.jpg", "contact"),
+                (126, 3, "/data/backups/media/126/real.jpg", "photo"),
+            ]
+
+        monkeypatch.setattr(refetch, "_rows", fake_rows)
+        config = SimpleNamespace(media_path=str(media_root))
+
+        targets = await refetch._select_targets(object(), config, "media")
+
+        assert targets == {126: [3]}
 
 
 class TestClearEmptyFile:
