@@ -310,7 +310,9 @@ VIEWER_PASSWORD = os.getenv("VIEWER_PASSWORD", "").strip()
 _SA_USERNAME = SUPER_ADMIN_USERNAME or VIEWER_USERNAME
 _SA_PASSWORD = SUPER_ADMIN_PASSWORD or VIEWER_PASSWORD
 AUTH_ENABLED = bool(_SA_USERNAME and _SA_PASSWORD)
-AUTH_COOKIE_NAME = "viewer_auth"
+# Configurable so several archive instances (one per Telegram account) can sit
+# behind one hostname without each login evicting the other's session cookie.
+AUTH_COOKIE_NAME = os.getenv("VIEWER_COOKIE_NAME", "").strip() or "viewer_auth"
 
 # Trusted proxy header authentication (v7.9.0)
 # When AUTH_PROXY_HEADER is set, identity is forwarded by a trusted reverse

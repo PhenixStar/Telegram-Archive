@@ -15,7 +15,12 @@ const APP_SHELL_CACHE = 'tg-shell-v1';
 const API_CACHE       = 'tg-api-v1';
 const MEDIA_CACHE     = 'tg-media-v1';
 
-const KNOWN_CACHES = [CACHE_NAME, APP_SHELL_CACHE, API_CACHE, MEDIA_CACHE];
+// Multi-account: one origin can front several archives (a reverse proxy routes by
+// the `tg_account` cookie, which only changes on a `?account=` navigation). Cached
+// API/media responses belong to one archive, so they are dropped when it changes.
+const ACCOUNT_CACHE   = 'tg-account-v1';
+
+const KNOWN_CACHES = [CACHE_NAME, APP_SHELL_CACHE, API_CACHE, MEDIA_CACHE, ACCOUNT_CACHE];
 
 // App shell assets to pre-cache on install
 const APP_SHELL_URLS = [
@@ -96,7 +101,12 @@ self.addEventListener('fetch', (event) => {
 
     // Navigation requests (HTML pages) — network-first, fallback to shell cache
     if (request.mode === 'navigate') {
-        event.respondWith(networkFirstNavigate(request));
+        const account = url.searchParams.get('account');
+        event.respondWith(
+            account
+                ? switchAccount(account).then(() => networkFirstNavigate(request))
+                : networkFirstNavigate(request)
+        );
         return;
     }
 
@@ -114,6 +124,22 @@ self.addEventListener('fetch', (event) => {
 
     // Everything else — network-only (static assets served by FastAPI, etc.)
 });
+
+/**
+ * Record which archive this origin now serves; on a change, drop cached API and
+ * media responses so the next page load cannot show the previous account's data.
+ */
+async function switchAccount(account) {
+    try {
+        const marker = await caches.open(ACCOUNT_CACHE);
+        const previous = await marker.match('/__account');
+        if (previous && (await previous.text()) === account) return;
+        await Promise.all([caches.delete(API_CACHE), caches.delete(MEDIA_CACHE)]);
+        await marker.put('/__account', new Response(account));
+    } catch (err) {
+        console.error('[SW] Account switch cache reset failed:', err);
+    }
+}
 
 /** Returns true for API paths worth caching for offline use. */
 function isApiCacheable(pathname) {

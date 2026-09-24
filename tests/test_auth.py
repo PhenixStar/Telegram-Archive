@@ -62,6 +62,27 @@ class TestCookieConfiguration:
         expected_cookie_name = "viewer_auth"
         assert expected_cookie_name == "viewer_auth"
 
+    @pytest.mark.parametrize(
+        ("env_value", "expected"),
+        [(None, "viewer_auth"), ("", "viewer_auth"), ("viewer_auth_acc2", "viewer_auth_acc2")],
+    )
+    def test_cookie_name_from_env(self, env_value, expected):
+        """VIEWER_COOKIE_NAME lets two instances share a hostname without evicting each other's session."""
+        import subprocess
+        import sys
+
+        env = {k: v for k, v in os.environ.items() if k != "VIEWER_COOKIE_NAME"}
+        if env_value is not None:
+            env["VIEWER_COOKIE_NAME"] = env_value
+        out = subprocess.run(
+            [sys.executable, "-c", "from src.web import dependencies as d; print(d.AUTH_COOKIE_NAME)"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert out.stdout.strip().splitlines()[-1] == expected
+
 
 class TestAuthEndpointStructure:
     """Test auth endpoint response structures."""

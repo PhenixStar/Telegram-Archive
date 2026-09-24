@@ -3913,7 +3913,7 @@
                                                     <template v-if="token.is_revoked"> · <span class="text-red-400">Revoked</span></template>
                                                 </div>
                                             </div>
-                                            <button @click="navigator.clipboard.writeText(window.location.origin + '/?token=' + token.token)" class="p-1 hover:text-blue-400" style="color: var(--tg-muted);" title="Copy Link"><i class="fas fa-link text-xs"></i></button>
+                                            <button @click="navigator.clipboard.writeText(withAccount(window.location.origin + '/?token=' + token.token))" class="p-1 hover:text-blue-400" style="color: var(--tg-muted);" title="Copy Link"><i class="fas fa-link text-xs"></i></button>
                                             <button @click="startEditToken(token)" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Edit"><i class="fas fa-pen text-xs"></i></button>
                                             <button v-if="!token.is_revoked" @click="revokeToken(token)" class="p-1 hover:text-amber-400" style="color: var(--tg-muted);" title="Revoke"><i class="fas fa-ban"></i></button>
                                             <button @click="deleteToken(token)" class="p-1 hover:text-red-400" style="color: var(--tg-muted);" title="Delete"><i class="fas fa-trash"></i></button>
@@ -5204,6 +5204,18 @@
 
                 // Context menu
                 const contextMenu = Vue.reactive({ visible: false, x: 0, y: 0, items: [], target: null })
+                // Multi-account: one hostname fronts several archive instances and the
+                // reverse proxy routes by the `tg_account` cookie (set from ?account=).
+                // Copied links carry the account so they open on the same archive.
+                const currentAccountKey = () => (document.cookie.match(/(?:^|;\s*)tg_account=([A-Za-z0-9_-]+)/) || [])[1] || ''
+                const withAccount = (url) => {
+                    const key = currentAccountKey()
+                    if (!key) return url
+                    const u = new URL(url, window.location.origin)
+                    u.searchParams.set('account', key)
+                    return u.toString()
+                }
+
                 const copyToClipboard = async (text, msg) => {
                     try {
                         if (navigator.clipboard) { await navigator.clipboard.writeText(text) }
@@ -5228,7 +5240,7 @@
                     if (type === 'message') {
                         if (data.text) items.push({ label: 'Copy Text', icon: 'fa-copy', action: () => copyToClipboard(data.text) })
                         items.push({ label: 'Copy Link', icon: 'fa-link', action: () => {
-                            const url = `${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`
+                            const url = withAccount(`${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`)
                             copyToClipboard(url)
                         }})
                         if (data.reply_to_msg_id) items.push({ label: 'Jump to Reply', icon: 'fa-reply', action: () => { closeContextMenu(); scrollToMessage(data.reply_to_msg_id) }})
@@ -5267,7 +5279,7 @@
                         if (!noDownload.value) items.push({ label: isVideo ? 'Download Video' : 'Download Image', icon: 'fa-download', action: () => window.open(getMediaUrl(data) + '?download=1', '_blank') })
                         items.push({ label: 'Open in New Tab', icon: 'fa-external-link-alt', action: () => window.open(getMediaUrl(data), '_blank') })
                         items.push({ label: 'Copy Link', icon: 'fa-link', action: () => {
-                            const url = `${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`
+                            const url = withAccount(`${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`)
                             copyToClipboard(url)
                         }})
                     } else if (type === 'chat') {
@@ -5287,7 +5299,7 @@
                         }
                         items.push({ separator: true })
                         items.push({ label: 'Copy Link', icon: 'fa-link', action: () => {
-                            const url = `${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`
+                            const url = withAccount(`${window.location.origin}/chat/${data.chat_id}?msg=${data.id}`)
                             copyToClipboard(url)
                         }})
                         if (!noDownload.value) {
@@ -5347,7 +5359,7 @@
 
                 // Permalink
                 const copyPermalink = (msg) => {
-                    const url = `${window.location.origin}/chat/${msg.chat_id}?msg=${msg.id}`
+                    const url = withAccount(`${window.location.origin}/chat/${msg.chat_id}?msg=${msg.id}`)
                     copyToClipboard(url)
                 }
                 // chatListFocusIndex for keyboard nav (Phase 6)
@@ -6229,6 +6241,12 @@
                     // Global keyboard handler
                     document.addEventListener('keydown', handleGlobalKeydown)
                     console.log('[DEBUG] onMounted started')
+                    // ?account= was consumed by the reverse proxy (it set the routing cookie)
+                    if (new URLSearchParams(window.location.search).has('account')) {
+                        const cleanUrl = new URL(window.location)
+                        cleanUrl.searchParams.delete('account')
+                        window.history.replaceState({}, '', cleanUrl)
+                    }
                     try {
                         console.log('[DEBUG] Fetching /api/auth/check...')
                         const res = await fetch('/api/auth/check', {
@@ -6784,7 +6802,10 @@
                             showProfileSelector.value = backupProfiles.value.length > 0
                             const lastId = localStorage.getItem('tg-last-profile')
                             const last = backupProfiles.value.find(p => p.id === lastId)
-                            selectedProfile.value = last || backupProfiles.value[0] || null
+                            // Prefer the profile for the account this page is actually serving
+                            const key = currentAccountKey()
+                            const current = key && backupProfiles.value.find(p => new URLSearchParams((p.url || '').split('?')[1] || '').get('account') === key)
+                            selectedProfile.value = current || last || backupProfiles.value[0] || null
                         }
                     } catch { /* profiles endpoint not available — single instance */ }
                 }
@@ -7001,13 +7022,15 @@
                 }
 
                 // v8.1: Unread badge tracking via localStorage
+                // Per-account key: private-chat ids repeat across accounts but message ids don't.
+                const _seenKey = currentAccountKey() && currentAccountKey() !== 'main' ? `tg_last_seen:${currentAccountKey()}` : 'tg_last_seen'
                 let _savedSeen = {}
-                try { _savedSeen = JSON.parse(localStorage.getItem('tg_last_seen') || '{}') } catch {}
+                try { _savedSeen = JSON.parse(localStorage.getItem(_seenKey) || '{}') } catch {}
                 const lastSeenMap = Vue.reactive(_savedSeen)
                 const markChatSeen = (chat) => {
                     if (chat.last_message_id) {
                         lastSeenMap[chat.id] = chat.last_message_id
-                        localStorage.setItem('tg_last_seen', JSON.stringify(lastSeenMap))
+                        localStorage.setItem(_seenKey, JSON.stringify(lastSeenMap))
                     }
                 }
                 const hasUnread = (chat) => {
@@ -9622,7 +9645,7 @@
                 const adminNewToken = ref('')
                 const adminNewTokenUrl = computed(() => {
                     if (!adminNewToken.value) return ''
-                    return `${window.location.origin}/?token=${adminNewToken.value}`
+                    return withAccount(`${window.location.origin}/?token=${adminNewToken.value}`)
                 })
 
                 const filteredAdminChats = computed(() => {
@@ -9765,7 +9788,7 @@
                         adminTokenForm.value = { label: '', allowed_chat_ids: [], no_download: false, expires_at: '' }
                         await loadAdminTokens()
                         // Auto-copy shareable link to clipboard
-                        const shareUrl = `${window.location.origin}/?token=${data.token}`
+                        const shareUrl = withAccount(`${window.location.origin}/?token=${data.token}`)
                         copyToClipboard(shareUrl, 'Shareable link copied to clipboard')
                     } catch (e) { adminTokenError.value = 'Network error' }
                 }
@@ -10080,6 +10103,7 @@
                     closeContextMenu,
                     handleMenuKeydown,
                     copyToClipboard,
+                    withAccount,
                     copyPermalink,
                     startLongPress,
                     cancelLongPress,

@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Multi-account behind one hostname] - 2026-09-25
+
+### Added
+- **`VIEWER_COOKIE_NAME`** (default `viewer_auth`): the viewer session cookie name
+  is configurable, so several archive instances (one per Telegram account) can sit
+  behind one hostname without each login evicting the other's session.
+- **Account-aware links:** when a `tg_account` routing cookie is present (set by a
+  fronting reverse proxy from `?account=`), copied message permalinks and share-token
+  links carry `?account=<key>` so they open on the same archive. The login profile
+  picker preselects the profile whose URL matches the current account, and
+  `?account=` is removed from the address bar after load.
+
+### Fixed
+- **No cross-account data after switching accounts on one origin.** The service
+  worker served the previous account's cached chat list (stale-while-revalidate) and
+  media (cache-first) right after a switch. It now records the account on every
+  `?account=` navigation and drops its API and media caches when it changes.
+- **Unread badges are kept per account** (`tg_last_seen:<key>`), since private-chat
+  ids repeat across accounts while message ids do not. The default account keeps
+  the existing `tg_last_seen` key.
+
+No schema change. Without a `tg_account` cookie or `VIEWER_COOKIE_NAME`, behaviour is
+unchanged.
+
 ## [Fork port wave 4] - 2026-09-23
 
 Two opt-in upstream features. Both default to off, so behaviour is unchanged
