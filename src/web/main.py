@@ -62,6 +62,7 @@ from .dependencies import (
     ConnectionManager,
     ListenerManager,
     SessionData,
+    session_from_row,
     _sessions,
     set_app_state,
     set_push_manager,
@@ -377,22 +378,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             for row in rows:
                 if now - row["created_at"] > AUTH_SESSION_SECONDS:
                     continue
-                allowed = None
-                if row["allowed_chat_ids"]:
-                    try:
-                        allowed = set(json.loads(row["allowed_chat_ids"]))
-                    except (json.JSONDecodeError, TypeError):
-                        logger.warning("Skipping session with corrupted allowed_chat_ids (role=%s)", row["role"])
-                        continue
-                _sessions[row["token"]] = SessionData(
-                    username=row["username"],
-                    role=row["role"],
-                    allowed_chat_ids=allowed,
-                    no_download=bool(row.get("no_download", 0)),
-                    source_token_id=row.get("source_token_id"),
-                    created_at=row["created_at"],
-                    last_accessed=row["last_accessed"],
-                )
+                session = session_from_row(row)
+                if session is None:
+                    continue
+                _sessions[row["token"]] = session
                 restored += 1
             if restored:
                 logger.info(f"Restored {restored} sessions from database")
@@ -567,6 +556,7 @@ if static_dir.exists():
 # Include routers
 # ---------------------------------------------------------------------------
 
+from .routes_account_switch import router as account_switch_router
 from .routes_admin_settings import router as admin_settings_router
 from .routes_admin_users import router as admin_users_router
 from .routes_admin_vault import router as admin_vault_router
@@ -579,6 +569,7 @@ from .routes_websocket import router as ws_router
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(account_switch_router)
 app.include_router(chat_router)
 app.include_router(media_router)
 app.include_router(admin_users_router)

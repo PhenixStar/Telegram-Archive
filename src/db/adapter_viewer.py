@@ -247,6 +247,7 @@ class ViewerMixin:
         last_accessed: float,
         no_download: int = 0,
         source_token_id: int | None = None,
+        allowed_profile_ids: str | None = None,
     ) -> None:
         """Save or update a session in the database."""
         from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -260,6 +261,7 @@ class ViewerMixin:
                 "allowed_chat_ids": allowed_chat_ids,
                 "no_download": no_download,
                 "source_token_id": source_token_id,
+                "allowed_profile_ids": allowed_profile_ids,
                 "created_at": created_at,
                 "last_accessed": last_accessed,
             }
@@ -335,6 +337,7 @@ class ViewerMixin:
             "allowed_chat_ids": row.allowed_chat_ids,
             "no_download": row.no_download,
             "source_token_id": row.source_token_id,
+            "allowed_profile_ids": row.allowed_profile_ids,
             "created_at": row.created_at,
             "last_accessed": row.last_accessed,
         }

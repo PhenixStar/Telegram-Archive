@@ -129,16 +129,7 @@ async def login(request: Request):
     if not AUTH_ENABLED:
         return JSONResponse({"success": True, "message": "Auth disabled"})
 
-    direct_ip = request.client.host if request.client else "unknown"
-    _trusted = direct_ip.startswith(("172.", "10.", "192.168.", "127.")) or direct_ip in ("::1", "localhost")
-    if _trusted:
-        client_ip = (
-            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-            or request.headers.get("x-real-ip", "")
-            or direct_ip
-        )
-    else:
-        client_ip = direct_ip
+    client_ip = deps.client_ip(request)
 
     if not _check_rate_limit(client_ip):
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
@@ -168,7 +159,8 @@ async def login(request: Request):
                     try:
                         profile_ids = json.loads(raw_pids) if isinstance(raw_pids, str) else raw_pids
                     except (json.JSONDecodeError, TypeError):
-                        profile_ids = None
+                        # Unreadable scope: grant no accounts rather than all of them.
+                        profile_ids = []
                 token = await _create_session(username, acct_role, None, allowed_profile_ids=profile_ids)
                 response = JSONResponse({"success": True, "role": acct_role, "username": username})
                 response.set_cookie(
@@ -302,16 +294,7 @@ async def auth_via_token(request: Request):
     if not deps.db:
         raise HTTPException(status_code=500, detail="Database not available")
 
-    direct_ip = request.client.host if request.client else "unknown"
-    _trusted = direct_ip.startswith(("172.", "10.", "192.168.", "127.")) or direct_ip in ("::1", "localhost")
-    if _trusted:
-        client_ip = (
-            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-            or request.headers.get("x-real-ip", "")
-            or direct_ip
-        )
-    else:
-        client_ip = direct_ip
+    client_ip = deps.client_ip(request)
 
     if not _check_rate_limit(client_ip):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")

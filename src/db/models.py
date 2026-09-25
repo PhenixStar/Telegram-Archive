@@ -445,6 +445,9 @@ class ViewerSession(Base):
     username: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # "master", "viewer", or "token"
     allowed_chat_ids: Mapped[str | None] = mapped_column(Text)  # JSON array or NULL = all chats
+    # Accounts (backup profile ids) an admin session may manage, JSON array or
+    # NULL = unrestricted (019). Persisted so a restart cannot widen an admin.
+    allowed_profile_ids: Mapped[str | None] = mapped_column(Text)
     no_download: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # v7.2.0
     source_token_id: Mapped[int | None] = mapped_column(Integer)  # v7.2.0: FK to viewer_tokens.id for revocation
     created_at: Mapped[float] = mapped_column(Float, nullable=False)

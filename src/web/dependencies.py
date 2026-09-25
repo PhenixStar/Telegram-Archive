@@ -388,6 +388,23 @@ def _verify_password(password: str, salt: str, password_hash: str) -> bool:
     return secrets.compare_digest(_hash_password(password, salt), password_hash)
 
 
+def client_ip(request: Request) -> str:
+    """Client address for rate limiting and audit.
+
+    Proxy headers are trusted only when the direct peer is a private or local
+    address (the router, host nginx or cloudflared); a public peer is taken as is.
+    """
+    direct_ip = request.client.host if request.client else "unknown"
+    trusted = direct_ip.startswith(("172.", "10.", "192.168.", "127.")) or direct_ip in ("::1", "localhost")
+    if not trusted:
+        return direct_ip
+    return (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or request.headers.get("x-real-ip", "")
+        or direct_ip
+    )
+
+
 def _check_rate_limit(ip: str) -> bool:
     """Returns True if the request is within rate limits."""
     now = time.time()
@@ -446,6 +463,7 @@ async def _create_session(
                 last_accessed=now,
                 no_download=1 if no_download else 0,
                 source_token_id=source_token_id,
+                allowed_profile_ids=json.dumps(allowed_profile_ids) if allowed_profile_ids is not None else None,
             )
         except Exception as e:
             logger.warning(f"Failed to persist session to database: {e}")
@@ -487,6 +505,36 @@ def _get_secure_cookies(request: Request) -> bool:
     return forwarded_proto == "https" or str(request.url.scheme) == "https"
 
 
+def session_from_row(row: dict) -> SessionData | None:
+    """Rebuild a persisted session; None (deny) when its scoping is unreadable.
+
+    Both chat and account (profile) restrictions are restored, so a viewer
+    restart can never widen what a session may see.
+    """
+    def _json(field: str):
+        raw = row.get(field)
+        if not raw:
+            return None
+        return json.loads(raw)
+
+    try:
+        chat_ids = _json("allowed_chat_ids")
+        profile_ids = _json("allowed_profile_ids")
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Session with corrupted scoping (role=%s); denying access", row.get("role"))
+        return None
+    return SessionData(
+        username=row["username"],
+        role=row["role"],
+        allowed_chat_ids=set(chat_ids) if chat_ids is not None else None,
+        allowed_profile_ids=list(profile_ids) if profile_ids is not None else None,
+        no_download=bool(row.get("no_download", 0)),
+        source_token_id=row.get("source_token_id"),
+        created_at=row["created_at"],
+        last_accessed=row["last_accessed"],
+    )
+
+
 async def _resolve_session(auth_cookie: str) -> SessionData | None:
     """Look up session from in-memory cache, falling back to DB if needed."""
     session = _sessions.get(auth_cookie)
@@ -504,23 +552,9 @@ async def _resolve_session(auth_cookie: str) -> SessionData | None:
     if not row or time.time() - row["created_at"] > AUTH_SESSION_SECONDS:
         return None
 
-    allowed = None
-    if row["allowed_chat_ids"]:
-        try:
-            allowed = set(json.loads(row["allowed_chat_ids"]))
-        except (json.JSONDecodeError, TypeError):
-            logger.warning(f"Corrupted allowed_chat_ids for session {row['username']}, denying access")
-            return None
-
-    session = SessionData(
-        username=row["username"],
-        role=row["role"],
-        allowed_chat_ids=allowed,
-        no_download=bool(row.get("no_download", 0)),
-        source_token_id=row.get("source_token_id"),
-        created_at=row["created_at"],
-        last_accessed=row["last_accessed"],
-    )
+    session = session_from_row(row)
+    if session is None:
+        return None
     _sessions[auth_cookie] = session
     return session
 

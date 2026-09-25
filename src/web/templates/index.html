@@ -3138,6 +3138,25 @@
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
+                <!-- Account switcher: admins move between Telegram accounts without logging in again -->
+                <div v-if="authRequired && isAuthenticated && isAdminOrAbove && switchableAccounts.length > 1"
+                    class="flex items-center gap-2 px-6 py-3 flex-wrap" style="border-bottom: 1px solid var(--tg-border);">
+                    <span class="text-xs mr-1" style="color: var(--tg-muted);"><i class="fas fa-user-circle mr-1"></i>Account</span>
+                    <button v-for="acct in switchableAccounts" :key="acct.id" @click="switchAccount(acct)"
+                        :disabled="acct.key === activeAccountKey || !!switchingAccount"
+                        class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors disabled:cursor-default"
+                        :style="{
+                            background: acct.key === activeAccountKey ? (acct.color || 'var(--tg-accent)') : 'var(--tg-bg)',
+                            color: acct.key === activeAccountKey ? '#fff' : 'var(--tg-text)',
+                            border: '1px solid var(--tg-border)'
+                        }"
+                        :aria-pressed="acct.key === activeAccountKey">
+                        <i :class="'fas fa-' + (acct.icon || 'database')" class="text-xs"></i>
+                        <span>{{ acct.name }}</span>
+                        <i v-if="acct.key === activeAccountKey" class="fas fa-check text-[10px]"></i>
+                        <span v-else-if="switchingAccount === acct.key" class="login-spinner"></span>
+                    </button>
+                </div>
                 <!-- Tab bar -->
                 <div class="flex px-6" style="border-bottom: 1px solid var(--tg-border);">
                     <button @click="settingsActiveTab = 'appearance'"
@@ -6299,6 +6318,30 @@
                             noDownload.value = !!data.no_download
                             console.log('[DEBUG] authRequired:', authRequired.value, 'isAuthenticated:', isAuthenticated.value)
 
+                            // Account switch hand-off (#handoff=<ticket>): the archive of another
+                            // account vouched for this admin, so no second login is needed. The
+                            // fragment never reaches a server; drop it from the address bar at once.
+                            const handoffTicket = new URLSearchParams(window.location.hash.slice(1)).get('handoff')
+                            if (handoffTicket) {
+                                window.history.replaceState({}, '', window.location.pathname + window.location.search)
+                                if (!isAuthenticated.value && authRequired.value) {
+                                    try {
+                                        const handoffRes = await fetch('/auth/handoff', {
+                                            method: 'POST', credentials: 'include',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ ticket: handoffTicket }),
+                                        })
+                                        if (handoffRes.ok) {
+                                            const handoffData = await handoffRes.json()
+                                            isAuthenticated.value = true
+                                            userRole.value = handoffData.role || ''
+                                            currentUsername.value = handoffData.username || ''
+                                            noDownload.value = false
+                                        }
+                                    } catch (e) { console.error('Account hand-off failed:', e) }
+                                }
+                            }
+
                             // Auto-login via ?token= URL parameter (v7.2.1)
                             if (!isAuthenticated.value && authRequired.value) {
                                 const urlParams = new URLSearchParams(window.location.search)
@@ -6327,10 +6370,8 @@
                                 }
                             }
 
-                            // Load profile selector if not yet authenticated
-                            if (!isAuthenticated.value) {
-                                loadProfiles()  // fire-and-forget, non-blocking
-                            }
+                            // Profiles feed the login card and, once signed in, the account switcher
+                            loadProfiles()  // fire-and-forget, non-blocking
 
                             if (isAuthenticated.value) {
                                 await loadChats()
@@ -8316,6 +8357,35 @@
                     loadMediaPanel(true)
                 }
 
+                // Account switcher (Settings): profiles whose URL switches account (?account=)
+                const profileAccountKey = p => new URLSearchParams((p.url || '').split('?')[1] || '').get('account')
+                const switchableAccounts = computed(() => backupProfiles.value
+                    .map(p => ({ ...p, key: profileAccountKey(p) }))
+                    .filter(p => p.key))
+                const activeAccountKey = computed(() => currentAccountKey() || 'main')
+                const switchingAccount = ref('')
+                const switchAccount = async (acct) => {
+                    if (!acct?.key || acct.key === activeAccountKey.value || switchingAccount.value) return
+                    switchingAccount.value = acct.key
+                    let target = `/?account=${encodeURIComponent(acct.key)}`
+                    try {
+                        // A hand-off ticket signs this admin in on the other account; without
+                        // one (not configured / not allowed) it is a plain switch that reuses
+                        // any session already open there, else shows its login card.
+                        const res = await fetch('/api/auth/handoff', {
+                            method: 'POST', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ profile_id: acct.id, account: acct.key }),
+                        })
+                        if (res.ok) {
+                            const data = await res.json()
+                            if (data.ticket && data.account === acct.key) target += `#handoff=${encodeURIComponent(data.ticket)}`
+                        }
+                    } catch (e) { console.error('Account hand-off request failed:', e) }
+                    localStorage.setItem('tg-last-profile', acct.id)
+                    window.location.href = target
+                }
+
                 // Previous profile photos for the open chat (avatar history)
                 const chatAvatars = ref({ previous: [] })
                 const loadChatAvatars = async (chatId) => {
@@ -10157,6 +10227,10 @@
                     copyToClipboard,
                     withAccount,
                     chatAvatars,
+                    switchableAccounts,
+                    activeAccountKey,
+                    switchingAccount,
+                    switchAccount,
                     copyPermalink,
                     startLongPress,
                     cancelLongPress,
