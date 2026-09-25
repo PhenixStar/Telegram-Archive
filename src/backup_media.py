@@ -195,10 +195,30 @@ class BackupMediaMixin:
 
         # Get Telegram's file unique ID for deduplication
         telegram_file_id = None
+        content = None
         if hasattr(media, "photo"):
-            telegram_file_id = str(getattr(media.photo, "id", None))
+            content = media.photo
         elif hasattr(media, "document"):
-            telegram_file_id = str(getattr(media.document, "id", None))
+            content = media.document
+        content_id = getattr(content, "id", None)
+        if content_id is not None:
+            telegram_file_id = str(content_id)
+
+        # A photo/document message whose content Telegram no longer holds (an
+        # expired view-once or timer photo keeps the media wrapper with no photo
+        # inside). There is nothing to download: record it as unavailable. The
+        # id used to be str(None), so every such message was filed as "None.jpg",
+        # linked to a shared file that never existed and marked downloaded.
+        if (hasattr(media, "photo") or hasattr(media, "document")) and content_id is None:
+            logger.debug(f"Media content no longer available on Telegram (type: {media_type})")
+            return {
+                "id": media_id,
+                "type": media_type,
+                "message_id": message.id,
+                "chat_id": chat_id,
+                "downloaded": False,
+                "skip_reason": "unavailable",
+            }
 
         # Check file size (estimated)
         file_size = self._get_media_size(media)
@@ -241,6 +261,9 @@ class BackupMediaMixin:
             # Generate filename using file_id for automatic deduplication
             file_name = self._get_media_filename(message, media_type, telegram_file_id)
             file_path = os.path.join(chat_media_dir, file_name)
+            # Set when this call fetched bytes; a link recorded by an earlier run
+            # is kept as downloaded even if its target is unreachable (#143).
+            attempted_download = False
 
             # Check if deduplication is enabled
             if getattr(self.config, "deduplicate_media", True):
@@ -275,6 +298,7 @@ class BackupMediaMixin:
                         # Capture the actual path returned by download_media: Telethon may
                         # append an extension (e.g. .bin -> .mp4), so the symlink target must
                         # point at the returned path, not the requested one.
+                        attempted_download = True
                         actual_shared_path = await self._download_media_to_path(
                             message, shared_file_path, file_size, chat_id
                         )
@@ -301,12 +325,34 @@ class BackupMediaMixin:
                 # No deduplication - download directly to chat directory.
                 # lexists short-circuits when a symlink is already recorded.
                 if not os.path.lexists(file_path):
-                    await self._download_media_to_path(message, file_path, file_size, chat_id)
+                    attempted_download = True
+                    returned_path = await self._download_media_to_path(message, file_path, file_size, chat_id)
+                    # Telethon may append the real extension (.bin -> .jpg):
+                    # record the file that was actually written.
+                    if isinstance(returned_path, str) and returned_path:
+                        file_path = returned_path
+                        file_name = os.path.basename(returned_path)
                     logger.debug(f"Downloaded media: {file_name}")
 
                 # Update file_size with actual size from disk
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
+
+            # Only a file that actually landed counts as downloaded. A download
+            # that produced nothing must not leave a dangling link behind: the
+            # link would make every later run skip this media as already there.
+            if attempted_download and not os.path.exists(file_path):
+                if os.path.islink(file_path):
+                    os.remove(file_path)
+                logger.warning("Media download produced no file; leaving it pending for a later run")
+                return {
+                    "id": media_id,
+                    "type": media_type,
+                    "message_id": message.id,
+                    "chat_id": chat_id,
+                    "file_size": file_size,
+                    "downloaded": False,
+                }
 
             # Extract media metadata
             media_data = {

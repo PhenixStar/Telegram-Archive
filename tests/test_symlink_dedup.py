@@ -495,7 +495,8 @@ class TestShutilMoveFallback(unittest.TestCase):
         # The code does `import shutil; shutil.move(...)` inside the except block,
         # so we patch shutil.move on the shutil module itself.
         symlink_error = OSError(errno.EPERM, "Operation not permitted")
-        with patch("os.symlink", side_effect=symlink_error), patch("shutil.move") as mock_move:
+        real_move = shutil.move
+        with patch("os.symlink", side_effect=symlink_error), patch("shutil.move", side_effect=real_move) as mock_move:
             result = self._run(self.backup._process_media(msg, 400))
 
         self.assertIsNotNone(result)

@@ -212,7 +212,13 @@ class TestProcessMediaRecordsFilteredMedia(unittest.TestCase):
     def test_unfiltered_media_still_downloads(self):
         """Sanity check: when the predicate allows the type, download proceeds as before."""
         self.backup.config.should_download_media_type = MagicMock(return_value=True)
-        self.backup.client.download_media = AsyncMock(return_value=os.path.join(self.media_path, "won.jpg"))
+        def fake_download(message, path):
+            # A real download writes the file; only a file that landed counts.
+            with open(path, "wb") as f:
+                f.write(b"jpeg")
+            return path
+
+        self.backup.client.download_media = AsyncMock(side_effect=fake_download)
         self.backup.db.find_media_by_content_hash = AsyncMock(return_value=None)
         self.backup._get_media_type = MagicMock(return_value="photo")
         self.backup._get_media_filename = MagicMock(return_value="won.jpg")
@@ -223,6 +229,40 @@ class TestProcessMediaRecordsFilteredMedia(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertTrue(result["downloaded"])
+
+    def test_photo_telegram_no_longer_holds_is_unavailable_not_none_jpg(self):
+        """An expired view-once/timer photo keeps a media wrapper with no photo inside.
+
+        It used to be filed as "None.jpg", linked to a file that never existed and
+        marked downloaded; now it is recorded as unavailable and nothing is fetched.
+        """
+        self.backup.config.should_download_media_type = MagicMock(return_value=True)
+        self.backup._get_media_type = MagicMock(return_value="photo")
+        self.backup._get_media_size = MagicMock(return_value=0)
+        msg = self._make_message(msg_id=44)
+        msg.media.photo = None
+
+        result = self._run(self.backup._process_media(msg, 902))
+
+        self.assertEqual(result["skip_reason"], "unavailable")
+        self.assertFalse(result["downloaded"])
+        self.backup.client.download_media.assert_not_called()
+        self.assertFalse(os.path.lexists(os.path.join(self.media_path, "902", "None.jpg")))
+
+    def test_download_that_writes_nothing_stays_pending_without_a_link(self):
+        """A download that produced no file is not downloaded and leaves no dangling link."""
+        self.backup.config.should_download_media_type = MagicMock(return_value=True)
+        self.backup.client.download_media = AsyncMock(return_value=None)
+        self.backup._get_media_type = MagicMock(return_value="photo")
+        self.backup._get_media_filename = MagicMock(return_value="ghost.jpg")
+        self.backup._get_media_size = MagicMock(return_value=512)
+        msg = self._make_message(msg_id=45, file_id="ghost")
+
+        result = self._run(self.backup._process_media(msg, 903))
+
+        self.assertFalse(result["downloaded"])
+        self.assertIsNone(result.get("skip_reason"))  # pending: a later run retries it
+        self.assertFalse(os.path.lexists(os.path.join(self.media_path, "903", "ghost.jpg")))
 
 
 class TestListenerDownloadMediaFilter(unittest.TestCase):
