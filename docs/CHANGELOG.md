@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Switch accounts without logging in again] - 2026-09-25
+
+### Added
+- **Account strip in Settings** (admin and above): switch between Telegram accounts
+  served behind one hostname without a second login. The current archive mints a
+  signed hand-off ticket (`POST /api/auth/handoff`, HMAC-SHA256 over
+  `VIEWER_HANDOFF_SECRET`, 60 s, single use, bound to one target account); the target
+  (`POST /auth/handoff`, `VIEWER_ACCOUNT_KEY`) opens a session with exactly the carried
+  role and account scope. The ticket travels in the URL fragment, never to a server.
+  An admin can only switch to accounts (backup profiles) assigned to it. Without the
+  two settings the strip falls back to a plain switch.
+
+### Fixed
+- **An admin's account scope survives a viewer restart** (migration 019): sessions
+  reloaded from the database used to drop `allowed_profile_ids` and come back
+  unrestricted; a corrupt stored scope now denies instead of granting everything.
+
 ## [Vanished photos no longer break the viewer] - 2026-09-25
 
 ### Fixed
