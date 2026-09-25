@@ -70,10 +70,12 @@ class MediaMixin:
             "cleared": update(Media).where(
                 Media.skip_reason == "oversize", or_(Media.file_size.is_(None), ~oversize)
             ),
-            "oversize": update(Media).where(Media.downloaded == 0, Media.skip_reason.is_(None), oversize),
         }
         if not filters_active:
             statements["unfiltered"] = update(Media).where(Media.skip_reason == "filtered")
+        # Last, so a row un-marked above (a filter turned off) that is still over
+        # the cap is classified in this same pass rather than one run later.
+        statements["oversize"] = update(Media).where(Media.downloaded == 0, Media.skip_reason.is_(None), oversize)
         counts: dict[str, int] = {}
         async with self.db_manager.async_session_factory() as session:
             for name, stmt in statements.items():

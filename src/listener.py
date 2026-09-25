@@ -48,8 +48,8 @@ from .message_utils import (
     sender_display_name,
     utcnow_naive,
 )
-from .rich_message import effective_message_text
 from .realtime import NotificationType, RealtimeNotifier
+from .rich_message import effective_message_text
 from .telegram_backup import call_with_flood_retry
 
 logger = logging.getLogger(__name__)

@@ -80,7 +80,9 @@ async def test_one_scan_yields_totals_and_per_chat_media_maps(sqlite_adapter):
     from datetime import datetime
 
     for chat_id, message_id in ((1, 1), (1, 2), (2, 1)):
-        await sqlite_adapter.insert_message({"id": message_id, "chat_id": chat_id, "date": datetime(2026, 1, 1), "text": "x"})
+        await sqlite_adapter.insert_message(
+            {"id": message_id, "chat_id": chat_id, "date": datetime(2026, 1, 1), "text": "x"}
+        )
     rows = [
         {"id": "1_1_photo", "chat_id": 1, "message_id": 1, "type": "photo", "file_size": 1000, "downloaded": 1},
         {"id": "1_2_video", "chat_id": 1, "message_id": 2, "type": "video", "file_size": 3000, "downloaded": 1},

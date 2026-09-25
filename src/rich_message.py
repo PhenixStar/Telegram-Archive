@@ -325,12 +325,6 @@ def effective_message_text(message: object) -> str:
     return ""
 
 
-def message_rich_payload(message: object) -> dict | None:
-    """``raw_data["rich_message"]`` for a message, or None when it has no block tree to keep."""
-    rich = rich_message_of(message)
-    return rich_message_payload(rich) if rich is not None else None
-
-
 def rich_message_payload(rich: object) -> dict:
     """JSON-safe copy of the block tree for ``raw_data["rich_message"]``.
 

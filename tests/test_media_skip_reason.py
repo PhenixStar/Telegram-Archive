@@ -116,3 +116,10 @@ def test_catch_up_query_skips_rows_that_can_never_download():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert "'unavailable'" in module.SKIPPED_MEDIA_SQL and "'filtered'" in module.SKIPPED_MEDIA_SQL
+
+
+@pytest.mark.asyncio
+async def test_row_unfiltered_while_still_over_the_cap_is_classified_in_the_same_pass(adapter):
+    await _seed(adapter, [_row("big-filtered", 1, 900 * MB, reason="filtered")])
+    await adapter.reconcile_media_skip_reasons(500 * MB, filters_active=False)
+    assert (await _reasons(adapter))["big-filtered"] == "oversize"

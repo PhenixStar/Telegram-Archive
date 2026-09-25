@@ -236,7 +236,7 @@ class BackupMediaMixin:
                 "message_id": message.id,
                 "chat_id": chat_id,
                 "file_size": file_size,
-                "downloaded": False,                "downloaded": False,
+                "downloaded": False,
                 "skip_reason": "filtered",  # the viewer says why, not "will download"
             }
 
@@ -248,7 +248,7 @@ class BackupMediaMixin:
                 "message_id": message.id,
                 "chat_id": chat_id,
                 "file_size": file_size,
-                "downloaded": False,                "downloaded": False,
+                "downloaded": False,
                 "skip_reason": "oversize",  # the viewer says why, not "will download"
             }
 

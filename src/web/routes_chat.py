@@ -558,9 +558,9 @@ async def refresh_stats(user: UserContext = Depends(require_master)):
     """Manually trigger stats recalculation."""
     try:
         stats = await deps.db.calculate_and_store_statistics(storage_path=deps.config.backup_path)
-        # Same rule as the read path: the per-chat maps are scoping input, keyed by chat id.
-        for key in PER_CHAT_STATS_KEYS:
-            stats.pop(key, None)
+        # Same rule as the read path: strip the per-chat maps and scope the
+        # figures (a master can still be limited by DISPLAY_CHAT_IDS).
+        _scope_stats_to_user(stats, deps.get_user_chat_ids(user))
         stats["timezone"] = deps.config.viewer_timezone
         return stats
     except Exception as e:
