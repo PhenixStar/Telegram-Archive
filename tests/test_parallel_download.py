@@ -458,7 +458,44 @@ class TestReassembly(_PatchHelpers, _TmpDirMixin, unittest.IsolatedAsyncioTestCa
 # --------------------------------------------------------------------------- #
 # Failure modes — transactional cleanup + propagation
 # --------------------------------------------------------------------------- #
+class _StallingClient(FakeClient):
+    """A sender whose connection died: the request at one offset never answers."""
+
+    def __init__(self, blob: bytes, *, stall_at_offset: int) -> None:
+        super().__init__(blob)
+        self._stall_at_offset = stall_at_offset
+
+    async def _call(self, sender: Any, request: Any) -> _GetFileResult:
+        if request.offset == self._stall_at_offset:
+            await asyncio.Event().wait()  # never set: the response is never coming
+        return await super()._call(sender, request)
+
+
 class TestFailureModes(_PatchHelpers, _TmpDirMixin, unittest.IsolatedAsyncioTestCase):
+    async def test_unanswered_chunk_fails_the_transfer_and_cleans_up(self) -> None:
+        # A host network drop mid-transfer left a chunk pending forever: the run
+        # hung and the pre-allocated file stayed on disk, mostly zeros. The
+        # deadline turns that into the fallback signal, with full cleanup.
+        blob = os.urandom(524288 * 4)
+        client = _StallingClient(blob, stall_at_offset=524288 * 2)
+        self._patch_sender(client)
+        dl = ParallelDownloader(client, connections=4, part_size=524288, chunk_timeout=0.2)
+        dest = str(self.tmp / "video.mp4")
+
+        with self.assertRaises(ParallelDownloadUnavailable) as ctx:
+            await asyncio.wait_for(dl.download_media(_make_message(len(blob)), dest), 5)
+        self.assertIn("no response for chunk", str(ctx.exception))
+        self.assertFalse(os.path.exists(dest))
+        self.assertTrue(all(s.disconnected for s in client.created_senders))
+
+    def test_chunk_timeout_config_has_a_floor(self) -> None:
+        from src.config import Config
+
+        with patch.dict(os.environ, {"PARALLEL_DOWNLOAD_CHUNK_TIMEOUT_SECONDS": "1"}):
+            self.assertEqual(Config().parallel_download_chunk_timeout, 10.0)
+        with patch.dict(os.environ, {"PARALLEL_DOWNLOAD_CHUNK_TIMEOUT_SECONDS": "300"}):
+            self.assertEqual(Config().parallel_download_chunk_timeout, 300.0)
+
     async def test_floodwait_propagates_and_cleans_up(self) -> None:
         blob = os.urandom(524288 * 3)
         client = FakeClient(blob, fail_at_offset=524288, fail_exc=FloodWaitError(request=None))

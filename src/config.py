@@ -208,6 +208,12 @@ class Config:
         # Concurrent senders per file. Hard-capped well under Telegram's ~20
         # connection cliff to stay safe for an unattended, scheduled tool.
         self.parallel_download_connections = max(2, min(8, int(os.getenv("PARALLEL_DOWNLOAD_CONNECTIONS", "4"))))
+        # Seconds a single chunk request may go unanswered before the parallel
+        # transfer is abandoned (dead connection) and the file is retried
+        # single-stream. Floor of 10s so a typo cannot make every chunk time out.
+        self.parallel_download_chunk_timeout = max(
+            10.0, float(os.getenv("PARALLEL_DOWNLOAD_CHUNK_TIMEOUT_SECONDS", "120"))
+        )
         # Per-request chunk size in KiB. Must be a 4 KiB multiple that divides
         # 1 MiB and is <= 512 KiB (Telegram getFile constraints); invalid values
         # fall back to the 512 KiB maximum. Peak memory ~= connections * part.

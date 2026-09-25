@@ -389,6 +389,7 @@ class BackupMediaMixin:
                     connections=self.config.parallel_download_connections,
                     part_size=self.config.get_parallel_download_part_size_bytes(),
                     max_file_size=self.config.get_max_media_size_bytes(),
+                    chunk_timeout=getattr(self.config, "parallel_download_chunk_timeout", 120.0),
                 )
             try:
                 return await self._parallel_downloader.download_media(message, tmp_path)

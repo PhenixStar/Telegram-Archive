@@ -28,6 +28,12 @@ Design constraints (issue #183, all enforced here):
    caller's retry / ``FileReferenceExpired`` refresh logic is unchanged.
 6. **Bounded memory.** Chunks stream straight to disk; peak resident bytes are
    roughly ``connections * part_size`` (default 4 * 512 KiB = 2 MiB).
+7. **Bounded waiting.** Each chunk request has a deadline. A sender whose
+   connection died without recovering (a host network drop mid-transfer)
+   otherwise leaves its request pending forever: the transfer never finishes,
+   never cleans up, and the run hangs holding a pre-allocated, mostly-zero file.
+   A missed deadline fails the transfer transactionally and falls back to
+   single-stream for that file.
 """
 
 import asyncio
@@ -60,6 +66,9 @@ logger = logging.getLogger(__name__)
 CHUNK_ALIGN = 4096
 MAX_PART_SIZE = 524288  # 512 KiB — Telegram's per-request ceiling
 ONE_MB = 1048576
+# A 512 KiB chunk normally returns in well under a second; two minutes of
+# silence means the sender's connection is gone, not slow.
+DEFAULT_CHUNK_TIMEOUT_SECONDS = 120.0
 
 
 class ParallelDownloadUnavailable(Exception):
@@ -140,7 +149,15 @@ def _pwrite_all(fd: int, data: bytes, offset: int) -> None:
 class ParallelDownloader:
     """Fetches one file at a time over a bounded pool of independent senders."""
 
-    def __init__(self, client, *, connections: int, part_size: int, max_file_size: int | None = None):
+    def __init__(
+        self,
+        client,
+        *,
+        connections: int,
+        part_size: int,
+        max_file_size: int | None = None,
+        chunk_timeout: float = DEFAULT_CHUNK_TIMEOUT_SECONDS,
+    ):
         if not is_valid_part_size(part_size):
             raise ValueError(f"invalid part_size {part_size}; must be a 4 KiB multiple dividing 1 MiB, <= 512 KiB")
         self._client = client
@@ -150,6 +167,7 @@ class ParallelDownloader:
         # metadata. A ceiling caps how many chunks (and how large a
         # pre-allocation) one transfer can request before we fall back.
         self._max_file_size = int(max_file_size) if max_file_size and max_file_size > 0 else None
+        self._chunk_timeout = float(chunk_timeout) if chunk_timeout and chunk_timeout > 0 else DEFAULT_CHUNK_TIMEOUT_SECONDS
 
     async def download_media(self, message, file) -> str:
         """Download ``message``'s media to path ``file`` and return ``file``.
@@ -237,7 +255,13 @@ class ParallelDownloader:
                 return
             request = functions.upload.GetFileRequest(location, offset=offset, limit=self._part_size)
             try:
-                result = await self._client._call(sender, request)
+                result = await asyncio.wait_for(self._client._call(sender, request), self._chunk_timeout)
+            except TimeoutError as exc:
+                # Dead connection, not a Telegram error: fail this transfer so the
+                # cleanup runs and the caller retries the file single-stream.
+                raise ParallelDownloadUnavailable(
+                    f"no response for chunk at offset {offset} within {self._chunk_timeout:g}s"
+                ) from exc
             except (FloodWaitError, FloodPremiumWaitError):
                 # Must propagate unchanged so the caller's single flood budget
                 # (call_with_flood_retry) governs it — never a second backoff.
