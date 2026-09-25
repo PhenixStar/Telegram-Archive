@@ -6802,10 +6802,15 @@
                             showProfileSelector.value = backupProfiles.value.length > 0
                             const lastId = localStorage.getItem('tg-last-profile')
                             const last = backupProfiles.value.find(p => p.id === lastId)
-                            // Prefer the profile for the account this page is actually serving
-                            const key = currentAccountKey()
-                            const current = key && backupProfiles.value.find(p => new URLSearchParams((p.url || '').split('?')[1] || '').get('account') === key)
-                            selectedProfile.value = current || last || backupProfiles.value[0] || null
+                            // When profiles switch accounts (?account=), the selection must show the
+                            // account this page is actually serving — a remembered pick that never
+                            // switched would label one archive with another's name. No routing
+                            // cookie means the proxy's default account, "main".
+                            const accountOf = p => new URLSearchParams((p.url || '').split('?')[1] || '').get('account')
+                            const routed = backupProfiles.value.some(accountOf)
+                                ? backupProfiles.value.find(p => accountOf(p) === (currentAccountKey() || 'main'))
+                                : null
+                            selectedProfile.value = routed || last || backupProfiles.value[0] || null
                         }
                     } catch { /* profiles endpoint not available — single instance */ }
                 }
