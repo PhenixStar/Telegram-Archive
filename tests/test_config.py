@@ -272,12 +272,25 @@ class TestSkipMediaChatIds(unittest.TestCase):
             config = Config()
             self.assertEqual(config.skip_media_chat_ids, {-1001234567890, -1009876543210, 123456})
 
-    def test_skip_media_delete_existing_defaults_true(self):
-        """SKIP_MEDIA_DELETE_EXISTING defaults to true when not set."""
+    def test_skip_media_delete_existing_defaults_false(self):
+        """Skipping a chat's media keeps what is already archived unless asked."""
         env_vars = {"CHAT_TYPES": "private", "BACKUP_PATH": self.temp_dir}
         with patch.dict(os.environ, env_vars, clear=True):
             config = Config()
-            self.assertTrue(config.skip_media_delete_existing)
+            self.assertFalse(config.skip_media_delete_existing)
+
+    def test_archive_keeping_defaults(self):
+        """Deletions are soft and excluded chats keep their data unless configured otherwise."""
+        env_vars = {"CHAT_TYPES": "private", "BACKUP_PATH": self.temp_dir}
+        with patch.dict(os.environ, env_vars, clear=True):
+            config = Config()
+            self.assertEqual(config.deletion_mode, "soft")
+            self.assertFalse(config.exclude_delete_existing)
+        env_vars.update({"DELETION_MODE": "hard", "EXCLUDE_DELETE_EXISTING": "true"})
+        with patch.dict(os.environ, env_vars, clear=True):
+            config = Config()
+            self.assertEqual(config.deletion_mode, "hard")
+            self.assertTrue(config.exclude_delete_existing)
 
     def test_skip_media_delete_existing_can_be_disabled(self):
         """Can disable SKIP_MEDIA_DELETE_EXISTING to keep existing media."""

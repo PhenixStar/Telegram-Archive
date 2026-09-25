@@ -690,14 +690,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                     except Exception as e:
                         logger.warning(f"  → Could not fetch included chat {include_id}: {e}")
 
-            # Delete only explicitly excluded chats from database
-            if explicitly_excluded_chat_ids:
-                logger.info(f"Deleting {len(explicitly_excluded_chat_ids)} explicitly excluded chats from database...")
-                for chat_id in explicitly_excluded_chat_ids:
-                    try:
-                        await self.db.delete_chat_and_related_data(chat_id, self.config.media_path)
-                    except Exception as e:
-                        logger.error(f"Error deleting chat {chat_id}: {e}", exc_info=True)
+            await self._handle_excluded_chats(explicitly_excluded_chat_ids)
 
             logger.info(f"Backing up {len(filtered_dialogs)} dialogs after filtering")
 
@@ -1266,6 +1259,28 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         except OSError as e:
             logger.warning("Could not restore %s after a failed re-download: %s", file_path, e)
 
+    async def _handle_excluded_chats(self, excluded_chat_ids: set[int]) -> None:
+        """Skip excluded chats; delete their archived data only on request.
+
+        Excluding a chat stops capturing it. What the archive already holds for it
+        (rows, media folder, avatars) is deleted only when EXCLUDE_DELETE_EXISTING
+        is set; by default it stays. Logs a count, never the chat ids.
+        """
+        if not excluded_chat_ids:
+            return
+        if not getattr(self.config, "exclude_delete_existing", False):
+            logger.info(
+                f"{len(excluded_chat_ids)} excluded chat(s) keep their archived rows and files "
+                "(EXCLUDE_DELETE_EXISTING=false)"
+            )
+            return
+        logger.info(f"Deleting {len(excluded_chat_ids)} explicitly excluded chats from database...")
+        for chat_id in excluded_chat_ids:
+            try:
+                await self.db.delete_chat_and_related_data(chat_id, self.config.media_path)
+            except Exception as e:
+                logger.error(f"Error deleting chat {chat_id}: {e}", exc_info=True)
+
     async def _backup_dialog(self, dialog, is_archived: bool = False) -> int:
         """
         Backup a single dialog (chat).
@@ -1718,7 +1733,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                     if remote_msg is None:
                         if not aligned:
                             continue  # omitted from a misaligned response, not confirmed deleted
-                        if getattr(self.config, "deletion_mode", "hard") == "soft":
+                        if getattr(self.config, "deletion_mode", "soft") == "soft":
                             # mark_message_deleted defaults deleted_at to now(UTC); this path
                             # doesn't broadcast, so no need to pass an explicit timestamp.
                             await self.db.mark_message_deleted(chat_id, msg_id)

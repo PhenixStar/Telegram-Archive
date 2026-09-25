@@ -53,6 +53,7 @@ try:
 except ValueError as e:
     logger.error(f"Configuration error: {e}")
     raise
+config.log_summary()
 
 # Import shared state and dependencies
 from .dependencies import (
