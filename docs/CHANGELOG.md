@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Parallel download deadline] - 2026-09-25
+
+### Fixed
+- **A network drop mid-download no longer hangs the run.** A parallel-download chunk
+  whose connection died stayed pending forever, leaving a pre-allocated, mostly-zero
+  file behind. Each chunk now has a deadline, `PARALLEL_DOWNLOAD_CHUNK_TIMEOUT_SECONDS`
+  (default 120, minimum 10). A missed deadline removes the partial file, closes the
+  connections, and retries that file single-stream.
+
 ## [Media catch-up by size band] - 2026-09-25
 
 ### Added
