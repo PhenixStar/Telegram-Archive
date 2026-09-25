@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Vanished photos no longer break the viewer] - 2026-09-25
+
+### Fixed
+- **Expired view-once / timer photos were filed as a shared "None.jpg" marked
+  downloaded.** Their content id is gone, so the name became "None"; the file never
+  existed, the viewer showed a broken image, and the recorded link made every later
+  run skip it. Such media is now recorded as unavailable ("no longer on Telegram"),
+  and a download that writes nothing leaves no link and stays pending. 155 affected
+  rows across both archives were repaired (plus 2 photos Telegram no longer returns).
+
 ## [Upstream v8.15 port] - 2026-09-25
 
 Semantic port of upstream v8.13.0..v8.15.1, fitted to one account per archive
