@@ -48,6 +48,7 @@ from .message_utils import (
     sender_display_name,
     utcnow_naive,
 )
+from .rich_message import effective_message_text
 from .realtime import NotificationType, RealtimeNotifier
 from .telegram_backup import call_with_flood_retry
 
@@ -785,7 +786,7 @@ class TelegramListener:
                     return
 
                 self.stats["edits_received"] += 1
-                new_text = message.text or ""
+                new_text = effective_message_text(message)
                 edit_date = message.edit_date
 
                 # Check rate limit before applying

@@ -49,6 +49,7 @@ from .folder_utils import (
 )
 from .media_errors import is_media_location_error
 from .parallel_download import ParallelDownloader
+from .rich_message import effective_message_text
 from .telegram_stall_guard import (
     TELEGRAM_CALL_TIMEOUT_SECONDS,
     iter_with_stall_timeout,
@@ -1756,7 +1757,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         # Update text and edit_date; count only edits the archive
                         # actually accepted (the adapter re-checks under lock).
                         outcome = await self.db.update_message_text(
-                            chat_id, msg_id, remote_msg.message, remote_msg.edit_date
+                            chat_id, msg_id, effective_message_text(remote_msg), remote_msg.edit_date
                         )
                         if outcome == "applied":
                             total_updated += 1

@@ -156,7 +156,7 @@ class TestEntityTypeVocabulary:
     def test_telethon_names_map_to_the_names_the_viewer_renders(self):
         from telethon.tl import types as t
 
-        from src.backup_extraction import _entity_type
+        from src.message_utils import _entity_type
 
         expected = {
             "Bold": "bold",

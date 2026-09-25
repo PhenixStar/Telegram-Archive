@@ -19,7 +19,13 @@ from telethon.tl.types import (
 )
 from telethon.utils import get_peer_id
 
-from .message_utils import extract_extended_media_details, extract_webpage_preview, sender_display_name
+from .message_utils import (
+    extract_extended_media_details,
+    extract_webpage_preview,
+    sender_display_name,
+    serialize_message_entity,
+)
+from .rich_message import render_rich_message, rich_message_of, rich_message_payload
 from .telegram_stall_guard import TELEGRAM_CALL_TIMEOUT_SECONDS, with_call_timeout
 
 logger = logging.getLogger(__name__)
@@ -33,25 +39,6 @@ def _service_action_type(action: object) -> str:
     """
     name = type(action).__name__.removeprefix("MessageAction")
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-
-
-# Two Telethon class names do not snake_case into the name the stored format uses.
-# The stored vocabulary follows Telegram's own Bot API names, which is what the
-# viewer renders against: MessageEntityStrike is "strikethrough" there, and a
-# mention by user id is displayed exactly like a plain mention.
-_ENTITY_TYPE_ALIASES = {"strike": "strikethrough", "mention_name": "mention"}
-
-
-def _entity_type(entity: object) -> str:
-    """Normalize a Telethon ``MessageEntity`` class name to the stored type (#402).
-
-    ``MessageEntityTextUrl`` -> ``"text_url"``, ``MessageEntityBold`` ->
-    ``"bold"`` — mirrors ``_service_action_type`` above, then applies the
-    aliases above so the stored name matches what the viewer renders.
-    """
-    name = type(entity).__name__.removeprefix("MessageEntity")
-    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-    return _ENTITY_TYPE_ALIASES.get(snake, snake)
 
 
 class BackupExtractionMixin:
@@ -223,21 +210,7 @@ class BackupExtractionMixin:
 
     def _extract_entity(self, entity: object) -> dict:
         """Convert one Telethon ``MessageEntity`` to the raw_data.entities shape (#402)."""
-        data: dict[str, object] = {
-            "type": _entity_type(entity),
-            "offset": entity.offset,
-            "length": entity.length,
-        }
-        url = getattr(entity, "url", None)
-        if url:
-            data["url"] = url
-        user_id = getattr(entity, "user_id", None)
-        if user_id is not None:
-            data["user_id"] = user_id
-        language = getattr(entity, "language", None)
-        if language:
-            data["language"] = language
-        return data
+        return serialize_message_entity(entity)
 
     def _text_with_entities_to_string(self, text_obj) -> str:
         """
@@ -368,6 +341,18 @@ class BackupExtractionMixin:
         if message.entities:
             message_data["raw_data"]["raw_text"] = message.raw_text
             message_data["raw_data"]["entities"] = [self._extract_entity(entity) for entity in message.entities]
+
+        # Rich Text Editor messages (upstream #471): the wire text is empty and the
+        # content is a block tree. Render it into the same text + raw_text/entities
+        # contract as any formatted message, and keep the tree itself.
+        rich = rich_message_of(message)
+        if rich is not None:
+            rich_text, rich_entities = render_rich_message(rich)
+            message_data["text"] = rich_text
+            message_data["raw_data"]["raw_text"] = rich_text
+            if rich_entities:
+                message_data["raw_data"]["entities"] = rich_entities
+            message_data["raw_data"]["rich_message"] = rich_message_payload(rich)
 
         # Handle media
         if message.media:

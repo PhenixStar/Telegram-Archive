@@ -578,3 +578,44 @@ def extract_topic_id(message: object) -> int | None:
     if topic_id is None:
         topic_id = getattr(message.reply_to, "reply_to_msg_id", None)
     return topic_id
+
+
+# Two Telethon class names do not snake_case into the name the stored format uses.
+# The stored vocabulary follows Telegram's own Bot API names, which is what the
+# viewer renders against: MessageEntityStrike is "strikethrough" there, and a
+# mention by user id is displayed exactly like a plain mention.
+_ENTITY_TYPE_ALIASES = {"strike": "strikethrough", "mention_name": "mention"}
+
+
+def _entity_type(entity: object) -> str:
+    """Normalize a Telethon ``MessageEntity`` class name to the stored type (#402).
+
+    ``MessageEntityTextUrl`` -> ``"text_url"``, ``MessageEntityBold`` ->
+    ``"bold"`` — mirrors ``_service_action_type`` above, then applies the
+    aliases above so the stored name matches what the viewer renders.
+    """
+    name = type(entity).__name__.removeprefix("MessageEntity")
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    return _ENTITY_TYPE_ALIASES.get(snake, snake)
+
+
+def serialize_message_entity(entity: object) -> dict:
+    """Convert one Telethon ``MessageEntity`` to the raw_data.entities shape (#402).
+
+    Offsets and lengths are UTF-16 code units into the text they came with.
+    """
+    data: dict[str, object] = {
+        "type": _entity_type(entity),
+        "offset": entity.offset,
+        "length": entity.length,
+    }
+    url = getattr(entity, "url", None)
+    if url:
+        data["url"] = url
+    user_id = getattr(entity, "user_id", None)
+    if user_id is not None:
+        data["user_id"] = user_id
+    language = getattr(entity, "language", None)
+    if language:
+        data["language"] = language
+    return data
