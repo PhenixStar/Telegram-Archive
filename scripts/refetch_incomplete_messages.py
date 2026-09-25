@@ -261,8 +261,6 @@ async def _repair_chat(
 
         if processed:
             await backup._commit_batch(processed, chat_id)
-        if gone and mode == "skipped":
-            await backup.db.mark_media_unavailable(chat_id, gone)
             if mode not in ("media", "skipped"):
                 repaired += len(processed)
             else:
@@ -277,6 +275,8 @@ async def _repair_chat(
                         repaired += 1
                     else:
                         unavailable += 1
+        if gone and mode == "skipped":
+            await backup.db.mark_media_unavailable(chat_id, gone)
 
         if sleep_seconds:
             await asyncio.sleep(sleep_seconds)

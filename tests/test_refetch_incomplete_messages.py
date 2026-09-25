@@ -233,3 +233,68 @@ class TestBlankSelectionExcludesRepairedRows:
         # happens to contain "poll" is not mistaken for a poll payload.
         assert """'%"poll"%'""" in refetch.BLANK_MESSAGES_SQL
         assert """'%poll%'""" not in refetch.BLANK_MESSAGES_SQL
+
+
+class TestRepairChatCounts:
+    """What a repair pass reports must match what it did (a nesting slip once
+    made every blank/media pass report 0 repaired and 0 unrecoverable)."""
+
+    @staticmethod
+    def _backup(tmp_path, fetched_ids, media_for=None):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        async def process(message, chat_id):
+            data = {"id": message.id, "chat_id": chat_id}
+            if media_for is not None:
+                data["_media_data"] = media_for(message.id)
+            return data
+
+        messages = [SimpleNamespace(id=i) for i in fetched_ids]
+        return SimpleNamespace(
+            client=SimpleNamespace(get_entity=AsyncMock(return_value=object()), get_messages=AsyncMock(return_value=messages)),
+            _process_message_isolated=process,
+            _commit_batch=AsyncMock(),
+            db=SimpleNamespace(mark_media_unavailable=AsyncMock()),
+            config=SimpleNamespace(media_path=str(tmp_path)),
+        )
+
+    @pytest.mark.asyncio
+    async def test_blank_mode_counts_repaired_and_unavailable(self, tmp_path, monkeypatch):
+        async def passthrough(fn, *args, **kwargs):
+            return await fn(*args, **kwargs)
+
+        monkeypatch.setattr(refetch, "call_with_flood_retry", passthrough)
+        backup = self._backup(tmp_path, fetched_ids=[1, 2])  # Telegram no longer returns 3
+
+        repaired, unavailable = await refetch._repair_chat(backup, 126, [1, 2, 3], "blank", 0)
+
+        assert (repaired, unavailable) == (2, 1)
+        backup._commit_batch.assert_awaited_once()
+        backup.db.mark_media_unavailable.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_skipped_mode_counts_landed_files_and_marks_gone_media(self, tmp_path, monkeypatch):
+        async def passthrough(fn, *args, **kwargs):
+            return await fn(*args, **kwargs)
+
+        monkeypatch.setattr(refetch, "call_with_flood_retry", passthrough)
+        chat_dir = tmp_path / "126"
+        chat_dir.mkdir()
+        (chat_dir / "real.jpg").write_bytes(b"bytes")
+
+        def media_for(message_id):
+            if message_id == 1:
+                return {"downloaded": True, "file_path": "/data/backups/media/126/real.jpg"}
+            return None  # message 2 no longer carries media
+
+        # media_root must be named "media" for path normalisation
+        media_root = tmp_path
+        backup = self._backup(media_root, fetched_ids=[1, 2], media_for=media_for)
+        backup.config.media_path = str(tmp_path)
+
+        repaired, unavailable = await refetch._repair_chat(backup, 126, [1, 2, 3], "skipped", 0)
+
+        assert unavailable == 2  # 2 lost its media, 3 is gone from Telegram
+        backup.db.mark_media_unavailable.assert_awaited_once_with(126, [2, 3])
+        assert repaired + unavailable == 3
