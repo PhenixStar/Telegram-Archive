@@ -138,6 +138,36 @@ class TestSelection:
 
         assert targets == {126: [3]}
 
+    @pytest.mark.asyncio
+    async def test_skipped_mode_splits_by_size_band(self, monkeypatch, tmp_path):
+        # Small not-downloaded files are caught up in one pass and large ones in
+        # another; a row with no recorded size counts as 0 MB (a failed download).
+        from types import SimpleNamespace
+
+        mb = 1024 * 1024
+
+        async def fake_rows(_db, sql):
+            return [
+                (126, 1, "photo", 0),
+                (126, 2, "document", 120 * mb),
+                (126, 3, "video", 900 * mb),
+                (127, 4, "geo", 0),
+                (127, 5, "video", 3131 * mb),
+            ]
+
+        monkeypatch.setattr(refetch, "_rows", fake_rows)
+        config = SimpleNamespace(media_path=str(tmp_path))
+
+        small = await refetch._select_targets(object(), config, "skipped", (0, 500 * mb))
+        large = await refetch._select_targets(object(), config, "skipped", (500 * mb, None))
+
+        assert small == {126: [1, 2]}
+        assert large == {126: [3], 127: [5]}
+
+        # Chats the operator excluded from backups are left alone.
+        config.global_exclude_ids = {127}
+        assert await refetch._select_targets(object(), config, "skipped", (500 * mb, None)) == {126: [3]}
+
 
 class TestClearEmptyFile:
     """Deduplication makes the chat-directory entry a symlink into a shared store,

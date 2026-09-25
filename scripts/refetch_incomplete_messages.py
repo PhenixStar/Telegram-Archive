@@ -16,6 +16,14 @@ Two repairs, both opt-in and both read-only against Telegram:
     on disk. Interrupted downloads leave these behind; the September 2026 storage
     outage produced a batch of them.
 
+``--mode skipped``
+    Media rows recorded as NOT downloaded: files over MAX_MEDIA_SIZE_MB when they
+    were captured, and downloads that failed. Bound the size band with
+    ``--min-size-mb`` / ``--max-size-mb`` (rows with no recorded size count as
+    0 MB) and lift the capture limit for this run only with
+    ``--max-media-size-mb``, so small files can be caught up first and large ones
+    after. Each size band keeps its own resume checkpoint.
+
 Both modes reuse the live capture code, so a repaired row is written exactly as a
 normal backup would write it. The only thing ever deleted is a ZERO-BYTE media
 file (and its equally empty deduplication target), which has to go before the
@@ -41,6 +49,11 @@ USAGE
 
     # Empty media files
     python scripts/refetch_incomplete_messages.py --mode media --apply
+
+    # Not-downloaded media: everything up to 500 MB first, then the larger files
+    python scripts/refetch_incomplete_messages.py --mode skipped --max-size-mb 500 --apply
+    python scripts/refetch_incomplete_messages.py --mode skipped --min-size-mb 500 \
+        --max-media-size-mb 4096 --apply
 
     # Start over rather than resuming
     python scripts/refetch_incomplete_messages.py --mode blank --apply --restart
@@ -101,6 +114,13 @@ DOWNLOADED_MEDIA_SQL = """
     ORDER BY chat_id, message_id
 """
 
+SKIPPED_MEDIA_SQL = """
+    SELECT chat_id, message_id, type, COALESCE(file_size, 0)
+    FROM media
+    WHERE downloaded = 0 AND message_id IS NOT NULL
+    ORDER BY chat_id, message_id
+"""
+
 
 async def _rows(db: DatabaseAdapter, sql: str) -> list[tuple]:
     """Run a read-only query through the adapter's own engine."""
@@ -157,9 +177,24 @@ def _empty_on_disk(stored_path: str, media_root: str) -> bool:
         return True
 
 
-async def _select_targets(db: DatabaseAdapter, config: Config, mode: str) -> dict[int, list[int]]:
+async def _select_targets(
+    db: DatabaseAdapter, config: Config, mode: str, size_band: tuple[int, int | None] = (0, None)
+) -> dict[int, list[int]]:
     """Message ids needing repair, grouped by chat."""
     targets: dict[int, list[int]] = {}
+    if mode == "skipped":
+        low, high = size_band
+        excluded = set(getattr(config, "global_exclude_ids", ()) or ())
+        for chat_id, message_id, media_type, file_size in await _rows(db, SKIPPED_MEDIA_SQL):
+            if media_type in METADATA_ONLY_MEDIA_TYPES:
+                continue  # a payload, not a file: nothing to download
+            if chat_id in excluded:
+                continue  # the operator excluded this chat from backups
+            if file_size < low or (high is not None and file_size > high):
+                continue
+            targets.setdefault(chat_id, []).append(message_id)
+        return targets
+
     if mode == "blank":
         for chat_id, message_id in await _rows(db, BLANK_MESSAGES_SQL):
             targets.setdefault(chat_id, []).append(message_id)
@@ -210,7 +245,7 @@ async def _repair_chat(
             if data is None:
                 unavailable += 1
                 continue
-            if mode == "media" and not data.get("_media_data"):
+            if mode in ("media", "skipped") and not data.get("_media_data"):
                 # Nothing to repair: the message no longer carries media.
                 unavailable += 1
                 continue
@@ -218,7 +253,7 @@ async def _repair_chat(
 
         if processed:
             await backup._commit_batch(processed, chat_id)
-            if mode != "media":
+            if mode not in ("media", "skipped"):
                 repaired += len(processed)
             else:
                 # A committed row is not a repair: only a file with bytes behind
@@ -226,8 +261,9 @@ async def _repair_chat(
                 # run reports what actually changed on disk.
                 media_root = str(backup.config.media_path)
                 for data in processed:
-                    stored = (data.get("_media_data") or {}).get("file_path")
-                    if stored and not _empty_on_disk(stored, media_root):
+                    media_data = data.get("_media_data") or {}
+                    stored = media_data.get("file_path")
+                    if media_data.get("downloaded", True) and stored and not _empty_on_disk(stored, media_root):
                         repaired += 1
                     else:
                         unavailable += 1
@@ -243,13 +279,25 @@ async def run(args: argparse.Namespace) -> int:
     db_manager = await init_database()
     db = DatabaseAdapter(db_manager)
 
-    targets = await _select_targets(db, config, args.mode)
+    if args.max_media_size_mb:
+        # This run only: the capture code skips anything over the configured limit.
+        config.max_media_size_mb = args.max_media_size_mb
+    mb = 1024 * 1024
+    size_band = (
+        int(args.min_size_mb * mb),
+        int(args.max_size_mb * mb) if args.max_size_mb is not None else None,
+    )
+    targets = await _select_targets(db, config, args.mode, size_band)
     total_messages = sum(len(ids) for ids in targets.values())
     logger.info("Found %d message(s) to repair across %d chat(s)", total_messages, len(targets))
     if not targets:
         return 0
 
     progress_key = PROGRESS_KEY.format(mode=args.mode)
+    if args.mode == "skipped":
+        # Each size band is its own pass; sharing one checkpoint would make the
+        # large-file pass resume after the last chat the small-file pass finished.
+        progress_key += f":{args.min_size_mb:g}-{args.max_size_mb if args.max_size_mb is not None else 'max'}"
     # Resume by the last chat id finished, not by a position in the list: the
     # target set shrinks as rows are repaired, so an index would point somewhere
     # different on every run and silently skip chats.
@@ -315,7 +363,15 @@ async def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=("blank", "media"), required=True, help="What to repair")
+    parser.add_argument("--mode", choices=("blank", "media", "skipped"), required=True, help="What to repair")
+    parser.add_argument("--min-size-mb", type=float, default=0, help="skipped mode: smallest recorded size to include")
+    parser.add_argument("--max-size-mb", type=float, default=None, help="skipped mode: largest recorded size to include")
+    parser.add_argument(
+        "--max-media-size-mb",
+        type=int,
+        default=0,
+        help="Override MAX_MEDIA_SIZE_MB for this run (needed to fetch files above the configured limit)",
+    )
     parser.add_argument("--apply", action="store_true", help="Write changes (default is a dry run)")
     parser.add_argument("--max-chats", type=int, default=0, help="Stop after this many chats (0 = no limit)")
     parser.add_argument("--sleep", type=float, default=1.5, help="Seconds to wait between Telegram calls")
