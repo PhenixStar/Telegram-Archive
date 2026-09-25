@@ -587,6 +587,8 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             # ever persisted and this stays empty (warning-only behaviour).
             await self._load_followed_migrations()
 
+            await self._reconcile_media_skip_reasons()
+
             # Get all dialogs (chats)
             logger.info("Fetching dialog list...")
             dialogs = await self._get_dialogs()
@@ -1259,6 +1261,22 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             os.replace(backup_path, file_path)
         except OSError as e:
             logger.warning("Could not restore %s after a failed re-download: %s", file_path, e)
+
+    async def _reconcile_media_skip_reasons(self) -> None:
+        """Classify not-downloaded media by the current settings (size cap, media
+        filter) so the viewer says why a file is absent instead of promising a
+        download. Best effort: a failure here must never stop the backup."""
+        try:
+            counts = await self.db.reconcile_media_skip_reasons(
+                self.config.get_max_media_size_bytes(),
+                filters_active=bool(self.config.download_media_types or self.config.download_document_mime_types),
+            )
+        except Exception as e:
+            logger.warning(f"Could not reconcile media skip reasons: {e}")
+            return
+        # isinstance: many tests wire ``db`` as a bare AsyncMock.
+        if isinstance(counts, dict) and any(counts.values()):
+            logger.info("Media skip reasons: %s", ", ".join(f"{k} {v}" for k, v in counts.items() if v))
 
     async def _handle_excluded_chats(self, excluded_chat_ids: set[int]) -> None:
         """Skip excluded chats; delete their archived data only on request.

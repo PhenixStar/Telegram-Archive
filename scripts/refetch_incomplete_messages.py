@@ -118,6 +118,8 @@ SKIPPED_MEDIA_SQL = """
     SELECT chat_id, message_id, type, COALESCE(file_size, 0)
     FROM media
     WHERE downloaded = 0 AND message_id IS NOT NULL
+      -- confirmed gone from Telegram, or declined by the operator's media filter
+      AND (skip_reason IS NULL OR skip_reason NOT IN ('unavailable', 'filtered'))
     ORDER BY chat_id, message_id
 """
 
@@ -230,10 +232,15 @@ async def _repair_chat(
         by_id = {message.id: message for message in (fetched or []) if message is not None}
 
         processed: list[dict] = []
+        # Definitively gone (message deleted, or view-once/timer media Telegram no
+        # longer holds): recorded so the viewer stops promising a download. A
+        # failed download is NOT added here; it may succeed next time.
+        gone: list[int] = []
         for message_id in batch:
             message = by_id.get(message_id)
             if message is None:
                 unavailable += 1
+                gone.append(message_id)
                 continue
             if mode == "media":
                 # Clear the empty file first, or deduplication short-circuits the
@@ -248,11 +255,14 @@ async def _repair_chat(
             if mode in ("media", "skipped") and not data.get("_media_data"):
                 # Nothing to repair: the message no longer carries media.
                 unavailable += 1
+                gone.append(message_id)
                 continue
             processed.append(data)
 
         if processed:
             await backup._commit_batch(processed, chat_id)
+        if gone and mode == "skipped":
+            await backup.db.mark_media_unavailable(chat_id, gone)
             if mode not in ("media", "skipped"):
                 repaired += len(processed)
             else:

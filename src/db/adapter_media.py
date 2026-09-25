@@ -40,6 +40,9 @@ class MediaMixin:
                 "duration": media_data.get("duration"),
                 "downloaded": 1 if media_data.get("downloaded") else 0,
                 "download_date": media_data.get("download_date"),
+                # Why a not-downloaded row will not download on its own; any
+                # download outcome rewrites it (a success clears it to NULL).
+                "skip_reason": media_data.get("skip_reason"),
             }
 
             if self._is_sqlite:
@@ -51,6 +54,47 @@ class MediaMixin:
 
             await session.execute(stmt)
             await session.commit()
+
+    async def reconcile_media_skip_reasons(self, max_size_bytes: int, filters_active: bool) -> dict[str, int]:
+        """Re-derive size and filter skip reasons from the current settings.
+
+        Rows written before skip reasons existed are classified, and rows a
+        relaxed setting now covers are un-marked, so raising MAX_MEDIA_SIZE_MB
+        or clearing the media filter stops the viewer from calling them
+        skipped. "unavailable" (confirmed gone from Telegram) is never touched
+        here, and a downloaded row never keeps a reason.
+        """
+        oversize = Media.file_size > max_size_bytes
+        statements = {
+            "stale": update(Media).where(Media.downloaded == 1, Media.skip_reason.is_not(None)),
+            "cleared": update(Media).where(
+                Media.skip_reason == "oversize", or_(Media.file_size.is_(None), ~oversize)
+            ),
+            "oversize": update(Media).where(Media.downloaded == 0, Media.skip_reason.is_(None), oversize),
+        }
+        if not filters_active:
+            statements["unfiltered"] = update(Media).where(Media.skip_reason == "filtered")
+        counts: dict[str, int] = {}
+        async with self.db_manager.async_session_factory() as session:
+            for name, stmt in statements.items():
+                reason = "oversize" if name == "oversize" else None
+                result = await session.execute(stmt.values(skip_reason=reason))
+                counts[name] = result.rowcount or 0
+            await session.commit()
+        return counts
+
+    async def mark_media_unavailable(self, chat_id: int, message_ids: list[int]) -> int:
+        """Record that these not-downloaded rows can never be fetched (gone from Telegram)."""
+        if not message_ids:
+            return 0
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(
+                update(Media)
+                .where(Media.chat_id == chat_id, Media.message_id.in_(message_ids), Media.downloaded == 0)
+                .values(skip_reason="unavailable")
+            )
+            await session.commit()
+            return result.rowcount or 0
 
     async def get_media_for_chat(self, chat_id: int) -> list[dict[str, Any]]:
         """
@@ -265,6 +309,7 @@ class MediaMixin:
                     Media.id.label("media_id"),
                     Media.type.label("media_type"),
                     Media.file_path.label("media_file_path"),
+                    Media.skip_reason.label("media_skip_reason"),
                     Media.file_name.label("media_file_name"),
                     Media.file_size.label("media_file_size"),
                     Media.mime_type.label("media_mime_type"),
@@ -301,6 +346,7 @@ class MediaMixin:
                     "id": row.media_id,
                     "type": row.media_type,
                     "file_path": row.media_file_path,
+                    "skip_reason": row.media_skip_reason,
                     "file_name": row.media_file_name,
                     "file_size": row.media_file_size,
                     "mime_type": row.media_mime_type,

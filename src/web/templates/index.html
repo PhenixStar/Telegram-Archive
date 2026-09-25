@@ -2151,7 +2151,12 @@
                                             </svg>
                                             <div>
                                                 <div class="text-sm text-gray-300">{{ msg.media?.type }}</div>
-                                                <div class="text-xs text-gray-500">Will download on next backup</div>
+                                                <!-- The backup records why a file is absent; say that instead of promising a download -->
+                                                <div v-if="msg.media?.skip_reason === 'oversize'" class="text-xs text-gray-500">Not downloaded: larger than the size limit</div>
+                                                <div v-else-if="msg.media?.skip_reason === 'filtered'" class="text-xs text-gray-500">Not downloaded: excluded by the media filter</div>
+                                                <div v-else-if="msg.media?.skip_reason === 'unavailable'" class="text-xs text-gray-500">Not available: no longer on Telegram (view-once, timer or deleted)</div>
+                                                <div v-else-if="noDownload" class="text-xs text-gray-500">File not available for this login</div>
+                                                <div v-else class="text-xs text-gray-500">Will download on next backup</div>
                                             </div>
                                         </div>
                                     </div>

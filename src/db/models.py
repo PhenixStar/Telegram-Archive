@@ -213,6 +213,12 @@ class Media(Base):
     duration: Mapped[int | None] = mapped_column(Integer)
     content_hash: Mapped[str | None] = mapped_column(String(64))  # SHA-256 hex digest
     downloaded: Mapped[int] = mapped_column(Integer, default=0)  # 0 or 1
+    # Why a downloaded=0 row will not download on its own: "oversize"
+    # (MAX_MEDIA_SIZE_MB), "filtered" (DOWNLOAD_MEDIA_TYPES /
+    # DOWNLOAD_DOCUMENT_MIME_TYPES) or "unavailable" (confirmed gone from
+    # Telegram: view-once/timer media, deleted messages). NULL = pending or
+    # unclassified. The viewer reads it instead of promising a download.
+    skip_reason: Mapped[str | None] = mapped_column(String(16))
     download_date: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=func.now())
 
