@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Upstream v8.15 port] - 2026-09-25
+
+Semantic port of upstream v8.13.0..v8.15.1, fitted to one account per archive
+(each Telegram account runs its own stack). Two additive migrations (017, 018).
+
+### Changed (breaking defaults, archive-keeping)
+- **Excluded chats keep their archived data.** A chat on an `*_EXCLUDE_CHAT_IDS`
+  list stops being captured, but its rows, media and avatars stay unless
+  `EXCLUDE_DELETE_EXISTING=true`. Previously every run deleted them.
+- `DELETION_MODE` defaults to `soft` (keep and mark deleted); `SKIP_MEDIA_DELETE_EXISTING`
+  defaults to `false`. Set them explicitly to keep the old deleting behaviour.
+
+### Added
+- **Rich Text Editor messages are archived** (text, formatting and the block tree)
+  instead of an empty row; edits to them no longer blank the text.
+- **Why a file was not downloaded** (`media.skip_reason`, 017): over the size limit,
+  excluded by the media filter, or gone from Telegram (view-once, timer, deleted).
+  The viewer says so instead of "Will download on next backup"; a no-download login
+  reads "File not available for this login". Reconciled with the settings each run.
+- **Previous profile photos** (`chats.avatar_photo_id`, `avatar_history`, 018): the
+  viewer serves the photo the chat currently has rather than the newest file, a
+  recorded removal shows no avatar, and Chat Info shows a "Previous photos" strip
+  (`GET /api/chats/{id}/avatars`).
+
+### Fixed
+- **Stats no longer leak to restricted viewers.** `/api/stats` sent every login the
+  archive-wide totals and the id and message count of every chat; the per-chat maps
+  are now stripped, and share-token / restricted viewers get figures summed over
+  their own chats. Tiny totals read "<1 MiB"; the stats job scans media once.
+- The startup configuration summary now reaches the container log.
+
 ## [Parallel download deadline] - 2026-09-25
 
 ### Fixed
