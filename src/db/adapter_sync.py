@@ -28,6 +28,14 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# Scoping inputs stored in the cached statistics blob, keyed by chat id. They
+# let /api/stats compute a restricted viewer's figures from its own chats, and
+# are never sent to a browser (their keys are chat ids).
+PER_CHAT_MESSAGE_COUNTS_KEY = "per_chat_message_counts"
+PER_CHAT_MEDIA_COUNTS_KEY = "per_chat_media_counts"
+PER_CHAT_MEDIA_BYTES_KEY = "per_chat_media_bytes"
+PER_CHAT_STATS_KEYS = (PER_CHAT_MESSAGE_COUNTS_KEY, PER_CHAT_MEDIA_COUNTS_KEY, PER_CHAT_MEDIA_BYTES_KEY)
+
 
 class SyncMixin:
     """Mixin providing sync, chat, folder, and statistics operations.
@@ -512,15 +520,31 @@ class SyncMixin:
             msg_count = await session.execute(select(func.count()).select_from(Message))
             msg_count = msg_count.scalar() or 0
 
-            # Media count
-            media_count = await session.execute(select(func.count(Media.id)).where(Media.downloaded == 1))
-            media_count = media_count.scalar() or 0
-
-            # DB snapshot of downloaded media sizes — the fallback when on-disk
-            # usage is unavailable (e.g. the backup volume is not mounted yet).
-            db_total_size = (
-                await session.execute(select(func.sum(Media.file_size)).where(Media.downloaded == 1))
-            ).scalar() or 0
+            # Downloaded media, count and bytes per chat, in one scan. The archive-
+            # wide totals are summed from the same rows (rows without a chat id
+            # still count), and the per-chat maps let a restricted viewer's media
+            # figures come from its own chats. Bytes are the DB file sizes
+            # (logical), which is also the fallback when on-disk usage is
+            # unavailable (e.g. the backup volume is not mounted yet).
+            media_rows = await session.execute(
+                select(
+                    Media.chat_id,
+                    func.count(Media.id).label("media_count"),
+                    func.coalesce(func.sum(Media.file_size), 0).label("media_bytes"),
+                )
+                .where(Media.downloaded == 1)
+                .group_by(Media.chat_id)
+            )
+            media_count = 0
+            db_total_size = 0
+            per_chat_media_counts: dict[str, int] = {}
+            per_chat_media_bytes: dict[str, int] = {}
+            for row in media_rows:
+                media_count += int(row.media_count)
+                db_total_size += int(row.media_bytes)
+                if row.chat_id is not None:
+                    per_chat_media_counts[str(row.chat_id)] = int(row.media_count)
+                    per_chat_media_bytes[str(row.chat_id)] = int(row.media_bytes)
 
             # Per-chat statistics
             chat_stats_query = select(Message.chat_id, func.count(Message.id).label("message_count")).group_by(
@@ -546,7 +570,9 @@ class SyncMixin:
             "messages": int(msg_count),
             "media_files": int(media_count),
             "total_size_mb": float(round(total_size / (1024 * 1024), 2)),
-            "per_chat_message_counts": {int(k): int(v) for k, v in per_chat_stats.items()},
+            PER_CHAT_MESSAGE_COUNTS_KEY: {int(k): int(v) for k, v in per_chat_stats.items()},
+            PER_CHAT_MEDIA_COUNTS_KEY: per_chat_media_counts,
+            PER_CHAT_MEDIA_BYTES_KEY: per_chat_media_bytes,
         }
 
         logger.info(f"Statistics calculated: {chat_count} chats, {msg_count} messages, {media_count} media files")

@@ -10,6 +10,12 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from ..db.adapter_sync import (
+    PER_CHAT_MEDIA_BYTES_KEY,
+    PER_CHAT_MEDIA_COUNTS_KEY,
+    PER_CHAT_MESSAGE_COUNTS_KEY,
+    PER_CHAT_STATS_KEYS,
+)
 from ..message_utils import normalize_media_path
 from . import dependencies as deps
 from .dependencies import (
@@ -375,11 +381,59 @@ async def get_archived_count(user: UserContext = Depends(require_auth)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _scoped_chat_values(raw: object, visible: set[int]) -> dict[int, int] | None:
+    """The entries of one cached per-chat map that a viewer may see.
+
+    Fail closed: a missing or malformed map yields None (the caller then omits
+    the figure rather than falling back to archive-wide totals), and entries
+    whose key is not a chat id or whose value is not a plain int are skipped.
+    """
+    if not isinstance(raw, dict):
+        return None
+    values: dict[int, int] = {}
+    for key, value in raw.items():
+        try:
+            chat_id = int(key)
+        except (TypeError, ValueError):
+            continue
+        # bool is an int subclass, and a JSON `true` is not a count.
+        if chat_id in visible and isinstance(value, int) and not isinstance(value, bool):
+            values[chat_id] = value
+    return values
+
+
+def _scope_stats_to_user(stats: dict, visible: set[int] | None) -> None:
+    """Strip the per-chat maps and, for a restricted viewer, rescope the figures.
+
+    The maps are keyed by chat id, so they never reach a browser (they would
+    list every archived chat and its size to a viewer limited to a few). A
+    viewer restricted to some chats (share token, viewer account,
+    DISPLAY_CHAT_IDS) sees counts computed from its own chats only; figures the
+    cached blob cannot scope (one written before the media maps existed) are
+    omitted, and the UI hides them.
+    """
+    maps = {key: stats.pop(key, None) for key in PER_CHAT_STATS_KEYS}
+    if visible is None:
+        return
+    messages = _scoped_chat_values(maps[PER_CHAT_MESSAGE_COUNTS_KEY], visible) or {}
+    stats["chats"] = len(messages)
+    stats["messages"] = sum(messages.values())
+    media_files = _scoped_chat_values(maps[PER_CHAT_MEDIA_COUNTS_KEY], visible)
+    media_bytes = _scoped_chat_values(maps[PER_CHAT_MEDIA_BYTES_KEY], visible)
+    if media_files is None or media_bytes is None:
+        stats.pop("media_files", None)
+        stats.pop("total_size_mb", None)
+    else:
+        stats["media_files"] = sum(media_files.values())
+        stats["total_size_mb"] = float(round(sum(media_bytes.values()) / (1024 * 1024), 2))
+
+
 @router.get("/api/stats")
 async def get_stats(user: UserContext = Depends(require_auth)):
     """Get cached backup statistics (fast, calculated daily)."""
     try:
         stats = await deps.db.get_cached_statistics()
+        _scope_stats_to_user(stats, deps.get_user_chat_ids(user))
         stats["timezone"] = deps.config.viewer_timezone
         stats["stats_calculation_hour"] = deps.config.stats_calculation_hour
         stats["show_stats"] = deps.config.show_stats
@@ -408,6 +462,9 @@ async def refresh_stats(user: UserContext = Depends(require_master)):
     """Manually trigger stats recalculation."""
     try:
         stats = await deps.db.calculate_and_store_statistics(storage_path=deps.config.backup_path)
+        # Same rule as the read path: the per-chat maps are scoping input, keyed by chat id.
+        for key in PER_CHAT_STATS_KEYS:
+            stats.pop(key, None)
         stats["timezone"] = deps.config.viewer_timezone
         return stats
     except Exception as e:

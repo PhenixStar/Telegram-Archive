@@ -4113,11 +4113,12 @@
                                             <span style="color: var(--tg-muted);">📬 Messages</span>
                                             <span style="color: var(--tg-text);">{{ formatNumber(statsData.messages) }}</span>
                                         </div>
-                                        <div class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
+                                        <!-- Omitted by the server when it cannot scope them to this viewer -->
+                                        <div v-if="statsData.media_files !== null" class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
                                             <span style="color: var(--tg-muted);">🖼️ Media</span>
                                             <span style="color: var(--tg-text);">{{ formatNumber(statsData.media_files) }}</span>
                                         </div>
-                                        <div class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
+                                        <div v-if="statsData.total_size_mb !== null" class="flex justify-between rounded px-3 py-2" style="background: var(--tg-sidebar);">
                                             <span style="color: var(--tg-muted);">💾 Storage</span>
                                             <span style="color: var(--tg-text);">{{ formatSize(statsData.total_size_mb) }}</span>
                                         </div>
@@ -6110,8 +6111,9 @@
                             statsData.value = {
                                 chats: stats.chats || 0,
                                 messages: stats.messages || 0,
-                                media_files: stats.media_files || 0,
-                                total_size_mb: stats.total_size_mb || 0,
+                                // null = not provided for this viewer (row hidden), not zero
+                                media_files: 'media_files' in stats ? (stats.media_files || 0) : null,
+                                total_size_mb: 'total_size_mb' in stats ? (stats.total_size_mb || 0) : null,
                                 stats_calculated_at: stats.stats_calculated_at,
                                 backup_in_progress: stats.backup_in_progress || false
                             }
@@ -6222,6 +6224,8 @@
                 // Format size in MB to appropriate unit (MB, GB, TB)
                 const formatSize = (sizeMB) => {
                     if (!sizeMB || sizeMB === 0) return '0 MiB'
+                    // Tiny archives (a few hundred KiB) must not read as empty
+                    if (sizeMB < 0.5) return '<1 MiB'
                     if (sizeMB >= 1024 * 1024) {
                         return (sizeMB / (1024 * 1024)).toFixed(2) + ' TiB'
                     }
