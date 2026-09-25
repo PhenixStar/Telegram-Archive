@@ -1844,13 +1844,26 @@
                             <span class="font-semibold text-white text-sm">Profile</span>
                         </div>
                         <div class="flex flex-col items-center py-6 px-4">
-                            <div class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white"
+                            <img v-if="selectedChat.avatar_url" :src="selectedChat.avatar_url" :alt="getChatName(selectedChat)"
+                                class="w-20 h-20 rounded-full object-cover" @error="selectedChat.avatar_url = null">
+                            <div v-else class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white"
                                 :style="{ background: PEER_COLORS[getSenderColor({sender_id: selectedChat.id})] }">
                                 {{ getInitials(selectedChat) }}
                             </div>
                             <div class="mt-3 text-lg font-semibold text-white">{{ getChatName(selectedChat) }}</div>
                             <div v-if="selectedChat.username" class="text-sm text-blue-400">@{{ selectedChat.username }}</div>
                             <div class="text-xs text-tg-muted mt-1">{{ selectedChat.type }}</div>
+                        </div>
+                        <!-- Previous profile photos: every photo archived for this chat, newest first -->
+                        <div v-if="chatAvatars.chatId === selectedChat.id && chatAvatars.previous.length" class="px-4 pb-3">
+                            <div class="text-xs text-tg-muted mb-2">Previous photos</div>
+                            <div class="flex gap-2 overflow-x-auto pb-1">
+                                <a v-for="photo in chatAvatars.previous" :key="photo.url" :href="photo.url" target="_blank" rel="noopener"
+                                    class="shrink-0" :title="photo.seen_at ? 'Seen ' + formatDate(photo.seen_at) : 'Archived photo'">
+                                    <img :src="photo.url" class="w-12 h-12 rounded-full object-cover border" style="border-color: var(--tg-border);"
+                                        loading="lazy" alt="Previous profile photo">
+                                </a>
+                            </div>
                         </div>
                         <div v-if="chatStats" class="flex justify-around px-4 py-3 border-t border-b" style="border-color: var(--tg-border);">
                             <div class="text-center">
@@ -2717,13 +2730,26 @@
                     </div>
                     <div class="flex-1 overflow-y-auto">
                         <div class="flex flex-col items-center py-6 px-4">
-                            <div class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white"
+                            <img v-if="selectedChat.avatar_url" :src="selectedChat.avatar_url" :alt="getChatName(selectedChat)"
+                                class="w-20 h-20 rounded-full object-cover" @error="selectedChat.avatar_url = null">
+                            <div v-else class="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white"
                                 :style="{ background: PEER_COLORS[getSenderColor({sender_id: selectedChat.id})] }">
                                 {{ getInitials(selectedChat) }}
                             </div>
                             <div class="mt-3 text-lg font-semibold text-white">{{ getChatName(selectedChat) }}</div>
                             <div v-if="selectedChat.username" class="text-sm text-blue-400">@{{ selectedChat.username }}</div>
                             <div class="text-xs text-tg-muted mt-1">{{ selectedChat.type }}</div>
+                        </div>
+                        <!-- Previous profile photos: every photo archived for this chat, newest first -->
+                        <div v-if="chatAvatars.chatId === selectedChat.id && chatAvatars.previous.length" class="px-4 pb-3">
+                            <div class="text-xs text-tg-muted mb-2">Previous photos</div>
+                            <div class="flex gap-2 overflow-x-auto pb-1">
+                                <a v-for="photo in chatAvatars.previous" :key="photo.url" :href="photo.url" target="_blank" rel="noopener"
+                                    class="shrink-0" :title="photo.seen_at ? 'Seen ' + formatDate(photo.seen_at) : 'Archived photo'">
+                                    <img :src="photo.url" class="w-12 h-12 rounded-full object-cover border" style="border-color: var(--tg-border);"
+                                        loading="lazy" alt="Previous profile photo">
+                                </a>
+                            </div>
                         </div>
                         <div v-if="chatStats" class="flex justify-around px-4 py-3 border-t border-b" style="border-color: var(--tg-border);">
                             <div class="text-center">
@@ -8290,9 +8316,20 @@
                     loadMediaPanel(true)
                 }
 
+                // Previous profile photos for the open chat (avatar history)
+                const chatAvatars = ref({ previous: [] })
+                const loadChatAvatars = async (chatId) => {
+                    chatAvatars.value = { previous: [] }
+                    try {
+                        const res = await fetch(`/api/chats/${chatId}/avatars`, { credentials: 'include' })
+                        if (res.ok && selectedChat.value?.id === chatId) chatAvatars.value = { ...(await res.json()), chatId }
+                    } catch (e) { console.error('Avatar history load error:', e) }
+                }
+
                 // Phase 6: Profile panel functions
                 const openProfile = async () => {
                     if (!selectedChat.value) return
+                    loadChatAvatars(selectedChat.value.id)
                     // Desktop: use dock tab. Mobile: use overlay fallback
                     if (window.innerWidth >= 768) {
                         onToolClick('profile')
@@ -8379,6 +8416,7 @@
                         aiMessages.value = aiMessagesByChatId[cid]
                     }
                     else if (mode === 'profile') {
+                        if (chatAvatars.value.chatId !== selectedChat.value.id) loadChatAvatars(selectedChat.value.id)
                         loadOcrStatus()
                         loadEmbeddingStats()
                         loadTranslationStatus()
@@ -10118,6 +10156,7 @@
                     handleMenuKeydown,
                     copyToClipboard,
                     withAccount,
+                    chatAvatars,
                     copyPermalink,
                     startLongPress,
                     cancelLongPress,

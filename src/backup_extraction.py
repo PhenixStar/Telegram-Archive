@@ -41,6 +41,15 @@ def _service_action_type(action: object) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
+def _entity_photo_id(entity: object) -> int | None:
+    """Photo id of a user/chat/channel's current profile photo, None when it has none."""
+    photo = getattr(entity, "photo", None)
+    if photo is None or type(photo).__name__ in ("ChatPhotoEmpty", "UserProfilePhotoEmpty"):
+        return None
+    photo_id = getattr(photo, "photo_id", None)
+    return photo_id if isinstance(photo_id, int) else None
+
+
 class BackupExtractionMixin:
     """Extract/transform data from Telethon objects into DB-ready dicts."""
 
@@ -503,6 +512,12 @@ class BackupExtractionMixin:
 
         # v6.2.0: Track archived status (always set explicitly)
         chat_data["is_archived"] = 1 if is_archived else 0
+
+        # Profile photo currently seen (018): the viewer serves this file and
+        # upsert_chat records every change in avatar_history. A "min" entity
+        # omits fields like the photo, so it says nothing about a removal.
+        if hasattr(entity, "photo") and not getattr(entity, "min", False):
+            chat_data["avatar_photo_id"] = _entity_photo_id(entity)
 
         return chat_data
 

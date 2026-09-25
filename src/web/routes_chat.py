@@ -36,51 +36,100 @@ router = APIRouter()
 import glob
 import os
 
-_avatar_cache: dict[int, str | None] = {}
+_avatar_cache: dict[tuple[int, int | None, bool], str | None] = {}
 _avatar_cache_time: datetime | None = None
 AVATAR_CACHE_TTL_SECONDS = 300
 
 
-def _find_avatar_path(chat_id: int, chat_type: str) -> str | None:
-    """Find avatar file path for a chat."""
+def _avatar_files(chat_id: int, chat_type: str) -> tuple[str, list[str]]:
+    """The avatar folder for a chat and every avatar file stored for it."""
     avatar_folder = "users" if chat_type == "private" else "chats"
     avatar_dir = os.path.join(deps.config.media_path, "avatars", avatar_folder)
-
-    if not os.path.exists(avatar_dir):
-        return None
-
-    pattern = os.path.join(avatar_dir, f"{chat_id}_*.jpg")
-    matches = glob.glob(pattern)
-
+    if not os.path.isdir(avatar_dir):
+        return avatar_folder, []
+    matches = glob.glob(os.path.join(avatar_dir, f"{chat_id}_*.jpg"))
     legacy_path = os.path.join(avatar_dir, f"{chat_id}.jpg")
     if os.path.exists(legacy_path):
         matches.append(legacy_path)
+    return avatar_folder, matches
 
+
+def _avatar_photo_id(path: str) -> int | None:
+    """Photo id from a ``<chat>_<photo>.jpg`` avatar file name, None for other names."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    _, _, suffix = stem.partition("_")
+    return int(suffix) if suffix.isdigit() else None
+
+
+def _find_avatar_path(
+    chat_id: int, chat_type: str, photo_id: int | None = None, removed: bool = False
+) -> str | None:
+    """Relative path of the avatar to show for a chat.
+
+    The recorded current photo wins when its file is on disk; a recorded removal
+    shows none; otherwise (nothing recorded, or the file not downloaded yet) the
+    newest avatar file.
+    """
+    if removed:
+        return None
+    avatar_folder, matches = _avatar_files(chat_id, chat_type)
+    if photo_id is not None:
+        for path in matches:
+            if _avatar_photo_id(path) == photo_id:
+                return f"avatars/{avatar_folder}/{os.path.basename(path)}"
     if matches:
         newest_avatar = max(matches, key=os.path.getmtime)
-        avatar_file = os.path.basename(newest_avatar)
-        return f"avatars/{avatar_folder}/{avatar_file}"
-
+        return f"avatars/{avatar_folder}/{os.path.basename(newest_avatar)}"
     return None
 
 
-def _get_cached_avatar_path(chat_id: int, chat_type: str) -> str | None:
-    """Get avatar path with caching."""
+def _get_cached_avatar_path(
+    chat_id: int, chat_type: str, photo_id: int | None = None, removed: bool = False
+) -> str | None:
+    """Get avatar path with caching (keyed on the recorded photo, so a change shows at once)."""
     global _avatar_cache, _avatar_cache_time
 
     if _avatar_cache_time and (datetime.utcnow() - _avatar_cache_time).total_seconds() > AVATAR_CACHE_TTL_SECONDS:
         _avatar_cache.clear()
         _avatar_cache_time = None
 
-    if chat_id in _avatar_cache:
-        return _avatar_cache[chat_id]
+    key = (chat_id, photo_id, removed)
+    if key in _avatar_cache:
+        return _avatar_cache[key]
 
-    avatar_path = _find_avatar_path(chat_id, chat_type)
-    _avatar_cache[chat_id] = avatar_path
-    if _avatar_cache_time is None:
-        _avatar_cache_time = datetime.utcnow()
+    avatar_path = _find_avatar_path(chat_id, chat_type, photo_id, removed)
+    # A recorded photo whose file has not landed yet is not cached, so the real
+    # photo shows as soon as it downloads.
+    if photo_id is None or (avatar_path and _avatar_photo_id(avatar_path) == photo_id):
+        _avatar_cache[key] = avatar_path
+        if _avatar_cache_time is None:
+            _avatar_cache_time = datetime.utcnow()
 
     return avatar_path
+
+
+async def _attach_avatar_urls(chats: list[dict]) -> None:
+    """Set ``avatar_url`` on each chat dict, one history query for the whole page."""
+    unrecorded = [c["id"] for c in chats if c.get("avatar_photo_id") is None]
+    try:
+        with_history = await deps.db.get_chat_ids_with_avatar_history(unrecorded)
+    except Exception as e:
+        # Fail open to the newest-file answer rather than hiding every avatar.
+        logger.warning(f"Avatar history lookup failed: {e}")
+        with_history = set()
+    for chat in chats:
+        try:
+            photo_id = chat.get("avatar_photo_id")
+            avatar_path = _get_cached_avatar_path(
+                chat["id"],
+                chat.get("type", "private"),
+                photo_id,
+                removed=photo_id is None and chat["id"] in with_history,
+            )
+            chat["avatar_url"] = f"/media/{avatar_path}" if avatar_path else None
+        except Exception as e:
+            logger.error(f"Error finding avatar for chat {chat.get('id')}: {e}")
+            chat["avatar_url"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -128,16 +177,7 @@ async def get_chats(
                 folder_ids=effective_folder_ids,
             )
 
-        for chat in chats:
-            try:
-                avatar_path = _get_cached_avatar_path(chat["id"], chat.get("type", "private"))
-                if avatar_path:
-                    chat["avatar_url"] = f"/media/{avatar_path}"
-                else:
-                    chat["avatar_url"] = None
-            except Exception as e:
-                logger.error(f"Error finding avatar for chat {chat.get('id')}: {e}")
-                chat["avatar_url"] = None
+        await _attach_avatar_urls(chats)
 
         return {
             "chats": chats,
@@ -163,7 +203,63 @@ async def get_chat_info(
     chat = await deps.db.get_chat_by_id(chat_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
+    await _attach_avatar_urls([chat])
     return chat
+
+
+@router.get("/api/chats/{chat_id}/avatars")
+async def get_chat_avatars(
+    chat_id: int,
+    user: UserContext = Depends(require_auth),
+):
+    """The current profile photo and every previous one archived for a chat.
+
+    Previous photos are the avatar files on disk (each photo id keeps its own
+    file) dated by avatar_history where a sighting was recorded, newest first.
+    """
+    user_chat_ids = get_user_chat_ids(user)
+    if user_chat_ids is not None and chat_id not in user_chat_ids:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    chat = await deps.db.get_chat_by_id(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    history = await deps.db.get_avatar_history(chat_id)
+    photo_id = chat.get("avatar_photo_id")
+    removed = photo_id is None and bool(history)
+    current = _find_avatar_path(chat_id, chat.get("type", "private"), photo_id, removed)
+
+    last_seen: dict[int, datetime] = {}
+    for sighting in history:  # newest first: keep each photo's latest sighting
+        if sighting["photo_id"] is not None:
+            last_seen.setdefault(sighting["photo_id"], sighting["seen_at"])
+
+    avatar_folder, files = _avatar_files(chat_id, chat.get("type", "private"))
+    previous = []
+    for path in files:
+        relative = f"avatars/{avatar_folder}/{os.path.basename(path)}"
+        if relative == current:
+            continue
+        file_photo_id = _avatar_photo_id(path)
+        seen_at = last_seen.get(file_photo_id) if file_photo_id is not None else None
+        sort_time = seen_at or datetime.utcfromtimestamp(os.path.getmtime(path))
+        previous.append(
+            (
+                sort_time,
+                {
+                    "url": f"/media/{relative}",
+                    # A string: photo ids exceed JavaScript's safe integer range.
+                    "photo_id": str(file_photo_id) if file_photo_id is not None else None,
+                    "seen_at": seen_at.isoformat() if seen_at else None,
+                },
+            )
+        )
+    previous.sort(key=lambda pair: pair[0], reverse=True)
+    return {
+        "current": f"/media/{current}" if current else None,
+        "removed": removed,
+        "previous": [item for _, item in previous],
+    }
 
 
 @router.get("/api/chats/{chat_id}/messages")

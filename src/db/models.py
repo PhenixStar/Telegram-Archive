@@ -48,6 +48,9 @@ class Chat(Base):
     participants_count: Mapped[int | None] = mapped_column(Integer)
     is_forum: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # v6.2.0: forum with topics
     is_archived: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # v6.2.0: archived chat
+    # Profile photo id this account currently sees for the chat (018). NULL is
+    # "no photo" once a sighting exists in avatar_history, else "never recorded".
+    avatar_photo_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_synced_message_id: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -576,3 +579,22 @@ class AppSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=func.now()
     )
+
+
+class AvatarHistory(Base):
+    """Every profile photo id seen for a chat, append-only (018, port of upstream #479).
+
+    ``Chat.avatar_photo_id`` is the current pointer; ``upsert_chat`` adds a row
+    here whenever it changes. ``photo_id`` NULL records a removal. No unique
+    constraint: a photo seen again after another one is a new row. Nothing is
+    ever deleted, and the avatar files themselves stay on disk.
+    """
+
+    __tablename__ = "avatar_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    photo_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)
+
+    __table_args__ = (Index("ix_avatar_history_chat_seen", "chat_id", "seen_at"),)

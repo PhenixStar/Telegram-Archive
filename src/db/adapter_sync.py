@@ -16,6 +16,7 @@ from sqlalchemy import and_, delete, func, or_, select, text
 
 from .adapter import retry_on_locked
 from .models import (
+    AvatarHistory,
     Chat,
     ChatFolderMember,
     Media,
@@ -91,6 +92,18 @@ class SyncMixin:
             ):
                 if field in chat_data:
                     update_set[field] = values[field]
+            # Every change of the recorded profile photo goes to avatar_history
+            # (018), read before the upsert overwrites it. A missing chat row
+            # counts as a stored None, so a new chat with no photo records nothing.
+            avatar_changed = False
+            if "avatar_photo_id" in chat_data:
+                values["avatar_photo_id"] = chat_data["avatar_photo_id"]
+                update_set["avatar_photo_id"] = chat_data["avatar_photo_id"]
+                stored = (
+                    await session.execute(select(Chat.avatar_photo_id).where(Chat.id == chat_data["id"]))
+                ).first()
+                avatar_changed = (stored[0] if stored else None) != chat_data["avatar_photo_id"]
+
             # Only update is_forum/is_archived if explicitly provided
             if "is_forum" in chat_data:
                 update_set["is_forum"] = values["is_forum"]
@@ -105,8 +118,46 @@ class SyncMixin:
                 stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_set)
 
             await session.execute(stmt)
+            if avatar_changed:
+                await self._record_avatar_sighting(session, chat_data["id"], chat_data["avatar_photo_id"])
             await session.commit()
             return chat_data["id"]
+
+    async def _record_avatar_sighting(self, session, chat_id: int, photo_id: int | None) -> None:
+        """Best-effort append of one avatar_history row in the caller's transaction.
+
+        Runs in a SAVEPOINT so a failure here never aborts the chat upsert.
+        """
+        try:
+            async with session.begin_nested():
+                session.add(AvatarHistory(chat_id=chat_id, photo_id=photo_id, seen_at=datetime.utcnow()))
+        except Exception as e:
+            logger.warning("Could not record an avatar sighting (%s); chat update continues", type(e).__name__)
+
+    async def get_chat_ids_with_avatar_history(self, chat_ids: list[int]) -> set[int]:
+        """Which of ``chat_ids`` have any recorded avatar sighting (one query per page).
+
+        A chat whose current photo id is NULL is a recorded removal only when it
+        has history; otherwise nothing was ever recorded for it.
+        """
+        if not chat_ids:
+            return set()
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(
+                select(AvatarHistory.chat_id).where(AvatarHistory.chat_id.in_(chat_ids)).distinct()
+            )
+            return {row[0] for row in result}
+
+    async def get_avatar_history(self, chat_id: int) -> list[dict[str, Any]]:
+        """Every photo id seen for ``chat_id``, newest first. ``photo_id`` None is a
+        removal; an empty list means nothing was recorded (not a removal)."""
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.execute(
+                select(AvatarHistory.photo_id, AvatarHistory.seen_at)
+                .where(AvatarHistory.chat_id == chat_id)
+                .order_by(AvatarHistory.seen_at.desc(), AvatarHistory.id.desc())
+            )
+            return [{"photo_id": row.photo_id, "seen_at": row.seen_at} for row in result]
 
     @staticmethod
     def _apply_folder_filter(stmt, folder_id=None, folder_ids=None):
@@ -238,6 +289,7 @@ class SyncMixin:
                     "phone": row.Chat.phone,
                     "description": row.Chat.description,
                     "participants_count": row.Chat.participants_count,
+                    "avatar_photo_id": row.Chat.avatar_photo_id,
                     "is_forum": row.Chat.is_forum,
                     "is_archived": row.Chat.is_archived,
                     "last_synced_message_id": row.Chat.last_synced_message_id,
@@ -308,6 +360,7 @@ class SyncMixin:
                 "phone": chat.phone,
                 "description": chat.description,
                 "participants_count": chat.participants_count,
+                "avatar_photo_id": chat.avatar_photo_id,
                 "is_forum": chat.is_forum,
                 "is_archived": chat.is_archived,
             }
