@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Media catch-up by size band] - 2026-09-25
+
+### Added
+- **`refetch_incomplete_messages.py --mode skipped`** re-fetches media recorded as
+  not downloaded (over `MAX_MEDIA_SIZE_MB` at capture time, or a failed download).
+  `--min-size-mb`/`--max-size-mb` select a band so small files are caught up
+  before large ones, and `--max-media-size-mb` lifts the capture limit for that
+  run only. Metadata-only kinds and globally excluded chats are skipped; each band
+  resumes from its own checkpoint. Self-destructing (view-once/timer) media and
+  deleted messages cannot be recovered and are reported as such.
+
 ## [Multi-account behind one hostname] - 2026-09-25
 
 ### Added
