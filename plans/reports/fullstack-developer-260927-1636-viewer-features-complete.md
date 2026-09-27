@@ -81,6 +81,21 @@ a real message; clicking each opens the tag view and shows the matching
 message. Screenshots: `lanec-1-chat.png`, `lanec-2-tag-view.png` (see Browser
 Validation section).
 
+**Extraction-layer check (owned by another lane, verified not touched).**
+The browser run used hand-written synthetic `raw_data` (`"type": "cashtag"`),
+which proves the frontend renders that string correctly but not that the
+real backup writer ever produces it. Checked by reading
+`src/message_utils.py`'s `_entity_type` (used by `serialize_message_entity`,
+called from `backup_extraction.py`, neither file touched by this lane): it
+generically converts `type(entity).__name__.removeprefix("MessageEntity")`
+to snake_case (`_ENTITY_TYPE_ALIASES` only overrides `strike`->`strikethrough`
+and `mention_name`->`mention`). Telethon's `MessageEntityCashtag` converts to
+`"cashtag"` under that same generic rule with no alias needed, matching
+`MessageEntityHashtag` -> `"hashtag"` (the mapping
+`tests/test_backup_extraction_entities.py:177` already exercises). Real
+cashtags will carry `type: "cashtag"` in production; the feature is wired
+end to end, not just in the synthetic test fixture.
+
 ## Feature 2 — what-changed feed (upstream #397 / a16dc71)
 
 **Design.** A feed of edits and deletions the archive kept: soft-deleted
@@ -179,7 +194,10 @@ fetching that exact URL in-page (same session) returned
 `messages: [900001, 900002, 900003]` (all three synthetic messages, correctly
 included), and `message_versions: [900002]` (only the one version whose date
 falls in the window — 900001 has no versions, 900003 is a deletion not a
-version). Screenshot: `lanec-4-export-modal.png`.
+version). Screenshot: `lanec-4-export-modal.png`. This run exercised the
+REAL `iter_message_versions_for_export` generator against real SQLite (not a
+mock), so `_version_in_window`'s assumption that each yielded dict's `"date"`
+key is a raw `datetime` is verified by this live result, not merely assumed.
 
 ## Access control
 
@@ -187,8 +205,9 @@ Every new endpoint uses `Depends(require_auth)` and filters through
 `get_user_chat_ids(user)` exactly like the rest of `routes_chat.py`
 (`None` = all chats, a set = only those). `user.no_download` continues to gate
 the export endpoint (unchanged path, re-tested after the date-range addition).
-All ACL/restriction behavior is covered by unit tests listed above (33 new
-adapter/endpoint tests total, covering: restricted viewer sees only its
+All ACL/restriction behavior is covered by unit tests listed above (40 new
+adapter/endpoint tests total — 9+6+7+4 for tag search/changes feed,
+5+9 for export date range — covering: restricted viewer sees only its
 chats' tag results, restricted viewer sees only its chats' changes, `scope=chat`
 403 for an unentitled chat, export 403 for an unentitled chat, `no_download`
 still blocks a windowed export). Browser validation additionally exercised the
@@ -202,9 +221,13 @@ browser session, given the effort budget.
 BACKUP_PATH=<tmp> MEDIA_PATH=<tmp>/media DB_PATH=<tmp>/t.db \
   .venv/bin/python -m pytest tests -q -p no:cacheprovider
 ```
-Result: **1533 passed, 1 skipped**, 0 failed (baseline on this base was 1501
-passed, 1 skipped, per the coordinator; net +32 after accounting for the fixed
-alphabetical test-ordering issue below — this lane added 40 new tests).
+Result: **1533 passed, 1 skipped**, 0 failed. This lane adds exactly 40 new
+tests (see the per-feature breakdown above), so the pre-lane count on this
+base should be 1493, not the 1501 the coordinator quoted as baseline — flagging
+this 8-test discrepancy for the coordinator rather than explaining it away;
+it is not a regression (0 failures either way) but the stated baseline number
+does not reconcile with the observed delta and is worth reconciling before
+other lanes report their own deltas against it.
 
 One real bug found and fixed in my own new tests, not the app: the first
 version of `tests/test_tag_search_and_change_feed.py`'s endpoint fixture
@@ -295,3 +318,8 @@ each ending with `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropi
    boundary (restricted viewer / share-token) was proven by the pytest suite
    only, not by a second restricted-viewer browser session, to stay within
    the effort budget for this lane.
+4. Clicking a tag-view result row or a changes-feed row to confirm the jump
+   actually lands on the right message was not browser-exercised (both route
+   through the existing `navigateToMessage` helper with the same
+   `{chat_id, id}` shape global search results already use successfully, so
+   risk is low, but it was not directly observed in this session).
