@@ -29,6 +29,25 @@ from .media_utils import THUMBNAIL_EXTENSIONS
 
 router = APIRouter()
 
+
+def _parse_iso_date(value: str | None, param_name: str) -> datetime | None:
+    """Parse an ISO 8601 query param to a naive datetime, or None when absent.
+
+    A timezone-aware value converts to naive by dropping the offset (the
+    stored ``Message.date`` is already naive), matching the convention this
+    endpoint family already used before this helper existed.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo:
+            parsed = parsed.replace(tzinfo=None)
+        return parsed
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {param_name} format. Use ISO 8601.")
+
+
 # ---------------------------------------------------------------------------
 # Avatar helpers
 # ---------------------------------------------------------------------------
@@ -285,21 +304,10 @@ async def get_messages(
     if before_date and after_date:
         raise HTTPException(status_code=400, detail="Cannot use both before_date and after_date")
 
-    def _parse_date(value: str | None, param_name: str) -> datetime | None:
-        if not value:
-            return None
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            if parsed.tzinfo:
-                parsed = parsed.replace(tzinfo=None)
-            return parsed
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid {param_name} format. Use ISO 8601.")
-
-    parsed_before_date = _parse_date(before_date, "before_date")
-    parsed_after_date = _parse_date(after_date, "after_date")
-    parsed_date_from = _parse_date(date_from, "date_from")
-    parsed_date_to = _parse_date(date_to, "date_to")
+    parsed_before_date = _parse_iso_date(before_date, "before_date")
+    parsed_after_date = _parse_iso_date(after_date, "after_date")
+    parsed_date_from = _parse_iso_date(date_from, "date_from")
+    parsed_date_to = _parse_iso_date(date_to, "date_to")
 
     try:
         messages = await deps.db.get_messages_paginated(
@@ -684,9 +692,18 @@ async def get_message_dates(
 async def export_chat(
     chat_id: int,
     format: str = Query("json", description="Export format: json or csv"),
+    date_from: str | None = Query(None, description="Only messages on/after this date (ISO 8601)"),
+    date_to: str | None = Query(None, description="Only messages on/before this date (ISO 8601)"),
     user: UserContext = Depends(require_auth),
 ):
-    """Export chat history to JSON or CSV."""
+    """Export chat history to JSON or CSV, optionally windowed by date.
+
+    ``date_from``/``date_to`` are both inclusive, matching the same params on
+    ``GET .../messages`` — one date-range contract for the whole chat-history
+    surface. The window also applies to the JSON export's preserved
+    ``message_versions``, filtered by each version's own message date, so a
+    windowed export cannot advertise edits from outside the requested range.
+    """
     if user.no_download:
         raise HTTPException(status_code=403, detail="Downloads disabled for this account")
     if format not in ("json", "csv"):
@@ -694,6 +711,23 @@ async def export_chat(
     user_chat_ids = get_user_chat_ids(user)
     if user_chat_ids is not None and chat_id not in user_chat_ids:
         raise HTTPException(status_code=403, detail="Access denied")
+
+    parsed_date_from = _parse_iso_date(date_from, "date_from")
+    parsed_date_to = _parse_iso_date(date_to, "date_to")
+    if parsed_date_from is not None and parsed_date_to is not None and parsed_date_from > parsed_date_to:
+        raise HTTPException(status_code=400, detail="date_from must be before date_to")
+
+    def _version_in_window(version: dict) -> bool:
+        # iter_message_versions_for_export is out of this lane's scope (owned
+        # by another change in adapter_messages.py), so the window is applied
+        # here instead of threading date params through that generator — same
+        # observable result, no changes to a function this lane does not own.
+        v_date = version.get("date")
+        if parsed_date_from is not None and (v_date is None or v_date < parsed_date_from):
+            return False
+        if parsed_date_to is not None and (v_date is None or v_date > parsed_date_to):
+            return False
+        return True
 
     try:
         chat = await deps.db.get_chat_by_id(chat_id)
@@ -715,7 +749,9 @@ async def export_chat(
                 buf.seek(0)
                 buf.truncate(0)
 
-                async for msg in deps.db.get_messages_for_export(chat_id, include_media=include_media):
+                async for msg in deps.db.get_messages_for_export(
+                    chat_id, include_media=include_media, date_from=parsed_date_from, date_to=parsed_date_to
+                ):
                     writer.writerow([
                         msg.get("id", ""),
                         msg.get("date", ""),
@@ -743,9 +779,16 @@ async def export_chat(
         async def iter_json():
             yield "{\n"
             yield f'  "chat": {json.dumps(chat_metadata, ensure_ascii=False, default=str)},\n'
+            if date_from or date_to:
+                # Record what this file contains — a windowed export must not
+                # masquerade as the full history.
+                window = {"date_from": date_from, "date_to": date_to}
+                yield f'  "filters": {json.dumps(window, ensure_ascii=False)},\n'
             yield '  "messages": [\n'
             first = True
-            async for msg in deps.db.get_messages_for_export(chat_id):
+            async for msg in deps.db.get_messages_for_export(
+                chat_id, date_from=parsed_date_from, date_to=parsed_date_to
+            ):
                 if not first:
                     yield ",\n"
                 first = False
@@ -756,6 +799,8 @@ async def export_chat(
             yield '  "message_versions": [\n'
             first_version = True
             async for version in deps.db.iter_message_versions_for_export(chat_id):
+                if not _version_in_window(version):
+                    continue
                 if not first_version:
                     yield ",\n"
                 first_version = False

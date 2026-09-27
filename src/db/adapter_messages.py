@@ -1166,7 +1166,14 @@ class MessageMixin:
             async for row in result.scalars():
                 yield self._message_version_to_dict(row)
 
-    async def get_messages_for_export(self, chat_id: int, include_media: bool = False):
+    async def get_messages_for_export(
+        self,
+        chat_id: int,
+        include_media: bool = False,
+        *,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ):
         """
         Get messages for export with user info.
         Returns an async generator for streaming.
@@ -1176,6 +1183,9 @@ class MessageMixin:
         Args:
             chat_id: Chat ID to export
             include_media: If True, include media info from media table
+            date_from: inclusive lower bound on Message.date (naive, same
+                contract as get_messages_paginated's date_from)
+            date_to: inclusive upper bound on Message.date
 
         Yields:
             Message dictionaries with user info
@@ -1219,6 +1229,11 @@ class MessageMixin:
                     .where(Message.chat_id == chat_id)
                     .order_by(Message.date.asc())
                 )
+
+            if date_from is not None:
+                stmt = stmt.where(Message.date >= date_from)
+            if date_to is not None:
+                stmt = stmt.where(Message.date <= date_to)
 
             result = await session.stream(stmt)
             async for row in result:
