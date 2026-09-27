@@ -587,6 +587,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             # ever persisted and this stays empty (warning-only behaviour).
             await self._load_followed_migrations()
 
+            await self._normalize_filter_ids()
             await self._reconcile_media_skip_reasons()
 
             # Get all dialogs (chats)
@@ -1261,6 +1262,27 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             os.replace(backup_path, file_path)
         except OSError as e:
             logger.warning("Could not restore %s after a failed re-download: %s", file_path, e)
+
+    async def _normalize_filter_ids(self) -> None:
+        """Auto-correct configured chat ids that lack the -100 prefix, against the
+        archived chats, before any filtering this run. Best effort; counts only."""
+        try:
+            corrected, unresolved = self.config.normalize_filter_ids(await self.db.get_chat_ids())
+        except Exception as e:
+            logger.debug("Filter id normalization skipped: %s", type(e).__name__)
+            return
+        if not isinstance(corrected, int):
+            return  # a mocked config in tests
+        if corrected:
+            logger.warning(
+                f"Capture filters: auto-corrected {corrected} id entr{'y' if corrected == 1 else 'ies'} "
+                "to the marked (channel/supergroup) format"
+            )
+        if unresolved:
+            logger.info(
+                f"Capture filters: {unresolved} configured id entr{'y' if unresolved == 1 else 'ies'} "
+                "not in the archive yet"
+            )
 
     async def _reconcile_media_skip_reasons(self) -> None:
         """Classify not-downloaded media by the current settings (size cap, media

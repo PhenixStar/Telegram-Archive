@@ -619,3 +619,33 @@ def serialize_message_entity(entity: object) -> dict:
     if language:
         data["language"] = language
     return data
+
+
+def normalize_configured_chat_ids(configured: set[int], existing_ids: set[int]) -> tuple[set[int], int, int]:
+    """Auto-correct filter ids missing the -100 channel/supergroup prefix.
+
+    A chat id copied from Telegram Web or the viewer without the marked prefix
+    otherwise matches nothing, which for exclude and skip lists is the dangerous
+    direction: capture continues while the configuration says it should not. An
+    entry already present in ``existing_ids`` is kept; a positive entry absent as
+    is whose ``-100...`` marked form IS archived is rewritten to that form; any
+    other entry is kept untouched (the chat may simply not be archived yet).
+    Returns ``(normalized, corrected_count, unresolved_count)``; callers log counts,
+    never ids.
+    """
+    normalized: set[int] = set()
+    corrected = 0
+    unresolved = 0
+    for chat_id in configured:
+        if chat_id in existing_ids:
+            normalized.add(chat_id)
+            continue
+        if chat_id > 0:
+            marked_id = -1000000000000 - chat_id
+            if marked_id in existing_ids:
+                corrected += 1
+                normalized.add(marked_id)
+                continue
+        unresolved += 1
+        normalized.add(chat_id)
+    return normalized, corrected, unresolved

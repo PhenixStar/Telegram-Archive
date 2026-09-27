@@ -7,6 +7,8 @@ import logging
 import mimetypes
 import os
 import re
+import sys
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
@@ -517,7 +519,16 @@ class Config:
 
         # Timezone configuration for viewer display
         # Defaults to Europe/Madrid if not specified
-        self.viewer_timezone = os.getenv("VIEWER_TIMEZONE", "Europe/Madrid")
+        # Validated here: the stats scheduler builds ZoneInfo(viewer_timezone) in a
+        # retry loop that would otherwise log and sleep every hour, forever, on a
+        # misspelled zone name.
+        viewer_timezone = os.getenv("VIEWER_TIMEZONE", "Europe/Madrid")
+        try:
+            ZoneInfo(viewer_timezone)
+        except (ZoneInfoNotFoundError, ValueError, KeyError):
+            logger.warning(f"VIEWER_TIMEZONE {viewer_timezone!r} is not a known timezone; falling back to UTC")
+            viewer_timezone = "UTC"
+        self.viewer_timezone = viewer_timezone
 
         # Viewer notifications (internal use, prefer PUSH_NOTIFICATIONS)
         self.enable_notifications = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() == "true"
@@ -580,7 +591,17 @@ class Config:
         # Stats calculation schedule
         # Daily calculation of statistics (chat counts, message counts, etc.)
         # Default: 03:00 (3am) in the configured viewer timezone
-        self.stats_calculation_hour = int(os.getenv("STATS_CALCULATION_HOUR", "3"))
+        # Documented as 0-23; validated for the same reason as the timezone
+        # (now.replace(hour=24) would raise inside the scheduler every hour).
+        stats_hour_raw = os.getenv("STATS_CALCULATION_HOUR", "3")
+        try:
+            stats_hour = int(stats_hour_raw)
+        except ValueError:
+            stats_hour = -1
+        if not 0 <= stats_hour <= 23:
+            logger.warning(f"STATS_CALCULATION_HOUR {stats_hour_raw!r} is not an hour in 0-23; using 3")
+            stats_hour = 3
+        self.stats_calculation_hour = stats_hour
 
         # Show stats in viewer UI
         # When disabled, hides the stats dropdown next to "Telegram Archive" title
@@ -750,6 +771,60 @@ class Config:
             result.setdefault(chat_id, set()).add(topic_id)
         return result
 
+    # Id-carrying filter fields that the -100 prefix auto-correct applies to.
+    _FILTER_ID_SET_FIELDS = (
+        "chat_ids",
+        "global_include_ids",
+        "global_exclude_ids",
+        "private_include_ids",
+        "private_exclude_ids",
+        "groups_include_ids",
+        "groups_exclude_ids",
+        "channels_include_ids",
+        "channels_exclude_ids",
+        "priority_chat_ids",
+        "skip_media_chat_ids",
+    )
+
+    def normalize_filter_ids(self, existing_ids: set) -> tuple[int, int]:
+        """Auto-correct configured chat ids against the archived chats.
+
+        Rewrites every id-set filter and the SKIP_TOPIC_IDS chat keys in place.
+        Returns (corrected, unresolved) counts; ids are never logged.
+        """
+        from .message_utils import normalize_configured_chat_ids
+
+        corrected_total = 0
+        unresolved_total = 0
+        for name in self._FILTER_ID_SET_FIELDS:
+            current = getattr(self, name, None)
+            if not current:
+                continue
+            normalized, corrected, unresolved = normalize_configured_chat_ids(set(current), existing_ids)
+            if corrected:
+                setattr(self, name, normalized)
+            corrected_total += corrected
+            unresolved_total += unresolved
+        if corrected_total:
+            self.whitelist_mode = len(self.chat_ids) > 0
+
+        if self.skip_topic_ids:
+            rebuilt: dict[int, set[int]] = {}
+            topic_corrected = 0
+            for key, topics in self.skip_topic_ids.items():
+                new_key = key
+                if key not in existing_ids:
+                    if key > 0 and -1000000000000 - key in existing_ids:
+                        new_key = -1000000000000 - key
+                        topic_corrected += 1
+                    else:
+                        unresolved_total += 1
+                rebuilt.setdefault(new_key, set()).update(topics)
+            if topic_corrected:
+                self.skip_topic_ids = rebuilt
+            corrected_total += topic_corrected
+        return corrected_total, unresolved_total
+
     def should_skip_topic(self, chat_id: int, topic_id: int | None) -> bool:
         """Check if a specific topic in a chat should be skipped.
 
@@ -760,11 +835,16 @@ class Config:
         Returns:
             True if this topic should be skipped, False otherwise
         """
-        if topic_id is None or not self.skip_topic_ids:
+        if not self.skip_topic_ids:
             return False
         skip_set = self.skip_topic_ids.get(chat_id)
         if skip_set is None:
             return False
+        if topic_id is None:
+            # General-topic messages carry no reply_to metadata (Telegram omits
+            # top_msg_id for "General"), and the archive files them under topic 1,
+            # so excluding topic 1 must exclude them too.
+            return 1 in skip_set
         return topic_id in skip_set
 
     def _get_required_env(self, key: str, value_type: type):
@@ -981,7 +1061,12 @@ class Config:
         self.channels_include_folder_chat_ids = frozenset(channel_ids)
 
     def get_max_media_size_bytes(self) -> int:
-        """Get maximum media file size in bytes."""
+        """Maximum media file size in bytes; 0 (or negative) means no limit.
+
+        It used to mean "skip every file with a nonzero size", silently.
+        """
+        if self.max_media_size_mb <= 0:
+            return sys.maxsize
         return self.max_media_size_mb * 1024 * 1024
 
     def should_download_media_for_chat(self, chat_id: int) -> bool:

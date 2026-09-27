@@ -81,15 +81,14 @@ class BackupExtractionMixin:
 
         peer = message.fwd_from.from_id
 
-        # Handle different Peer types
-        if hasattr(peer, "user_id"):
-            return peer.user_id
-        if hasattr(peer, "channel_id"):
-            return peer.channel_id
-        if hasattr(peer, "chat_id"):
-            return peer.chat_id
-
-        return None
+        # The MARKED id (user_id, -chat_id, -100<channel_id>): the convention every
+        # other stored id follows and the one the owner can look up. The raw
+        # channel/chat id landed in the user-id number space, indistinguishable
+        # from a forward by a user.
+        try:
+            return get_peer_id(peer)
+        except TypeError:
+            return None
 
     def _extract_fwd_from(self, message: Message) -> dict | None:
         """Build the raw_data.fwd_from provenance dict for a forward (#400).

@@ -136,7 +136,7 @@ async def websocket_endpoint(websocket: WebSocket):
         user_ctx = UserContext(session.username, session.role, session.allowed_chat_ids)
         ws_user_chat_ids = get_user_chat_ids(user_ctx)
 
-    connected = await deps.manager.connect(websocket, allowed_chat_ids=ws_user_chat_ids)
+    connected = await deps.manager.connect(websocket, allowed_chat_ids=ws_user_chat_ids, session_token=auth_cookie)
     if not connected:
         return
     await deps.listener_mgr.on_viewer_connect(len(deps.manager.active_connections))

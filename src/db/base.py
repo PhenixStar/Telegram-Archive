@@ -5,6 +5,7 @@ Supports both SQLite and PostgreSQL with proper configuration for each.
 """
 
 import logging
+import math
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -17,6 +18,22 @@ from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 from .models import Base
 
 logger = logging.getLogger(__name__)
+
+
+def _busy_timeout_ms() -> int:
+    """DATABASE_TIMEOUT seconds as PRAGMA busy_timeout milliseconds.
+
+    Garbage, non-finite and non-positive values keep the 60 s default (a knob must
+    never abort startup, and 0 would disable waiting); a positive sub-millisecond
+    value clamps to 1 ms.
+    """
+    try:
+        seconds = float(os.getenv("DATABASE_TIMEOUT", "60.0"))
+    except ValueError:
+        return 60000
+    if not math.isfinite(seconds) or seconds <= 0:
+        return 60000
+    return max(1, int(seconds * 1000))
 
 
 class DatabaseManager:
@@ -190,7 +207,9 @@ class DatabaseManager:
                 )
             try:
                 # 60 second busy timeout
-                cursor.execute("PRAGMA busy_timeout=60000")
+                # DATABASE_TIMEOUT (seconds) is the documented knob for "database
+                # is locked"; it used to be ignored in favour of a fixed 60 s.
+                cursor.execute(f"PRAGMA busy_timeout={_busy_timeout_ms()}")
                 # 64MB cache for better performance
                 cursor.execute("PRAGMA cache_size=-64000")
             except Exception:

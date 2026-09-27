@@ -89,6 +89,9 @@ class ConnectionManager:
         self._allowed_chats: dict[WebSocket, set[int] | None] = {}
         self._ip_counts: dict[str, int] = {}
         self._ws_ip: dict[WebSocket, str] = {}
+        # Session token each socket was opened with, so revoking a session can
+        # close its live channel instead of leaving it streaming updates.
+        self._ws_session: dict[WebSocket, str] = {}
 
     @staticmethod
     def _get_client_ip(websocket: WebSocket) -> str:
@@ -111,7 +114,9 @@ class ConnectionManager:
             return websocket.client.host
         return "unknown"
 
-    async def connect(self, websocket: WebSocket, allowed_chat_ids: set[int] | None = None) -> bool:
+    async def connect(
+        self, websocket: WebSocket, allowed_chat_ids: set[int] | None = None, session_token: str | None = None
+    ) -> bool:
         """Accept a WebSocket connection. Returns False if caps exceeded."""
         if len(self.active_connections) >= self._MAX_CONNECTIONS:
             await websocket.close(code=4008, reason="Too many connections")
@@ -125,18 +130,32 @@ class ConnectionManager:
         self._allowed_chats[websocket] = allowed_chat_ids
         self._ip_counts[ip] = self._ip_counts.get(ip, 0) + 1
         self._ws_ip[websocket] = ip
+        if session_token:
+            self._ws_session[websocket] = session_token
         logger.info(f"WebSocket connected (ip={ip}). Total connections: {len(self.active_connections)}")
         return True
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.pop(websocket, None)
         self._allowed_chats.pop(websocket, None)
+        self._ws_session.pop(websocket, None)
         ip = self._ws_ip.pop(websocket, None)
         if ip and ip in self._ip_counts:
             self._ip_counts[ip] = max(0, self._ip_counts[ip] - 1)
             if self._ip_counts[ip] == 0:
                 del self._ip_counts[ip]
         logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+
+    async def close_sessions(self, session_tokens: set[str]) -> int:
+        """Close every live socket opened with one of these (revoked) sessions."""
+        doomed = [ws for ws, token in list(self._ws_session.items()) if token in session_tokens]
+        for websocket in doomed:
+            try:
+                await websocket.close(code=4001, reason="Session revoked")
+            except Exception:
+                pass  # already gone; disconnect below still cleans up
+            self.disconnect(websocket)
+        return len(doomed)
 
     def subscribe(self, websocket: WebSocket, chat_id: int):
         """Subscribe a connection to updates for a specific chat."""
@@ -476,6 +495,8 @@ async def _invalidate_user_sessions(username: str) -> None:
     to_remove = [k for k, v in _sessions.items() if v.username == username]
     for k in to_remove:
         _sessions.pop(k, None)
+    if manager is not None and to_remove:
+        await manager.close_sessions(set(to_remove))
     if db:
         try:
             await db.delete_user_sessions(username)
@@ -488,6 +509,8 @@ async def _invalidate_token_sessions(token_id: int) -> None:
     to_remove = [k for k, v in _sessions.items() if v.source_token_id == token_id]
     for k in to_remove:
         _sessions.pop(k, None)
+    if manager is not None and to_remove:
+        await manager.close_sessions(set(to_remove))
     if db:
         try:
             await db.delete_sessions_by_source_token_id(token_id)

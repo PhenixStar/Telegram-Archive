@@ -22,6 +22,7 @@ from .models import (
     Media,
     Message,
     MessageVersion,
+    PushSubscription,
     Reaction,
     SyncStatus,
     User,
@@ -174,6 +175,11 @@ class SyncMixin:
                 and_(ChatFolderMember.chat_id == Chat.id, ChatFolderMember.folder_id == folder_id),
             )
         return stmt
+
+    async def get_chat_ids(self) -> set[int]:
+        """Ids of every archived chat (cheap: no joins, no counts)."""
+        async with self.db_manager.async_session_factory() as session:
+            return {row[0] for row in await session.execute(select(Chat.id))}
 
     async def get_all_chats(
         self,
@@ -653,6 +659,9 @@ class SyncMixin:
             await session.execute(delete(SyncStatus).where(SyncStatus.chat_id == chat_id))
             # Delete chat
             await session.execute(delete(Chat).where(Chat.id == chat_id))
+            # Chat-scoped push subscriptions would otherwise outlive their chat and
+            # keep a dangling id; global subscriptions (chat_id NULL) are untouched.
+            await session.execute(delete(PushSubscription).where(PushSubscription.chat_id == chat_id))
 
             await session.commit()
             logger.info(f"Deleted chat {chat_id} and all related data from database")
