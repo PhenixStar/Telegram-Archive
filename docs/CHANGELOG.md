@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [Upstream remaining-candidates port] - 2026-09-27
+
+Semantic ports from the 79 previously untriaged upstream commits (report:
+plans/reports/triage-260925-2247-upstream-remaining-candidates.md).
+
+### Added
+- **Hashtag and cashtag search:** tap a #hashtag or $cashtag in a message to see every
+  message using it across the chats the viewer may see (`GET /api/tags/{tag}`).
+- **"What changed" feed:** messages edited or deleted on Telegram that the archive kept,
+  newest first (`GET /api/changes`).
+- **Date range on chat export** (`date_from` / `date_to`).
+
+### Fixed
+- A partial message upsert (an import merge, an edit sync) no longer nulls columns it did
+  not supply; an empty `{}` never replaces archived extras.
+- Peerless deletions resolve only an unambiguous private/basic-group chat (the listener
+  called a method that never existed); a test now checks capture-code DB calls exist.
+- Revoking a share token or a user's sessions closes their open live-update sockets.
+- Config: bad `VIEWER_TIMEZONE` / `STATS_CALCULATION_HOUR` no longer wedge the stats job;
+  `MAX_MEDIA_SIZE_MB=0` means no limit; excluding topic 1 excludes General; chat ids
+  missing the -100 prefix are auto-corrected; `DATABASE_TIMEOUT` reaches busy_timeout.
+- Forwarded-from ids are stored in the marked form; deleting a chat removes its push
+  subscriptions.
+- Import (Telegram Desktop exports): no timezone shift for HTML exports, no history
+  amputation from a partial export, no clobbering of captured chats; already-archived
+  media is not re-fetched and an interrupted run resumes.
+
 ## [Switch accounts without logging in again] - 2026-09-25
 
 ### Added
