@@ -24,6 +24,26 @@ from src.telegram_import import (
 )
 
 
+def _make_mock_db() -> AsyncMock:
+    """An AsyncMock db seeded so the importer's already-have guards read
+    "nothing on record yet" instead of an unconfigured MagicMock.
+
+    An unseeded AsyncMock's awaited calls resolve to a MagicMock, which is
+    truthy and (for get_last_message_id) not comparable to an int - a
+    test-harness artifact the guards would otherwise trip on, not production
+    behavior. Individual tests still override any of these per case (e.g. an
+    existing-chat merge-conflict test sets get_chat_stats afterward).
+    """
+    db = AsyncMock()
+    db.get_chat_stats.return_value = {"messages": 0}
+    db.get_chat_by_id.return_value = None
+    db.get_user_by_id.return_value = None
+    db.get_media_for_message.return_value = None
+    db.get_last_message_id.return_value = 0
+    db.get_setting.return_value = None
+    return db
+
+
 class TestParseFromId(unittest.TestCase):
     def test_user_id(self):
         self.assertEqual(parse_from_id("user123456789"), 123456789)
@@ -127,6 +147,20 @@ class TestParseDate(unittest.TestCase):
 
     def test_invalid_date(self):
         self.assertIsNone(parse_date({"date": "not-a-date"}))
+
+    def test_aware_offset_converted_to_naive_utc(self):
+        """An aware ISO string (e.g. from an HTML export) is stored as naive UTC,
+        the same instant, not the local wall-clock time relabeled as UTC."""
+        msg = {"date": "2024-01-15T10:00:00+02:00"}
+        result = parse_date(msg)
+        self.assertEqual(result, datetime(2024, 1, 15, 8, 0, 0))
+
+    def test_html_export_offset_survives_into_the_stored_instant(self):
+        """End-to-end: parse_html_date's offset, fed back through parse_date,
+        lands on the correct UTC instant instead of the exporter's local time."""
+        iso = parse_html_date("15.01.2024 10:00:00 UTC+02:00")
+        result = parse_date({"date": iso})
+        self.assertEqual(result, datetime(2024, 1, 15, 8, 0, 0))
 
 
 class TestParseEditedDate(unittest.TestCase):
@@ -280,7 +314,7 @@ class TestTelegramImporterRun(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
         summary = self._run(importer.run(self.export_dir, dry_run=True))
@@ -302,7 +336,7 @@ class TestTelegramImporterRun(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 100}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -337,7 +371,7 @@ class TestTelegramImporterRun(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -377,7 +411,7 @@ class TestTelegramImporterRun(unittest.TestCase):
         )
 
         media_dir = os.path.join(self.temp_dir, "media")
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, media_dir)
 
@@ -413,7 +447,7 @@ class TestTelegramImporterRun(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -423,7 +457,7 @@ class TestTelegramImporterRun(unittest.TestCase):
         db.insert_media.assert_not_called()
 
     def test_missing_result_json(self):
-        db = AsyncMock()
+        db = _make_mock_db()
         importer = TelegramImporter(db, "/tmp/media")
 
         with self.assertRaises(FileNotFoundError):
@@ -447,7 +481,7 @@ class TestTelegramImporterRun(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -468,7 +502,7 @@ class TestTelegramImporterRun(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -686,7 +720,22 @@ class TestParseHtmlDate(unittest.TestCase):
         self.assertEqual(parse_html_date("15.01.2024 10:30:00"), "2024-01-15T10:30:00")
 
     def test_date_with_timezone(self):
-        self.assertEqual(parse_html_date("15.01.2024 10:30:00 UTC+02:00"), "2024-01-15T10:30:00")
+        # The offset is preserved rather than discarded: dropping it (the old
+        # behavior) shifted every HTML-imported message by the exporter's
+        # timezone relative to messages captured live in the same chat.
+        self.assertEqual(parse_html_date("15.01.2024 10:30:00 UTC+02:00"), "2024-01-15T10:30:00+02:00")
+
+    def test_date_with_out_of_range_offset_degrades_to_naive(self):
+        """A malformed offset (e.g. an impossible UTC+24:00) is dropped, not trusted."""
+        self.assertEqual(parse_html_date("15.01.2024 10:30:00 UTC+24:00"), "2024-01-15T10:30:00")
+
+    def test_date_with_invalid_minute_component_degrades_to_naive(self):
+        """UTC+02:60 (invalid minutes) is dropped rather than silently normalized."""
+        self.assertEqual(parse_html_date("15.01.2024 10:30:00 UTC+02:60"), "2024-01-15T10:30:00")
+
+    def test_date_with_bare_zone_name_degrades_to_naive(self):
+        """A non-offset third token (bare zone name) degrades to the old behavior."""
+        self.assertEqual(parse_html_date("15.01.2024 10:30:00 CEST"), "2024-01-15T10:30:00")
 
     def test_empty_string(self):
         self.assertIsNone(parse_html_date(""))
@@ -774,7 +823,7 @@ class TestParseHtmlExport(unittest.TestCase):
         self.assertEqual(messages[0]["id"], 100)
         self.assertEqual(messages[0]["from"], "Alice")
         self.assertEqual(messages[0]["text"], "Hello world!")
-        self.assertEqual(messages[0]["date"], "2024-01-15T10:00:00")
+        self.assertEqual(messages[0]["date"], "2024-01-15T10:00:00+02:00")
         self.assertEqual(messages[0]["type"], "message")
 
     def test_joined_messages(self):
@@ -956,7 +1005,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
 
     def test_html_import_requires_chat_id(self):
         self._write_html(SAMPLE_HTML_MESSAGE)
-        db = AsyncMock()
+        db = _make_mock_db()
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
         with self.assertRaises(ValueError) as ctx:
@@ -965,7 +1014,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
 
     def test_html_import_basic(self):
         self._write_html(SAMPLE_HTML_MESSAGE)
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -980,7 +1029,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
 
     def test_html_import_dry_run(self):
         self._write_html(SAMPLE_HTML_MESSAGE)
-        db = AsyncMock()
+        db = _make_mock_db()
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
         summary = self._run(importer.run(self.export_dir, chat_id_override=42, dry_run=True))
@@ -999,7 +1048,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
             f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
 
         media_dir = os.path.join(self.temp_dir, "media")
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, media_dir)
 
@@ -1019,7 +1068,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
         with open(os.path.join(photos_dir, "photo_1@15-01-2024_10-00-00.jpg"), "wb") as f:
             f.write(b"\x00" * 50)
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -1030,7 +1079,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
 
     def test_html_import_forwarded(self):
         self._write_html(SAMPLE_HTML_FORWARDED)
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -1041,7 +1090,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
 
     def test_html_import_reply(self):
         self._write_html(SAMPLE_HTML_REPLY)
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -1070,7 +1119,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
                 f,
             )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -1081,7 +1130,7 @@ class TestHtmlImportIntegration(unittest.TestCase):
 
     def test_no_export_files_raises_error(self):
         """Neither result.json nor messages.html should raise FileNotFoundError."""
-        db = AsyncMock()
+        db = _make_mock_db()
         importer = TelegramImporter(db, "/tmp/media")
 
         with self.assertRaises(FileNotFoundError) as ctx:
@@ -1132,7 +1181,7 @@ class TestImportSenderNameCapture(unittest.TestCase):
                 ],
             }
         )
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -1160,7 +1209,7 @@ class TestImportSenderNameCapture(unittest.TestCase):
                 ],
             }
         )
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -1180,7 +1229,7 @@ class TestImportSenderNameCapture(unittest.TestCase):
                 ],
             }
         )
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
 
@@ -1240,7 +1289,7 @@ class TestSecureImportPathConfinement(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, self.media_dir)
 
@@ -1271,7 +1320,7 @@ class TestSecureImportPathConfinement(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, self.media_dir)
 
@@ -1310,7 +1359,7 @@ class TestSecureImportPathConfinement(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, self.media_dir)
 
@@ -1339,7 +1388,7 @@ class TestSecureImportPathConfinement(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, self.media_dir)
 
@@ -1372,7 +1421,7 @@ class TestSecureImportPathConfinement(unittest.TestCase):
             }
         )
 
-        db = AsyncMock()
+        db = _make_mock_db()
         db.get_chat_stats.return_value = {"messages": 0}
         importer = TelegramImporter(db, self.media_dir)
 
@@ -1404,6 +1453,607 @@ class TestSecureImportPathConfinement(unittest.TestCase):
         result = _build_import_media_filename("import_42_1", "../../etc/passwd", max_filename_bytes=143)
         self.assertNotIn("..", result)
         self.assertNotIn("/", result)
+
+
+# ---------------------------------------------------------------------------
+# Sweep-cursor amputation guard
+# ---------------------------------------------------------------------------
+
+
+class TestSweepCursorGuard(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.export_dir = os.path.join(self.temp_dir, "export")
+        os.makedirs(self.export_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _write_export(self, data):
+        with open(os.path.join(self.export_dir, "result.json"), "w") as f:
+            json.dump(data, f)
+
+    def test_partial_export_does_not_advance_cursor(self):
+        """An export that starts mid-history (ids 8..9, not the chat head) must
+        not raise the sweep cursor - the still-retrievable older history would
+        silently never be fetched by the next backup run."""
+        self._write_export(
+            {
+                "name": "Chat",
+                "type": "personal_chat",
+                "id": 42,
+                "messages": [
+                    {"id": 8, "type": "message", "date": "2024-01-15T10:00:00", "text": "A"},
+                    {"id": 9, "type": "message", "date": "2024-01-15T10:01:00", "text": "B"},
+                ],
+            }
+        )
+        db = _make_mock_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        summary = self._run(importer.run(self.export_dir))
+
+        self.assertEqual(summary["total_messages"], 2)
+        db.update_sync_status.assert_not_called()
+
+    def test_full_export_from_head_advances_cursor(self):
+        self._write_export(
+            {
+                "name": "Chat",
+                "type": "personal_chat",
+                "id": 42,
+                "messages": [
+                    {"id": 1, "type": "message", "date": "2024-01-15T10:00:00", "text": "A"},
+                    {"id": 2, "type": "message", "date": "2024-01-15T10:01:00", "text": "B"},
+                ],
+            }
+        )
+        db = _make_mock_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir))
+
+        db.update_sync_status.assert_called_once_with(42, 2, 2)
+
+    def test_cursor_never_lowered_below_an_existing_higher_value(self):
+        """A chat the API has already swept far ahead of must not have its
+        cursor regressed by an older/partial import re-run with --merge."""
+        self._write_export(
+            {
+                "name": "Chat",
+                "type": "personal_chat",
+                "id": 42,
+                "messages": [
+                    {"id": 1, "type": "message", "date": "2024-01-15T10:00:00", "text": "A"},
+                ],
+            }
+        )
+        db = _make_mock_db()
+        db.get_chat_stats.return_value = {"messages": 500}
+        db.get_last_message_id.return_value = 500
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir, merge=True))
+
+        db.update_sync_status.assert_not_called()
+
+    def test_skipped_message_does_not_advance_cursor_past_itself(self):
+        """A message with no valid date is never accepted for insert, so its id
+        must not count toward the cursor bounds either."""
+        self._write_export(
+            {
+                "name": "Chat",
+                "type": "personal_chat",
+                "id": 42,
+                "messages": [
+                    {"id": 1, "type": "message", "date": "2024-01-15T10:00:00", "text": "A"},
+                    {"id": 999, "type": "message", "text": "no date, skipped"},
+                ],
+            }
+        )
+        db = _make_mock_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir))
+
+        db.update_sync_status.assert_called_once_with(42, 1, 1)
+
+
+# ---------------------------------------------------------------------------
+# Chat vocabulary, selective chat upsert, and honest is_outgoing
+# ---------------------------------------------------------------------------
+
+
+class TestChatVocabularyAndSelectiveUpsert(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.export_dir = os.path.join(self.temp_dir, "export")
+        os.makedirs(self.export_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _write_export(self, data):
+        with open(os.path.join(self.export_dir, "result.json"), "w") as f:
+            json.dump(data, f)
+
+    def _write_html(self, content):
+        with open(os.path.join(self.export_dir, "messages.html"), "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def test_chat_type_map_uses_the_forks_private_vocabulary(self):
+        """'user' appears nowhere else in this codebase; the viewer/sidebar
+        expect 'private' for personal/bot/saved chats."""
+        from src.telegram_import import CHAT_TYPE_MAP
+
+        self.assertEqual(CHAT_TYPE_MAP["personal_chat"], "private")
+        self.assertEqual(CHAT_TYPE_MAP["bot_chat"], "private")
+        self.assertEqual(CHAT_TYPE_MAP["saved_messages"], "private")
+
+    def test_json_personal_chat_upsert_supplies_only_known_fields(self):
+        self._write_export(
+            {
+                "name": "Alice",
+                "type": "personal_chat",
+                "id": 42,
+                "messages": [
+                    {"id": 1, "type": "message", "date": "2024-01-15T10:00:00", "text": "hi"},
+                ],
+            }
+        )
+        db = _make_mock_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir))
+
+        chat_row = db.upsert_chat.call_args[0][0]
+        self.assertEqual(chat_row["type"], "private")
+        self.assertEqual(chat_row["first_name"], "Alice")
+        self.assertNotIn("title", chat_row)
+
+    def test_html_import_into_existing_chat_leaves_type_and_name_untouched(self):
+        """Re-importing an HTML export over an already-captured chat must not
+        rewrite its type to 'unknown' or NULL its captured contact name."""
+        self._write_html(SAMPLE_HTML_MESSAGE)
+        db = _make_mock_db()
+        db.get_chat_by_id.return_value = {"id": -1001234567890, "type": "private", "first_name": "Alice"}
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir, chat_id_override=-1001234567890))
+
+        chat_row = db.upsert_chat.call_args[0][0]
+        self.assertNotIn("title", chat_row)
+        self.assertNotIn("type", chat_row)
+        self.assertNotIn("first_name", chat_row)
+
+    def test_html_import_into_new_chat_sets_only_the_name(self):
+        self._write_html(SAMPLE_HTML_MESSAGE)
+        db = _make_mock_db()  # get_chat_by_id defaults to None: no row yet
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir, chat_id_override=-1001234567890))
+
+        chat_row = db.upsert_chat.call_args[0][0]
+        self.assertEqual(chat_row["title"], "Test Chat")
+        self.assertNotIn("type", chat_row)
+
+    def test_full_account_export_sets_honest_is_outgoing(self):
+        self._write_export(
+            {
+                "personal_information": {"user_id": 42},
+                "chats": {
+                    "list": [
+                        {
+                            "name": "Chat",
+                            "type": "personal_chat",
+                            "id": 42,
+                            "messages": [
+                                {
+                                    "id": 1,
+                                    "type": "message",
+                                    "date": "2024-01-15T10:00:00",
+                                    "from": "Me",
+                                    "from_id": "user42",
+                                    "text": "outgoing",
+                                },
+                                {
+                                    "id": 2,
+                                    "type": "message",
+                                    "date": "2024-01-15T10:01:00",
+                                    "from": "Bob",
+                                    "from_id": "user99",
+                                    "text": "incoming",
+                                },
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
+        db = _make_mock_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir))
+
+        rows = db.insert_messages_batch.call_args[0][0]
+        self.assertEqual(rows[0]["is_outgoing"], 1)
+        self.assertEqual(rows[1]["is_outgoing"], 0)
+
+    def test_html_import_leaves_is_outgoing_absent(self):
+        """No owner info is available from a chat-scoped export: the key must
+        be OMITTED (not defaulted to 0), so a --merge cannot clobber an
+        is_outgoing the live sweep already determined correctly."""
+        self._write_html(SAMPLE_HTML_MESSAGE)
+        db = _make_mock_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir, chat_id_override=-1001234567890))
+
+        rows = db.insert_messages_batch.call_args[0][0]
+        self.assertNotIn("is_outgoing", rows[0])
+
+
+# ---------------------------------------------------------------------------
+# Media the archive already holds is not re-copied or re-inserted
+# ---------------------------------------------------------------------------
+
+
+class TestMediaAlreadyArchivedGuard(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.export_dir = os.path.join(self.temp_dir, "export")
+        os.makedirs(self.export_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _write_export(self, data):
+        with open(os.path.join(self.export_dir, "result.json"), "w") as f:
+            json.dump(data, f)
+
+    def _write_photo(self):
+        photos_dir = os.path.join(self.export_dir, "photos")
+        os.makedirs(photos_dir, exist_ok=True)
+        with open(os.path.join(photos_dir, "photo_1.jpg"), "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+
+    def _write_single_photo_message(self):
+        self._write_photo()
+        self._write_export(
+            {
+                "name": "Chat",
+                "type": "personal_chat",
+                "id": 42,
+                "messages": [
+                    {
+                        "id": 1,
+                        "type": "message",
+                        "date": "2024-01-15T10:00:00",
+                        "text": "",
+                        "photo": "photos/photo_1.jpg",
+                    },
+                ],
+            }
+        )
+
+    def test_skips_media_the_live_sweep_already_downloaded(self):
+        self._write_single_photo_message()
+        db = _make_mock_db()
+        db.get_media_for_message.return_value = {
+            "id": "42_1_photo",
+            "message_id": 1,
+            "chat_id": 42,
+            "type": "photo",
+            "file_path": "42/photo.jpg",
+            "downloaded": 1,
+        }
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        summary = self._run(importer.run(self.export_dir))
+
+        self.assertEqual(summary["total_media"], 0)
+        db.insert_media.assert_not_called()
+
+    def test_a_replay_under_its_own_import_id_still_proceeds(self):
+        """A row under OUR OWN import id is a resumed replay, not someone
+        else's duplicate, and must still be written (idempotently)."""
+        self._write_single_photo_message()
+        db = _make_mock_db()
+        db.get_media_for_message.return_value = {
+            "id": "import_42_1",
+            "message_id": 1,
+            "chat_id": 42,
+            "type": "photo",
+            "file_path": "42/import_42_1_photo_1.jpg",
+            "downloaded": 1,
+        }
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        summary = self._run(importer.run(self.export_dir))
+
+        self.assertEqual(summary["total_media"], 1)
+        db.insert_media.assert_called_once()
+
+    def test_a_not_yet_downloaded_sweep_row_does_not_block_the_import(self):
+        """A sweep row that exists but was never downloaded (e.g. size- or
+        filter-skipped) must not block importing the file the export has."""
+        self._write_single_photo_message()
+        db = _make_mock_db()
+        db.get_media_for_message.return_value = {
+            "id": "42_1_photo",
+            "message_id": 1,
+            "chat_id": 42,
+            "type": "photo",
+            "file_path": None,
+            "downloaded": 0,
+        }
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        summary = self._run(importer.run(self.export_dir))
+
+        self.assertEqual(summary["total_media"], 1)
+        db.insert_media.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# upsert_user only refreshes what the live API has never seen
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertUserOnlyWhenNotAlreadyCaptured(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.export_dir = os.path.join(self.temp_dir, "export")
+        os.makedirs(self.export_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _write_export(self, data):
+        with open(os.path.join(self.export_dir, "result.json"), "w") as f:
+            json.dump(data, f)
+
+    def _export_with_sender(self):
+        self._write_export(
+            {
+                "name": "Chat",
+                "type": "personal_chat",
+                "id": 42,
+                "messages": [
+                    {
+                        "id": 1,
+                        "type": "message",
+                        "date": "2024-01-15T10:00:00",
+                        "from": "Alice",
+                        "from_id": "user77",
+                        "text": "hi",
+                    },
+                ],
+            }
+        )
+
+    def test_a_sender_the_api_has_never_seen_is_created(self):
+        self._export_with_sender()
+        db = _make_mock_db()  # get_user_by_id defaults to None
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir))
+
+        db.upsert_user.assert_called_once()
+
+    def test_an_already_captured_sender_is_not_overwritten(self):
+        """upsert_user refreshes username/last_name/phone/is_bot unconditionally
+        on every call; an export only ever knows first_name, so writing over an
+        already-captured user would NULL out identity fields the live API
+        recorded."""
+        self._export_with_sender()
+        db = _make_mock_db()
+        db.get_user_by_id.return_value = {"id": 77, "username": "alice_real", "first_name": "Alice"}
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir))
+
+        db.upsert_user.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Resumable JSON import (checkpoint per chat, no streaming)
+# ---------------------------------------------------------------------------
+
+
+class TestResumableJsonImport(unittest.TestCase):
+    """Covers the resume/checkpoint half of the large-export durability fix.
+
+    Memory-flat streaming of result.json is NOT implemented here (it would
+    require the ijson dependency, which is out of scope - see the lane
+    report); this covers the part that is portable without it: an
+    interrupted multi-chat import can be retried without redoing completed
+    chats or inflating their counters.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.export_dir = os.path.join(self.temp_dir, "export")
+        os.makedirs(self.export_dir)
+        self.result_json_path = os.path.join(self.export_dir, "result.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _write_export(self, data):
+        with open(self.result_json_path, "w") as f:
+            json.dump(data, f)
+
+    def _stateful_db(self):
+        """An AsyncMock db whose get_setting/set_setting behave like a real
+        single-key store, so a marker written by one run() call is read back
+        by the next - exercising the actual persistence contract instead of
+        just asserting call shapes."""
+        db = _make_mock_db()
+        store: dict[str, str] = {}
+
+        async def _get_setting(key):
+            return store.get(key)
+
+        async def _set_setting(key, value):
+            store[key] = value
+
+        db.get_setting.side_effect = _get_setting
+        db.set_setting.side_effect = _set_setting
+        return db
+
+    def _two_chat_export(self):
+        return {
+            "chats": {
+                "list": [
+                    {
+                        "name": "Chat A",
+                        "type": "personal_chat",
+                        "id": 1,
+                        "messages": [
+                            {"id": 1, "type": "message", "date": "2024-01-15T10:00:00", "text": "A1"},
+                        ],
+                    },
+                    {
+                        "name": "Chat B",
+                        "type": "personal_chat",
+                        "id": 2,
+                        "messages": [
+                            {"id": 1, "type": "message", "date": "2024-01-15T10:00:00", "text": "B1"},
+                        ],
+                    },
+                ]
+            }
+        }
+
+    def test_retry_after_interruption_skips_only_the_completed_chat(self):
+        """A crash between chats leaves a marker naming the completed chat and
+        the one the run was inside; a retry must skip the former and replay
+        the latter, not redo everything or skip everything."""
+        self._write_export(self._two_chat_export())
+        db = self._stateful_db()
+
+        importer1 = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+        original_import_chat = importer1._import_chat
+        call_count = {"n": 0}
+
+        async def _flaky_import_chat(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("simulated crash mid-import")
+            return await original_import_chat(*args, **kwargs)
+
+        importer1._import_chat = _flaky_import_chat
+
+        with self.assertRaises(RuntimeError):
+            self._run(importer1.run(self.export_dir))
+
+        marker = self._run(importer1._load_import_marker())
+        self.assertEqual(marker["completed"], [1])
+        self.assertEqual(marker["started"], 2)
+
+        db.insert_messages_batch.reset_mock()
+        importer2 = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+        summary2 = self._run(importer2.run(self.export_dir, merge=True))
+
+        self.assertEqual(summary2["chats_skipped"], 1)
+        self.assertEqual(summary2["chats_imported"], 1)
+        self.assertEqual(summary2["details"][0]["chat_name"], "Chat B")
+
+        # A clean finish clears the marker: a later, unrelated import never
+        # inherits this run's skip set.
+        self.assertIsNone(self._run(importer2._load_import_marker()))
+
+    def test_marker_cleared_after_clean_completion(self):
+        self._write_export(self._two_chat_export())
+        db = self._stateful_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir))
+
+        marker = self._run(importer._load_import_marker())
+        self.assertIsNone(marker)
+
+    def test_dry_run_never_reads_or_writes_the_marker(self):
+        self._write_export(self._two_chat_export())
+        db = self._stateful_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        self._run(importer.run(self.export_dir, dry_run=True))
+
+        db.set_setting.assert_not_called()
+
+    def test_a_marker_from_a_different_export_file_is_not_inherited(self):
+        """A REPLACED export (different date range, newer pull) must not skip
+        chats a stale marker from a DIFFERENT file already marked complete -
+        that file's 'completed' chats may hold newer messages here."""
+        self._write_export(self._two_chat_export())
+        db = self._stateful_db()
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+
+        # Simulate a leftover marker from an unrelated export file.
+        self._run(importer._save_import_marker("stale-fingerprint-from-another-file", {1, 2}, started=None))
+
+        summary = self._run(importer.run(self.export_dir, merge=True))
+
+        self.assertEqual(summary["chats_skipped"], 0)
+        self.assertEqual(summary["chats_imported"], 2)
+
+    def test_interrupted_chat_replay_bypasses_the_merge_guard(self):
+        """The chat a previous run crashed inside must be resumable WITHOUT
+        --merge: its partial rows are the importer's own earlier output, not
+        someone else's data that a plain retry should refuse to touch."""
+        from src.telegram_import import _export_fingerprint
+
+        self._write_export(self._two_chat_export())
+        db = self._stateful_db()
+        # Chat 1 already has a partial row from the simulated crash; chat 2 is
+        # untouched. A plain (non-merge) run must still succeed on both.
+        db.get_chat_stats.side_effect = lambda chat_id: {"messages": 1 if chat_id == 1 else 0}
+
+        fingerprint = _export_fingerprint(Path(self.result_json_path))
+        importer = TelegramImporter(db, os.path.join(self.temp_dir, "media"))
+        self._run(importer._save_import_marker(fingerprint, set(), started=1))
+
+        summary = self._run(importer.run(self.export_dir))
+
+        self.assertEqual(summary["chats_imported"], 2)
+        self.assertEqual(summary["chats_skipped"], 0)
 
 
 if __name__ == "__main__":

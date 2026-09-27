@@ -9,6 +9,7 @@ Both formats insert messages, users, and media into the existing database schema
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -24,15 +25,20 @@ logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 500
 
+# Key for the resumable-import progress marker in the app_settings key-value
+# store. One archive per account (this fork has no multi-account import), so a
+# single global key is sufficient.
+IMPORT_PROGRESS_SETTING_KEY = "import_progress"
+
 # Cap on-disk import filenames in bytes (ext4/most Linux filesystems: 255 bytes
 # per path component). Leaves headroom for the "import_{chat_id}_{msg_id}_"
 # prefix ahead of the export's original filename.
 DEFAULT_MAX_FILENAME_BYTES = 143
 
 CHAT_TYPE_MAP = {
-    "personal_chat": "user",
-    "bot_chat": "user",
-    "saved_messages": "user",
+    "personal_chat": "private",
+    "bot_chat": "private",
+    "saved_messages": "private",
     "private_group": "group",
     "private_supergroup": "supergroup",
     "public_supergroup": "supergroup",
@@ -133,6 +139,26 @@ def flatten_text(text_field: str | list | None) -> str:
     return str(text_field)
 
 
+def _normalize_export_datetime(raw: str) -> datetime | None:
+    """Parse an export's ISO date string, converting an aware value to naive UTC.
+
+    ``date_unixtime``/``edited_unixtime`` are always UTC instants, but the plain
+    ``date``/``edited`` string can carry an offset (HTML exports append the
+    exporter's local ``UTC+HH:MM``, see ``parse_html_date``). A naive string is
+    the exporter's own wall clock and is kept as-is, matching every capture
+    path's naive storage; an aware one is converted to the same instant in UTC
+    before the offset is discarded, instead of silently keeping the local
+    wall-clock time as if it were UTC.
+    """
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
 def parse_date(msg: dict) -> datetime | None:
     """Parse date from a Telegram Desktop export message."""
     if "date_unixtime" in msg:
@@ -141,10 +167,7 @@ def parse_date(msg: dict) -> datetime | None:
         except (ValueError, TypeError, OSError):
             pass
     if "date" in msg:
-        try:
-            return datetime.fromisoformat(msg["date"]).replace(tzinfo=None)
-        except (ValueError, TypeError):
-            pass
+        return _normalize_export_datetime(msg["date"])
     return None
 
 
@@ -156,10 +179,7 @@ def parse_edited_date(msg: dict) -> datetime | None:
         except (ValueError, TypeError, OSError):
             pass
     if "edited" in msg:
-        try:
-            return datetime.fromisoformat(msg["edited"]).replace(tzinfo=None)
-        except (ValueError, TypeError):
-            pass
+        return _normalize_export_datetime(msg["edited"])
     return None
 
 
@@ -303,20 +323,43 @@ def _build_service_text(msg: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Real UTC offsets only (-12:00 .. +14:00). Telegram Desktop's HTML export
+# writes the date title as local wall-clock time plus this suffix; keeping only
+# the first two tokens (as before) shifted every HTML-imported message by the
+# exporter's offset relative to captured messages in the same chat - wrong
+# interleaving in the merged timeline and the wrong calendar day for
+# late-evening messages. A malformed token (e.g. an out-of-range offset or a
+# bare zone name) is dropped instead of trusted: accepting it verbatim could
+# make the downstream ISO parse raise (losing the date entirely) or silently
+# normalize an invalid minute component to a different instant.
+_HTML_DATE_OFFSET = re.compile(r"^UTC([+-](?:0\d|1[0-3]):[0-5]\d|[+-]14:00)$")
+
+
 def parse_html_date(date_str: str) -> str | None:
     """Convert HTML export date title to ISO format string.
 
     Input: 'DD.MM.YYYY HH:MM:SS' or 'DD.MM.YYYY HH:MM:SS UTC+HH:MM'
-    Output: ISO 8601 string like '2024-01-01T12:00:00'
+    Output: ISO 8601 string like '2024-01-01T12:00:00' or '2024-01-01T12:00:00+02:00'
+
+    The title is the exporter's local wall-clock time; the UTC+HH:MM suffix is
+    the only record of its offset, so it must survive into the ISO string -
+    parse_date/parse_edited_date normalise an aware string to naive UTC,
+    matching every capture path's storage. An unrecognised offset token
+    degrades to the pre-existing behavior: dropped, wall clock kept naive.
     """
     if not date_str:
         return None
     parts = date_str.strip().split()
     if len(parts) < 2:
         return None
+    offset = ""
+    if len(parts) >= 3:
+        match = _HTML_DATE_OFFSET.match(parts[2])
+        if match:
+            offset = match.group(1)
     try:
         day, month, year = parts[0].split(".")
-        return f"{year}-{month}-{day}T{parts[1]}"
+        return f"{year}-{month}-{day}T{parts[1]}{offset}"
     except (ValueError, IndexError):
         return None
 
@@ -594,6 +637,21 @@ def _parse_html_export(html_files: list[Path], export_path: Path) -> tuple[str, 
     return chat_name, messages
 
 
+def _export_fingerprint(path: Path) -> str:
+    """Identity of the export file a resume marker is valid against.
+
+    Size plus a hash of the first MiB: cheap even on a multi-gigabyte export,
+    and any re-export (different date range, a newer pull, an edited file)
+    changes at least one of the two. A mismatch simply invalidates the marker
+    - the import then starts fresh, with the normal already-imported guard
+    (or --merge) active as before.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        digest.update(handle.read(1024 * 1024))
+    return f"{path.stat().st_size}:{digest.hexdigest()}"
+
+
 # ---------------------------------------------------------------------------
 # Main importer
 # ---------------------------------------------------------------------------
@@ -607,6 +665,9 @@ class TelegramImporter:
         self.media_path = media_path
         self.media_root = Path(media_path).resolve()
         self.max_filename_bytes = max_filename_bytes
+        # Owner of a full-account JSON export (personal_information.user_id);
+        # None for HTML and single-chat JSON exports, which cannot know it.
+        self._owner_user_id: int | None = None
 
     @classmethod
     async def create(cls, media_path: str, max_filename_bytes: int = DEFAULT_MAX_FILENAME_BYTES) -> TelegramImporter:
@@ -633,12 +694,24 @@ class TelegramImporter:
         path = Path(export_path).resolve()
         result_file = _resolve_export_control_file(path, path / "result.json")
         html_files = _find_html_files(path)
+        fingerprint: str | None = None
 
         if result_file is not None:
             logger.info(f"Reading {result_file}...")
             with open(result_file, encoding="utf-8") as f:
                 data = json.load(f)
             chats = self._extract_chats(data)
+            # A full-account JSON export names its owner: with it, every
+            # message can carry an honest is_outgoing instead of leaving the
+            # column absent for the viewer fallback to guess.
+            info = data.get("personal_information")
+            owner_raw = info.get("user_id") if isinstance(info, dict) else None
+            try:
+                self._owner_user_id = int(owner_raw or 0) or None
+            except (TypeError, ValueError):
+                self._owner_user_id = None
+            if not dry_run:
+                fingerprint = _export_fingerprint(result_file)
         elif html_files:
             logger.info(f"Detected HTML export format ({len(html_files)} file(s))")
             if not chat_id_override:
@@ -657,7 +730,35 @@ class TelegramImporter:
         if not chats:
             raise ValueError("No chats found in export file")
 
-        summary: dict[str, Any] = {"chats_imported": 0, "total_messages": 0, "total_media": 0, "details": []}
+        # Resume model: every write the importer performs is an idempotent
+        # upsert, so the recovery unit is the CHAT. Completed chats are
+        # recorded in a settings-table marker keyed to this export's
+        # fingerprint and skipped; the chat a previous interrupted run was
+        # inside is REPLAYED from its start (an exact replay writes nothing
+        # new). The marker is bound to the exact file: a REPLACED export
+        # (different date range, re-export) never inherits the skip set, so
+        # that path keeps today's --merge semantics. Only the JSON path
+        # (multi-chat exports) checkpoints; a single-chat HTML import has
+        # nothing to resume between.
+        completed: set[int] = set()
+        interrupted_chat_id: int | None = None
+        if fingerprint is not None:
+            marker = await self._load_import_marker()
+            if marker and marker.get("fingerprint") == fingerprint:
+                completed = {int(c) for c in marker.get("completed", [])}
+                interrupted_chat_id = marker.get("started")
+                if completed or interrupted_chat_id is not None:
+                    logger.info(f"Resuming interrupted import: {len(completed)} chat(s) already complete")
+
+        summary: dict[str, Any] = {
+            "chats_imported": 0,
+            "chats_skipped": 0,
+            "total_messages": 0,
+            "total_media": 0,
+            "details": [],
+        }
+
+        finished_all_chats = True
 
         for chat_data in chats:
             chat_id = (
@@ -670,6 +771,17 @@ class TelegramImporter:
                 logger.warning(f"Skipping chat with no ID (type: {chat_data.get('type', 'unknown')})")
                 continue
 
+            if chat_id in completed:
+                summary["chats_skipped"] += 1
+                if chat_id_override and len(chats) > 1:
+                    finished_all_chats = False
+                    break
+                continue
+
+            resuming = interrupted_chat_id == chat_id
+            if fingerprint is not None:
+                await self._save_import_marker(fingerprint, completed, started=chat_id)
+
             result = await self._import_chat(
                 chat_data=chat_data,
                 chat_id=chat_id,
@@ -677,6 +789,7 @@ class TelegramImporter:
                 dry_run=dry_run,
                 skip_media=skip_media,
                 merge=merge,
+                resuming=resuming,
             )
 
             summary["chats_imported"] += 1
@@ -684,11 +797,38 @@ class TelegramImporter:
             summary["total_media"] += result["media"]
             summary["details"].append(result)
 
+            if fingerprint is not None:
+                completed.add(chat_id)
+                await self._save_import_marker(fingerprint, completed, started=None)
+
             if chat_id_override and len(chats) > 1:
                 logger.info("--chat-id provided with multi-chat export; only importing first chat")
+                finished_all_chats = False
                 break
 
+        if fingerprint is not None and finished_all_chats:
+            # Clean completion: clear the marker so an unrelated future import
+            # (of this or a different export) never inherits this run's skip set.
+            await self.db.set_setting(IMPORT_PROGRESS_SETTING_KEY, "")
+
         return summary
+
+    async def _load_import_marker(self) -> dict[str, Any] | None:
+        """Load the resumable-import progress marker, if any and well-formed."""
+        raw = await self.db.get_setting(IMPORT_PROGRESS_SETTING_KEY)
+        if not raw:
+            return None
+        try:
+            marker = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        return marker if isinstance(marker, dict) else None
+
+    async def _save_import_marker(self, fingerprint: str, completed: set[int], started: int | None) -> None:
+        await self.db.set_setting(
+            IMPORT_PROGRESS_SETTING_KEY,
+            json.dumps({"fingerprint": fingerprint, "completed": sorted(completed), "started": started}),
+        )
 
     def _extract_chats(self, data: dict) -> list[dict]:
         """Extract chat list from either single-chat or full-account export."""
@@ -708,15 +848,22 @@ class TelegramImporter:
         dry_run: bool,
         skip_media: bool,
         merge: bool,
+        resuming: bool = False,
     ) -> dict[str, Any]:
-        """Import a single chat from export data."""
+        """Import a single chat from export data.
+
+        ``resuming`` marks a chat a previous, interrupted run left partially
+        imported: its rows are the importer's own earlier output, so the
+        already-imported guard below must not fire on them, and the replay
+        converges through the same idempotent upserts every write already uses.
+        """
         chat_name = chat_data.get("name", "Unknown")
         export_type = chat_data.get("type", "personal_chat")
         messages = chat_data.get("messages", [])
 
         logger.info(f"Importing chat {chat_id} (type: {export_type}) - {len(messages)} messages")
 
-        if not merge and not dry_run:
+        if not merge and not dry_run and not resuming:
             existing = await self.db.get_chat_stats(chat_id)
             if existing and existing.get("messages", 0) > 0:
                 raise ValueError(
@@ -725,19 +872,32 @@ class TelegramImporter:
                 )
 
         if not dry_run:
-            await self.db.upsert_chat(
-                {
-                    "id": chat_id,
-                    "type": CHAT_TYPE_MAP.get(export_type, "unknown"),
-                    "title": chat_name if export_type not in ("personal_chat", "bot_chat") else None,
-                    "first_name": chat_name if export_type in ("personal_chat", "bot_chat") else None,
-                }
-            )
+            # Only observations this export actually made may reach the row:
+            # upsert_chat only refreshes the keys present, so an absent key
+            # preserves whatever live capture already recorded. Supplying
+            # type='unknown'/first_name=None unconditionally here rewrote an
+            # already-captured chat's type and NULLed its contact's real name
+            # every time an HTML export of it was (re-)imported with --merge.
+            chat_row: dict[str, Any] = {"id": chat_id}
+            if export_type == "html_export":
+                # An HTML export names the chat but cannot say what KIND it is,
+                # nor whether that name is a person's first name. The name is
+                # still worth keeping when no row exists yet.
+                if await self.db.get_chat_by_id(chat_id) is None:
+                    chat_row["title"] = chat_name
+            elif export_type in ("personal_chat", "bot_chat"):
+                chat_row["type"] = CHAT_TYPE_MAP[export_type]
+                chat_row["first_name"] = chat_name
+            else:
+                chat_row["type"] = CHAT_TYPE_MAP.get(export_type, "unknown")
+                chat_row["title"] = chat_name
+            await self.db.upsert_chat(chat_row)
 
         seen_users: set[int] = set()
         msg_count = 0
         media_count = 0
         max_msg_id = 0
+        min_msg_id = 0
         batch: list[dict[str, Any]] = []
         media_batch: list[dict[str, Any]] = []
 
@@ -746,7 +906,6 @@ class TelegramImporter:
             if msg_id is None:
                 continue
 
-            max_msg_id = max(max_msg_id, msg_id)
             msg_type = msg.get("type", "message")
 
             if msg_type == "service":
@@ -758,12 +917,18 @@ class TelegramImporter:
 
             if sender_id and sender_id > 0 and sender_id not in seen_users and not dry_run:
                 seen_users.add(sender_id)
-                await self.db.upsert_user(
-                    {
-                        "id": sender_id,
-                        "first_name": sender_name or "",
-                    }
-                )
+                # An export only ever knows a sender's first_name. upsert_user
+                # refreshes username/last_name/phone/is_bot unconditionally on
+                # every call, so writing over an already-captured user would
+                # NULL out identity fields the live API already recorded; only
+                # create the row when the API has never seen this user.
+                if await self.db.get_user_by_id(sender_id) is None:
+                    await self.db.upsert_user(
+                        {
+                            "id": sender_id,
+                            "first_name": sender_name or "",
+                        }
+                    )
 
             if msg_type == "service":
                 text = _build_service_text(msg)
@@ -774,6 +939,12 @@ class TelegramImporter:
             if date is None:
                 logger.warning(f"Skipping message {msg_id}: no valid date")
                 continue
+
+            # Cursor bounds track only messages actually ACCEPTED for insert -
+            # a skipped message must never advance (or narrow) the sweep
+            # cursor past itself.
+            max_msg_id = max(max_msg_id, msg_id)
+            min_msg_id = msg_id if min_msg_id == 0 else min(min_msg_id, msg_id)
 
             raw_data: dict[str, Any] = {}
             if msg.get("forwarded_from"):
@@ -790,9 +961,17 @@ class TelegramImporter:
                 "forward_from_id": None,
                 "edit_date": parse_edited_date(msg),
                 "raw_data": raw_data,
-                "is_outgoing": 0,
-                "is_pinned": 0,
             }
+
+            # A full-account JSON export names its owner: with it, every
+            # message can carry an honest is_outgoing instead of leaving the
+            # column absent. Leaving the key OUT entirely (rather than
+            # defaulting to 0) matters just as much: the message upsert only
+            # refreshes columns the writer supplied, so an HTML/chat-scoped
+            # import (no owner) must never overwrite an is_outgoing the live
+            # sweep already determined correctly on a --merge.
+            if self._owner_user_id and sender_id is not None:
+                message_data["is_outgoing"] = 1 if sender_id == self._owner_user_id else 0
 
             batch.append(message_data)
             msg_count += 1
@@ -800,49 +979,62 @@ class TelegramImporter:
             if not skip_media:
                 media_type, rel_path, orig_name = _detect_media(msg)
                 if media_type and rel_path:
-                    source = _resolve_export_media_path(export_path, rel_path)
-                    if source is not None:
-                        media_data = None
-                        try:
-                            media_id = f"import_{chat_id}_{msg_id}"
-                            dest_dir = (self.media_root / str(chat_id)).resolve()
-                            original_name = orig_name or Path(rel_path.replace("\\", "/")).name
-                            dest_name = _build_import_media_filename(media_id, original_name, self.max_filename_bytes)
-                            dest_file = dest_dir / dest_name
-                            resolved_dest = dest_file.resolve()
-                            if not resolved_dest.is_relative_to(self.media_root):
-                                logger.warning("Skipping imported media with an unsafe destination")
-                            else:
-                                file_size = source.stat().st_size
-                                stored_path = f"{chat_id}/{dest_name}"
-                                media_data = {
-                                    "id": media_id,
-                                    "message_id": msg_id,
-                                    "chat_id": chat_id,
-                                    "type": media_type,
-                                    "file_name": dest_name,
-                                    "file_path": stored_path,
-                                    "file_size": file_size,
-                                    "mime_type": msg.get("mime_type"),
-                                    "width": msg.get("width"),
-                                    "height": msg.get("height"),
-                                    "duration": msg.get("duration_seconds"),
-                                    "downloaded": True,
-                                    "download_date": utcnow_naive(),
-                                    "_source": str(source),
-                                    "_dest": str(resolved_dest),
-                                }
-                        except (OSError, RuntimeError, ValueError) as exc:
-                            logger.warning(
-                                "Skipping imported media after an invalid path or filesystem error (%s)",
-                                type(exc).__name__,
-                            )
-                        if media_data is not None:
-                            media_batch.append(media_data)
-                            if dry_run:
-                                media_count += 1
+                    media_id = f"import_{chat_id}_{msg_id}"
+                    # The live sweep (or an earlier import run) may already hold
+                    # this message's media under its own id/shape - re-copying
+                    # the file and inserting a second row would pay for the
+                    # same media twice. A match under OUR OWN id is a resumed
+                    # replay, not a duplicate, and must still proceed.
+                    already_archived = await self._media_already_archived(chat_id, msg_id, media_id)
+                    if already_archived:
+                        logger.debug(f"Skipping media for message {msg_id}: already archived")
                     else:
-                        logger.warning("Skipping imported media outside the export root or missing from the export")
+                        source = _resolve_export_media_path(export_path, rel_path)
+                        if source is not None:
+                            media_data = None
+                            try:
+                                dest_dir = (self.media_root / str(chat_id)).resolve()
+                                original_name = orig_name or Path(rel_path.replace("\\", "/")).name
+                                dest_name = _build_import_media_filename(
+                                    media_id, original_name, self.max_filename_bytes
+                                )
+                                dest_file = dest_dir / dest_name
+                                resolved_dest = dest_file.resolve()
+                                if not resolved_dest.is_relative_to(self.media_root):
+                                    logger.warning("Skipping imported media with an unsafe destination")
+                                else:
+                                    file_size = source.stat().st_size
+                                    stored_path = f"{chat_id}/{dest_name}"
+                                    media_data = {
+                                        "id": media_id,
+                                        "message_id": msg_id,
+                                        "chat_id": chat_id,
+                                        "type": media_type,
+                                        "file_name": dest_name,
+                                        "file_path": stored_path,
+                                        "file_size": file_size,
+                                        "mime_type": msg.get("mime_type"),
+                                        "width": msg.get("width"),
+                                        "height": msg.get("height"),
+                                        "duration": msg.get("duration_seconds"),
+                                        "downloaded": True,
+                                        "download_date": utcnow_naive(),
+                                        "_source": str(source),
+                                        "_dest": str(resolved_dest),
+                                    }
+                            except (OSError, RuntimeError, ValueError) as exc:
+                                logger.warning(
+                                    "Skipping imported media after an invalid path or filesystem error (%s)",
+                                    type(exc).__name__,
+                                )
+                            if media_data is not None:
+                                media_batch.append(media_data)
+                                if dry_run:
+                                    media_count += 1
+                        else:
+                            logger.warning(
+                                "Skipping imported media outside the export root or missing from the export"
+                            )
 
             if len(batch) >= BATCH_SIZE:
                 if not dry_run:
@@ -855,7 +1047,26 @@ class TelegramImporter:
             media_count += await self._flush_batch(batch, media_batch)
 
         if not dry_run and msg_count > 0:
-            await self.db.update_sync_status(chat_id, max_msg_id, msg_count)
+            # Advance the sweep cursor only when the export demonstrably covers
+            # the chat's head (Telegram message ids start at 1). Telegram
+            # Desktop's exporter offers date ranges, so a partial export (e.g.
+            # "last 3 months") must not raise the cursor: every id below its
+            # maximum would read as already captured and the still-retrievable
+            # older history would silently never be fetched by the next backup
+            # run. Gap-fill cannot recover a missing head - it only detects
+            # holes BETWEEN already-stored rows - so this guard is the only
+            # protection. An existing higher cursor is also never lowered
+            # (checked via get_last_message_id rather than being unconditional,
+            # so an older/--merge import can't regress a chat already ahead).
+            if min_msg_id > 1:
+                logger.warning(
+                    f"Export for chat {chat_id} starts at message id {min_msg_id}, not the chat head - "
+                    "sweep cursor left unchanged so the next backup run can still fetch the older history"
+                )
+            else:
+                current = await self.db.get_last_message_id(chat_id)
+                if max_msg_id > current:
+                    await self.db.update_sync_status(chat_id, max_msg_id, msg_count)
 
         action = "Would import" if dry_run else "Imported"
         logger.info(f"{action} {msg_count} messages and {media_count} media files for chat {chat_id}")
@@ -867,6 +1078,19 @@ class TelegramImporter:
             "media": media_count,
             "max_message_id": max_msg_id,
         }
+
+    async def _media_already_archived(self, chat_id: int, message_id: int, own_media_id: str) -> bool:
+        """True when the archive already holds a downloaded copy of this message's media.
+
+        The live sweep (and the listener) mint media ids as
+        f"{chat_id}_{message_id}_{type}"; a prior import run mints
+        f"import_{chat_id}_{message_id}". Either can get to a message first.
+        A row under OUR OWN id is a replay of an earlier import of this exact
+        export (resume, or a re-run with --merge) rather than a duplicate, and
+        must not be treated as already archived.
+        """
+        existing = await self.db.get_media_for_message(chat_id, message_id)
+        return bool(existing and existing.get("downloaded") and existing.get("id") != own_media_id)
 
     async def _flush_batch(
         self,
