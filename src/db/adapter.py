@@ -12,6 +12,8 @@ The adapter is composed from domain-focused mixins:
 - OrganizeMixin: pinned messages, forum topics, folders, backup profiles, members
 - SettingsMixin: app settings key-value store
 - SearchMixin: FTS5, AI/OCR, semantic search
+- TagSearchMixin: #hashtag/$cashtag click-through search
+- ChangeFeedMixin: what-changed feed (edits and deletions the archive kept)
 """
 
 import asyncio
@@ -84,6 +86,7 @@ def retry_on_locked(
 
 
 # Import mixins (must be after _strip_tz and retry_on_locked are defined)
+from .adapter_changes import ChangeFeedMixin, TagSearchMixin  # noqa: E402
 from .adapter_media import MediaMixin  # noqa: E402
 from .adapter_messages import MessageMixin  # noqa: E402
 from .adapter_organize import OrganizeMixin  # noqa: E402
@@ -101,6 +104,8 @@ class DatabaseAdapter(
     OrganizeMixin,
     SettingsMixin,
     SearchMixin,
+    TagSearchMixin,
+    ChangeFeedMixin,
 ):
     """
     Async database adapter compatible with the old Database class interface.

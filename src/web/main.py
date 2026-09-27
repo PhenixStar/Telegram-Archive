@@ -562,6 +562,7 @@ from .routes_admin_users import router as admin_users_router
 from .routes_admin_vault import router as admin_vault_router
 from .routes_ai import router as ai_router
 from .routes_auth import router as auth_router
+from .routes_changes import router as changes_router
 from .routes_chat import router as chat_router
 from .routes_health import router as health_router
 from .routes_media import router as media_router
@@ -571,6 +572,7 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(account_switch_router)
 app.include_router(chat_router)
+app.include_router(changes_router)
 app.include_router(media_router)
 app.include_router(admin_users_router)
 app.include_router(admin_settings_router)
