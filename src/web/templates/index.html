@@ -1192,6 +1192,9 @@
                                     Syncing...
                                 </div>
                             </div>
+                            <button @click="openChangesFeed()" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="What changed (deletions & edits)" aria-label="What changed">
+                                <i class="fas fa-clock-rotate-left text-xs"></i>
+                            </button>
                             <button @click="openSettings()" class="p-1 hover:opacity-80" style="color: var(--tg-muted);" title="Settings" aria-label="Settings">
                                 <i class="fas fa-cog text-xs"></i>
                             </button>
@@ -1736,6 +1739,9 @@
                                     </button>
                                     <button @click="exportChat('csv'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
                                         <i class="fas fa-table w-4 text-center"></i> Export CSV
+                                    </button>
+                                    <button @click="openExportRangeModal('json'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
+                                        <i class="fas fa-calendar-days w-4 text-center"></i> Custom range…
                                     </button>
                                 </div>
                             </div>
@@ -2555,6 +2561,9 @@
                         <button @click="exportChat('csv'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
                             <i class="fas fa-table w-4 text-center"></i> CSV
                         </button>
+                        <button @click="openExportRangeModal('json'); showExportMenu = false" class="relative z-50 w-full text-left px-3 py-1.5 text-xs text-white hover:bg-white/10">
+                            <i class="fas fa-calendar-days w-4 text-center"></i> Custom range…
+                        </button>
                     </div>
                 </div>
                 <button v-if="advancedFeatures.ai_chat" @click="onToolClick('ai')"
@@ -3011,6 +3020,157 @@
                     </div>
                 </div>
             </aside>
+        </div>
+
+        <!-- Tag view: #hashtag / $cashtag click-through (official-app tab structure) -->
+        <div v-if="tagView" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" @click.self="closeTagView()">
+            <div role="dialog" aria-modal="true" aria-labelledby="tag-view-title"
+                class="bg-tg-sidebar border border-gray-700 rounded-lg w-full max-w-lg max-h-[80vh] flex flex-col">
+                <div class="flex items-center justify-between p-3 border-b border-gray-700/50">
+                    <span id="tag-view-title" class="font-semibold truncate text-white">{{ tagView.tag }}</span>
+                    <button @click="closeTagView()" aria-label="Close tag search" class="text-gray-400 hover:text-white px-2 text-lg leading-none">&times;</button>
+                </div>
+                <div class="flex border-b border-gray-700/50 text-sm">
+                    <button v-for="t in tagTabs" :key="t.key" @click="setTagTab(t.key)"
+                        :disabled="t.key === 'chat' && !selectedChat"
+                        :class="['flex-1 py-2 disabled:opacity-40',
+                                 tagView.tab === t.key ? 'text-white border-b-2 border-blue-500' : 'text-tg-muted hover:text-white']">
+                        {{ t.label }}
+                    </button>
+                </div>
+                <div class="overflow-y-auto flex-1 min-h-[8rem]">
+                    <div v-if="tagView.loading && !tagView.results.length" class="p-4 text-center text-tg-muted text-sm">Loading…</div>
+                    <div v-else-if="tagView.error" class="p-4 text-center text-red-400 text-sm">{{ tagView.error }}</div>
+                    <div v-else-if="!tagView.results.length" class="p-4 text-center text-tg-muted text-sm">No messages with {{ tagView.tag }}</div>
+                    <button v-for="r in tagView.results" :key="r.chat_id + ':' + r.id" @click="openTagResult(r)"
+                        class="block w-full text-left p-3 border-b border-gray-700/30 hover:bg-white/5">
+                        <div class="flex justify-between text-xs text-tg-muted mb-1">
+                            <span class="truncate">{{ tagView.tab === 'chat' ? (r.sender_name || '') : r.chat_title }}</span>
+                            <span class="ml-2 shrink-0">{{ formatMessageVersionDate(r.date) }}</span>
+                        </div>
+                        <div class="text-sm text-white line-clamp-2 break-words">{{ r.text }}</div>
+                    </button>
+                    <div v-if="tagView.has_more" class="p-3 text-center">
+                        <button @click="loadTagResults(false)" :disabled="tagView.loading"
+                            class="text-blue-400 text-sm hover:underline disabled:opacity-40">Load more</button>
+                    </div>
+                    <div v-if="tagView.truncated" class="p-2 text-center text-xs text-tg-muted">
+                        Search stopped early — older matches may exist
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- What Changed feed: edits and deletions the archive kept -->
+        <div v-if="showChangesFeed"
+            class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center overflow-y-auto p-4"
+            @click.self="showChangesFeed = false">
+            <section role="dialog" aria-modal="true" aria-labelledby="changes-feed-title"
+                class="my-auto bg-tg-sidebar rounded-2xl shadow-2xl p-6 w-full max-w-2xl border border-gray-700 max-h-[85vh] flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 id="changes-feed-title" class="text-xl font-bold text-white">What changed</h3>
+                    <div class="flex items-center gap-2">
+                        <select v-model="changesSince" @change="reloadChangesFeed"
+                            class="bg-gray-900 text-white text-sm rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="1">Last 24 hours</option>
+                            <option value="7">Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="">All time</option>
+                        </select>
+                        <button type="button" @click="showChangesFeed = false" aria-label="Close changes feed"
+                            class="text-gray-400 hover:text-white transition p-1 focus:outline-none focus:ring-2 focus:ring-blue-400 rounded">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <p class="mb-3 text-xs text-tg-muted">
+                    Deletions and edits the archive kept. Deletions appear here when DELETION_MODE=soft.
+                </p>
+                <div class="flex-1 overflow-y-auto space-y-2 pr-1">
+                    <div v-if="changesLoading && !changesFeed.length" class="text-sm text-tg-muted py-6 text-center">Loading…</div>
+                    <div v-else-if="!changesFeed.length" class="text-sm text-tg-muted py-6 text-center">
+                        Nothing changed in this window.
+                    </div>
+                    <article v-for="change in changesFeed" :key="change.kind + ':' + change.chat.chat_id + ':' + change.message_id + ':' + change.date"
+                        class="rounded-xl border border-gray-700 bg-black/20 p-3 cursor-pointer hover:bg-white/5"
+                        @click="openChangeResult(change)">
+                        <header class="flex items-center gap-2 text-xs mb-1.5">
+                            <span :class="change.kind === 'deleted' ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300'"
+                                class="px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">
+                                {{ change.kind }}
+                            </span>
+                            <span class="text-white font-medium truncate">{{ change.chat.title || 'Unnamed chat' }}</span>
+                            <span v-if="change.sender_name" class="text-tg-muted truncate">· {{ change.sender_name }}</span>
+                            <span class="text-tg-muted ml-auto whitespace-nowrap">{{ formatMessageVersionDate(change.date) }}</span>
+                        </header>
+                        <div v-if="change.kind === 'deleted'" class="text-sm text-gray-200 whitespace-pre-wrap break-words">
+                            {{ change.text || '(no text — media or service message)' }}
+                        </div>
+                        <div v-else class="text-sm space-y-1">
+                            <div class="text-tg-muted line-through whitespace-pre-wrap break-words">{{ change.old_text || '(empty)' }}</div>
+                            <div class="text-gray-200 whitespace-pre-wrap break-words">{{ change.new_text || '(empty)' }}</div>
+                        </div>
+                    </article>
+                    <button v-if="changesNextBefore" @click.stop="loadMoreChanges" :disabled="changesLoading"
+                        class="w-full py-2 text-sm bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-lg transition">
+                        {{ changesLoading ? 'Loading…' : 'Load older' }}
+                    </button>
+                </div>
+            </section>
+        </div>
+
+        <!-- Export with date range modal -->
+        <div v-if="showExportRangeModal"
+            class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center overflow-y-auto p-4"
+            @click.self="showExportRangeModal = false">
+            <section role="dialog" aria-modal="true" aria-labelledby="export-range-modal-title"
+                class="my-auto bg-tg-sidebar rounded-2xl shadow-2xl p-6 w-full max-w-md border border-gray-700">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 id="export-range-modal-title" class="text-xl font-bold text-white">Export with date range</h3>
+                    <button type="button" @click="showExportRangeModal = false" aria-label="Close export dialog"
+                        class="text-gray-400 hover:text-white transition p-1 focus:outline-none focus:ring-2 focus:ring-blue-400 rounded">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="mb-4">
+                    <span class="text-xs text-tg-muted">Format</span>
+                    <div class="mt-1 flex gap-2">
+                        <button type="button" @click="exportRangeFormat = 'json'"
+                            :class="exportRangeFormat === 'json' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-tg-muted'"
+                            class="flex-1 rounded-lg px-3 py-2 text-sm transition-colors">JSON</button>
+                        <button type="button" @click="exportRangeFormat = 'csv'"
+                            :class="exportRangeFormat === 'csv' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-tg-muted'"
+                            class="flex-1 rounded-lg px-3 py-2 text-sm transition-colors">CSV</button>
+                    </div>
+                </div>
+                <div class="mb-4 grid grid-cols-2 gap-3">
+                    <label class="block">
+                        <span class="text-xs text-tg-muted">From (optional)</span>
+                        <input type="date" v-model="exportFromDate"
+                            class="mt-1 w-full bg-gray-900 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-tg-muted">To (optional)</span>
+                        <input type="date" v-model="exportToDate"
+                            class="mt-1 w-full bg-gray-900 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </label>
+                </div>
+                <p class="mb-4 text-xs text-tg-muted">Both days are included. Leave empty for that side to be unbounded.</p>
+                <div class="flex gap-2 justify-end">
+                    <button @click="showExportRangeModal = false"
+                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition">
+                        Cancel
+                    </button>
+                    <button @click="runRangeExport"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition">
+                        Export
+                    </button>
+                </div>
+            </section>
         </div>
 
         <!-- Global voice player bar — persists while scrolling, auto-advances -->
@@ -5777,6 +5937,124 @@
                     globalMessageResults.value = []
                 }
 
+                // ---- Tag view: #hashtag / $cashtag click-through ----
+                // Tabs mirror the official Telegram apps, mapped onto an archive:
+                // This Chat / My Messages (the archive owner's outgoing side) / All Chats.
+                const tagTabs = [
+                    { key: 'chat', label: 'This Chat' },
+                    { key: 'mine', label: 'My Messages' },
+                    { key: 'all', label: 'All Chats' },
+                ]
+                const tagView = ref(null)
+                const openTagView = (tag) => {
+                    if (!tag) return
+                    tagView.value = {
+                        tag,
+                        tab: selectedChat.value ? 'chat' : 'all',
+                        results: [], loading: false, has_more: false, truncated: false,
+                        offset: 0, error: null, gen: 0,
+                    }
+                    loadTagResults(true)
+                }
+                const closeTagView = () => { tagView.value = null }
+                const setTagTab = (tab) => {
+                    const view = tagView.value
+                    if (!view || view.tab === tab) return
+                    if (tab === 'chat' && !selectedChat.value) return
+                    Object.assign(view, { tab, results: [], offset: 0, has_more: false, truncated: false, error: null })
+                    loadTagResults(true)
+                }
+                const loadTagResults = async (reset) => {
+                    const view = tagView.value
+                    if (!view) return
+                    // A reset (open or tab switch) supersedes whatever is in flight: bump
+                    // the generation so a stale response — still holding the same view
+                    // object — cannot land under a tab the user already switched away
+                    // from. Only a load-more yields to an already-active request.
+                    if (view.loading && !reset) return
+                    const gen = ++view.gen
+                    const current = () => tagView.value === view && view.gen === gen
+                    view.loading = true
+                    view.error = null
+                    try {
+                        const params = new URLSearchParams({
+                            scope: view.tab,
+                            limit: '50',
+                            offset: String(reset ? 0 : view.offset),
+                        })
+                        if (view.tab === 'chat' && selectedChat.value) params.set('chat_id', String(selectedChat.value.id))
+                        const resp = await fetch(`/api/tags/${encodeURIComponent(view.tag)}?${params}`, { credentials: 'include' })
+                        if (!resp.ok) throw new Error(`tag search ${resp.status}`)
+                        const data = await resp.json()
+                        if (!current()) return
+                        view.results = reset ? data.results : view.results.concat(data.results)
+                        view.offset = view.results.length
+                        view.has_more = data.has_more
+                        view.truncated = Boolean(data.truncated)
+                    } catch (e) {
+                        if (current()) view.error = 'Could not load results'
+                    } finally {
+                        if (current()) view.loading = false
+                    }
+                }
+                const openTagResult = (row) => {
+                    closeTagView()
+                    navigateToMessage(row)
+                }
+
+                // ---- What-changed feed: deletions and edits the archive kept ----
+                const showChangesFeed = ref(false)
+                const changesFeed = ref([])
+                const changesNextBefore = ref(null)
+                const changesLoading = ref(false)
+                const changesSince = ref('7')  // days; '' = all time
+
+                const changesSinceIso = () => {
+                    if (!changesSince.value) return null
+                    const days = parseInt(changesSince.value, 10)
+                    return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString()
+                }
+
+                const fetchChanges = async (before) => {
+                    changesLoading.value = true
+                    try {
+                        const params = new URLSearchParams({ limit: '50' })
+                        const since = changesSinceIso()
+                        if (since) params.set('since', since)
+                        if (before) params.set('before', before)
+                        const resp = await fetch(`/api/changes?${params}`, { credentials: 'include' })
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+                        const data = await resp.json()
+                        if (before) changesFeed.value = changesFeed.value.concat(data.changes)
+                        else changesFeed.value = data.changes
+                        changesNextBefore.value = data.next_before
+                    } catch (e) {
+                        // Best-effort UI, but a load-more failure must not eat the
+                        // cursor: keeping it leaves the "Load older" button in place
+                        // as the retry affordance. Only an INITIAL failure clears to
+                        // the empty state.
+                        if (!before) {
+                            changesFeed.value = []
+                            changesNextBefore.value = null
+                        }
+                    } finally {
+                        changesLoading.value = false
+                    }
+                }
+
+                const openChangesFeed = () => {
+                    showChangesFeed.value = true
+                    fetchChanges(null)
+                }
+                const reloadChangesFeed = () => fetchChanges(null)
+                const loadMoreChanges = () => {
+                    if (changesNextBefore.value) fetchChanges(changesNextBefore.value)
+                }
+                const openChangeResult = (change) => {
+                    showChangesFeed.value = false
+                    navigateToMessage({ chat_id: change.chat.chat_id, id: change.message_id })
+                }
+
                 // Setup infinite scroll observer for chats
                 const setupInfiniteScroll = () => {
                     if (infiniteScrollObserver) {
@@ -8071,6 +8349,33 @@
                     window.open(url, '_blank')
                 }
 
+                // Export with an optional date_from/date_to window — both inclusive,
+                // same contract as the chat's regular messages endpoint.
+                const showExportRangeModal = ref(false)
+                const exportRangeFormat = ref('json')
+                const exportFromDate = ref('')
+                const exportToDate = ref('')
+
+                const openExportRangeModal = (format = 'json') => {
+                    if (!selectedChat.value) return
+                    exportRangeFormat.value = format
+                    showExportRangeModal.value = true
+                }
+
+                const runRangeExport = () => {
+                    if (!selectedChat.value) return
+                    const params = new URLSearchParams({ format: exportRangeFormat.value })
+                    // Same day-inclusive convention as the advanced message search's
+                    // date filter (search bar): a bare <input type="date"> value is
+                    // widened to the start/end of that local day before it reaches
+                    // date_from/date_to (both inclusive bounds on the server).
+                    if (exportFromDate.value) params.set('date_from', exportFromDate.value + 'T00:00:00')
+                    if (exportToDate.value) params.set('date_to', exportToDate.value + 'T23:59:59')
+                    const url = `/api/chats/${selectedChat.value.id}/export?${params}`
+                    showExportRangeModal.value = false
+                    window.open(url, '_blank')
+                }
+
                 // Jump to first or last message in chat
                 const jumpToBoundary = async (direction) => {
                     if (!selectedChat.value) return
@@ -9316,8 +9621,16 @@
                                 : inner
                         }
                         case 'mention':
-                        case 'hashtag':
                             return `<span class="tg-mention">${inner}</span>`
+                        case 'hashtag':
+                        case 'cashtag': {
+                            // Tap a #hashtag or $cashtag to see every message using it
+                            // (the tag view). data-tag carries the raw entity text
+                            // (with its # or $ sigil) for the delegated click
+                            // handler on the message-text container to read.
+                            const raw = text.slice(node.offset, node.end)
+                            return `<a href="#" class="tg-mention tag-link" data-tag="${escapeAttr(raw)}">${inner}</a>`
+                        }
                         default:
                             // Unknown/unsupported entity type (e.g. bot_command, custom_emoji):
                             // degrade to plain rendered text, no wrapper.
@@ -9381,12 +9694,21 @@
                     }
                 }
 
-                // Spoiler entities are injected via v-html, so Vue's template bindings never
-                // reach them directly; delegate through the message-text container (which IS
-                // template-bound) instead of a document-wide listener. Concealed: first
-                // click/Enter/Space reveals. Revealed: the span is inert forever afterward
-                // (official apps don't re-conceal), so a link or mention inside it then works.
+                // Spoiler entities AND tag links are injected via v-html, so Vue's template
+                // bindings never reach them directly; delegate through the message-text
+                // container (which IS template-bound) instead of a document-wide listener.
+                // Tag links: tapping a #hashtag/$cashtag opens the tag view instead of
+                // following the inert '#' href. Spoilers: first click/Enter/Space reveals;
+                // revealed is inert forever afterward (official apps don't re-conceal), so a
+                // link or mention inside it then works.
                 const handleSpoilerActivate = (event) => {
+                    const tagLink = event.target.closest ? event.target.closest('a.tag-link') : null
+                    if (tagLink) {
+                        if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return
+                        event.preventDefault()
+                        openTagView(tagLink.dataset.tag)
+                        return
+                    }
                     if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return
                     const spoiler = event.target.closest ? event.target.closest('.tg-spoiler') : null
                     if (!spoiler) return
@@ -10350,6 +10672,12 @@
                     serviceLabel,
                     formatDuration,
                     exportChat,
+                    showExportRangeModal,
+                    exportRangeFormat,
+                    exportFromDate,
+                    exportToDate,
+                    openExportRangeModal,
+                    runRangeExport,
                     // Error states
                     chatsError,
                     loadChats,
@@ -10368,6 +10696,24 @@
                     onSearchPaste,
                     globalMessageResults,
                     navigateToMessage,
+                    // Tag view (#hashtag / $cashtag click-through)
+                    tagView,
+                    tagTabs,
+                    openTagView,
+                    closeTagView,
+                    setTagTab,
+                    loadTagResults,
+                    openTagResult,
+                    // What-changed feed
+                    showChangesFeed,
+                    changesFeed,
+                    changesNextBefore,
+                    changesLoading,
+                    changesSince,
+                    openChangesFeed,
+                    reloadChangesFeed,
+                    loadMoreChanges,
+                    openChangeResult,
                     // Loading states
                     loadingChats,
                     loadingStats,
