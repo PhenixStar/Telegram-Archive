@@ -75,7 +75,7 @@ def _make_db():
     db.get_all_chats = AsyncMock(return_value=[])
     db.update_message_text = AsyncMock(return_value="applied")
     db.delete_message = AsyncMock()
-    db.resolve_message_chat_id = AsyncMock(return_value=None)
+    db.get_chat_id_for_message = AsyncMock(return_value=None)
     db.upsert_chat = AsyncMock()
     db.upsert_user = AsyncMock()
     db.insert_message = AsyncMock()
@@ -1517,7 +1517,7 @@ class TestOnMessageDeletedRateLimiting:
         handler = handlers[events.MessageDeleted]
 
         # First: exhaust rate limit for the resolved chat
-        db.resolve_message_chat_id = AsyncMock(return_value=-1001234567890)
+        db.get_chat_id_for_message = AsyncMock(return_value=-1001234567890)
         listener._tracked_chat_ids = {-1001234567890}
 
         # First deletion allowed
@@ -1545,7 +1545,7 @@ class TestOnMessageDeletedRateLimiting:
         listener, handlers, db, config = _make_listener_with_handlers()
         handler = handlers[events.MessageDeleted]
 
-        db.resolve_message_chat_id = AsyncMock(return_value=99999)  # Not tracked
+        db.get_chat_id_for_message = AsyncMock(return_value=99999)  # Not tracked
         listener._tracked_chat_ids = {-1001234567890}
 
         event = MagicMock()
@@ -1584,7 +1584,7 @@ class TestOnMessageDeletedRateLimiting:
         listener, handlers, db, config = _make_listener_with_handlers()
         handler = handlers[events.MessageDeleted]
 
-        db.resolve_message_chat_id = AsyncMock(side_effect=Exception("db error"))
+        db.get_chat_id_for_message = AsyncMock(side_effect=Exception("db error"))
 
         event = MagicMock()
         event.chat_id = None
@@ -2293,7 +2293,7 @@ class TestOnMessageDeletedInnerProcessCheck:
         listener, handlers, db, config = _make_listener_with_handlers()
         handler = handlers[events.MessageDeleted]
 
-        db.resolve_message_chat_id = AsyncMock(return_value=-9999)
+        db.get_chat_id_for_message = AsyncMock(return_value=-9999)
         listener._tracked_chat_ids = {-1001234567890}
 
         event = MagicMock()

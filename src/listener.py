@@ -861,7 +861,7 @@ class TelegramListener:
                     effective_chat_id = chat_id
                     if effective_chat_id is None:
                         try:
-                            resolved = await self.db.resolve_message_chat_id(msg_id)
+                            resolved = await self.db.get_chat_id_for_message(msg_id)
                             if resolved is None:
                                 logger.debug(f"⚠️ Deletion skipped (not found or ambiguous): msg={msg_id}")
                                 continue

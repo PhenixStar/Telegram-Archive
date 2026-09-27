@@ -1287,18 +1287,23 @@ class MessageMixin:
             return {row.id: row.edit_date for row in result}
 
     async def get_chat_id_for_message(self, message_id: int) -> int | None:
-        """
-        Look up the chat_id for a message by its ID.
+        """The one chat a peerless deletion can refer to, or None when unknown or ambiguous.
 
-        Used when Telegram sends deletion events without chat_id.
-        Note: Message IDs are only unique within a chat, so this may return
-        multiple results. Returns the first match.
+        Telegram sends deletions without a chat only for private chats and basic
+        groups, which share one account-wide message id sequence; channel and
+        supergroup deletions always name their channel. So channels (marked ids
+        below -10**12) are never candidates, and when the same id exists in more
+        than one remaining chat the deletion is skipped rather than guessed:
+        tombstoning the wrong chat's message would be silent data loss.
         """
         async with self.db_manager.async_session_factory() as session:
-            stmt = select(Message.chat_id).where(Message.id == message_id).limit(1)
-            result = await session.execute(stmt)
-            row = result.first()
-            return row[0] if row else None
+            stmt = (
+                select(Message.chat_id)
+                .where(Message.id == message_id, Message.chat_id > -(10**12))
+                .limit(2)
+            )
+            rows = (await session.execute(stmt)).all()
+            return rows[0][0] if len(rows) == 1 else None
 
     async def get_migration_markers(self) -> list[tuple[int, int]]:
         """Return stored group→supergroup migration pointers (#228).

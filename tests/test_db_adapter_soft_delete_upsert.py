@@ -684,3 +684,15 @@ async def test_unchanged_reupsert_is_a_semantic_noop(sqlite_adapter):
     assert message.text == "stable"
     assert message.edit_date == datetime(2026, 6, 26, 13, 5)
     assert versions == []
+
+
+@pytest.mark.asyncio
+async def test_peerless_deletion_resolves_only_an_unambiguous_non_channel_chat(sqlite_adapter):
+    for chat_id, message_id in ((100, 7), (200, 7), (300, 8), (-1001234567890, 9), (400, 9)):
+        await sqlite_adapter.insert_message(
+            {"id": message_id, "chat_id": chat_id, "date": datetime(2026, 6, 25, 10, 0), "text": "x"}
+        )
+    assert await sqlite_adapter.get_chat_id_for_message(7) is None  # two chats share id 7
+    assert await sqlite_adapter.get_chat_id_for_message(8) == 300
+    assert await sqlite_adapter.get_chat_id_for_message(9) == 400  # a channel is never a candidate
+    assert await sqlite_adapter.get_chat_id_for_message(10) is None

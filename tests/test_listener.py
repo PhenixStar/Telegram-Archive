@@ -46,7 +46,7 @@ class TestTelegramListener:
         db.get_all_chats = AsyncMock(return_value=[{"id": -1001234567890}, {"id": 123456789}, {"id": -987654321}])
         db.update_message_text = AsyncMock(return_value="applied")
         db.delete_message = AsyncMock()
-        db.resolve_message_chat_id = AsyncMock(return_value=-1001234567890)
+        db.get_chat_id_for_message = AsyncMock(return_value=-1001234567890)
         db.close = AsyncMock()
         return db
 
@@ -278,7 +278,7 @@ class TestEventHandlers:
         db.get_all_chats = AsyncMock(return_value=[])
         db.update_message_text = AsyncMock(return_value="applied")
         db.delete_message = AsyncMock()
-        db.resolve_message_chat_id = AsyncMock(return_value=None)
+        db.get_chat_id_for_message = AsyncMock(return_value=None)
         db.upsert_chat = AsyncMock()
         db.upsert_user = AsyncMock()
         db.insert_message = AsyncMock()
@@ -678,7 +678,7 @@ class TestEventHandlers:
         handler = handlers[events.MessageDeleted]
 
         # chat_id is None, must resolve from DB
-        mock_db.resolve_message_chat_id = AsyncMock(return_value=-1001234567890)
+        mock_db.get_chat_id_for_message = AsyncMock(return_value=-1001234567890)
 
         event = MagicMock()
         event.chat_id = None
@@ -686,7 +686,7 @@ class TestEventHandlers:
 
         asyncio.run(handler(event))
 
-        mock_db.resolve_message_chat_id.assert_called_once_with(42)
+        mock_db.get_chat_id_for_message.assert_called_once_with(42)
         assert listener.stats["deletions_applied"] == 1
 
     def test_on_message_deleted_skips_unresolvable_message(self, listener_with_handlers, mock_db):
@@ -694,7 +694,7 @@ class TestEventHandlers:
         listener, handlers = listener_with_handlers
         handler = handlers[events.MessageDeleted]
 
-        mock_db.resolve_message_chat_id = AsyncMock(return_value=None)
+        mock_db.get_chat_id_for_message = AsyncMock(return_value=None)
 
         event = MagicMock()
         event.chat_id = None
@@ -757,7 +757,7 @@ class TestStatsTracking:
         db.get_all_chats = AsyncMock(return_value=[])
         db.update_message_text = AsyncMock(return_value="applied")
         db.delete_message = AsyncMock()
-        db.resolve_message_chat_id = AsyncMock(return_value=None)
+        db.get_chat_id_for_message = AsyncMock(return_value=None)
         db.upsert_chat = AsyncMock()
         db.upsert_user = AsyncMock()
         db.insert_message = AsyncMock()
