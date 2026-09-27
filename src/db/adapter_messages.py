@@ -23,9 +23,44 @@ def _is_nonblank_text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+# Message columns an upsert may refresh only when the writer supplied the key.
+# _message_values materialises every column with a .get() default, so an absent
+# key is indistinguishable from an explicit NULL by the time the upsert runs, and
+# writing that NULL erases what an earlier writer captured (an import merge, for
+# instance, carries no reply_to_top_id and would un-thread every forum message it
+# overlaps). id, chat_id and date are required and always written.
+_MESSAGE_OPTIONAL_UPDATE_KEYS = (
+    "sender_id",
+    "sender_name",
+    "text",
+    "reply_to_msg_id",
+    "reply_to_top_id",
+    "reply_to_text",
+    "forward_from_id",
+    "edit_date",
+    "raw_data",
+    "is_outgoing",
+    "is_pinned",
+    "is_deleted",
+    "deleted_at",
+)
+
+
+def _has_raw_payload(value: Any) -> bool:
+    """True when a serialised raw_data blob carries anything worth keeping."""
+    return bool(value) and value != "{}"
+
+
 def _message_conflict_update_values(message_data: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
-    """Build update values for message upserts without undoing soft deletes."""
+    """Build update values for message upserts without undoing soft deletes.
+
+    Drops every column the caller did not supply, so a partial writer refreshes
+    what it observed and leaves the rest of the archived row alone.
+    """
     update_values = dict(values)
+    for key in _MESSAGE_OPTIONAL_UPDATE_KEYS:
+        if key not in message_data:
+            update_values.pop(key, None)
 
     if not message_data.get("is_deleted"):
         update_values.pop("is_deleted", None)
@@ -264,6 +299,13 @@ class MessageMixin:
         else:
             update_values.pop("text", None)
             update_values.pop("edit_date", None)
+
+        # raw_data carries capture-time extras (album grouped_id, service payloads,
+        # formatting entities, group->supergroup migration pointers). A source
+        # with no extras serialises to "{}", which is not evidence the archived
+        # blob should be emptied: no information never overwrites information.
+        if not _has_raw_payload(values.get("raw_data")) and _has_raw_payload(getattr(existing, "raw_data", None)):
+            update_values.pop("raw_data", None)
 
         # Sender names are capture-time snapshots. A missing/blank snapshot may
         # be hydrated once, but a nonblank archived value is immutable.

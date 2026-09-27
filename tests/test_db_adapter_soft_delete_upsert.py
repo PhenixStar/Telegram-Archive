@@ -696,3 +696,32 @@ async def test_peerless_deletion_resolves_only_an_unambiguous_non_channel_chat(s
     assert await sqlite_adapter.get_chat_id_for_message(8) == 300
     assert await sqlite_adapter.get_chat_id_for_message(9) == 400  # a channel is never a candidate
     assert await sqlite_adapter.get_chat_id_for_message(10) is None
+
+
+@pytest.mark.asyncio
+async def test_partial_writer_leaves_columns_it_did_not_supply(sqlite_adapter):
+    """A writer that omits a column (an import merge, an edit sync) must not null it."""
+    full = {
+        "id": 5,
+        "chat_id": 100,
+        "date": datetime(2026, 6, 25, 10, 0),
+        "text": "original",
+        "reply_to_msg_id": 3,
+        "reply_to_top_id": 2,
+        "forward_from_id": 777,
+        "raw_data": {"grouped_id": 42},
+    }
+    await sqlite_adapter.insert_message(full)
+    await sqlite_adapter.insert_message({"id": 5, "chat_id": 100, "date": full["date"], "text": "original"})
+
+    message = await _get_message(sqlite_adapter, 5, 100)
+    assert (message.reply_to_msg_id, message.reply_to_top_id, message.forward_from_id) == (3, 2, 777)
+    assert "grouped_id" in (message.raw_data or "")
+
+
+@pytest.mark.asyncio
+async def test_empty_extras_never_overwrite_archived_extras(sqlite_adapter):
+    date = datetime(2026, 6, 25, 10, 0)
+    await sqlite_adapter.insert_message({"id": 6, "chat_id": 100, "date": date, "text": "x", "raw_data": {"grouped_id": 9}})
+    await sqlite_adapter.insert_message({"id": 6, "chat_id": 100, "date": date, "text": "x", "raw_data": {}})
+    assert "grouped_id" in ((await _get_message(sqlite_adapter, 6, 100)).raw_data or "")
