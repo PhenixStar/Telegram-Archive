@@ -48,6 +48,7 @@ from .folder_utils import (
     resolve_include_folder_chat_ids,
 )
 from .media_errors import is_media_location_error
+from .media_integrity import ShortDownloadError, check_complete_download, declared_document_size, visible_media_root
 from .parallel_download import ParallelDownloader
 from .rich_message import effective_message_text
 from .telegram_stall_guard import (
@@ -989,6 +990,14 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         Non-FloodWait errors propagate straight out of ``call_with_flood_retry``
         (which only retries FloodWait), so this loop sees them directly.
 
+        A download shorter than the size Telegram declares
+        (``declared_document_size``) is not a finished file: single-stream
+        Telethon stops at the first short answer without comparing the total.
+        The short file is removed and the download tried again; after the last
+        attempt ``ShortDownloadError`` is raised like any other failure, so the
+        caller records the item as not downloaded. The parallel path already
+        tiles the declared size exactly, so this check costs it nothing.
+
         Returns the downloaded path on success.
         """
         timeout = getattr(self.config, "download_timeout_seconds", 3600)
@@ -1000,13 +1009,35 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
                 try:
-                    return await call_with_flood_retry(
+                    landed = await call_with_flood_retry(
                         self._fetch_media_bytes_bounded,
                         message,
                         tmp_path,
                         file_size,
                         timeout_val,
                         call_timeout=None,  # bounded by DOWNLOAD_TIMEOUT_SECONDS instead
+                    )
+                    # Telethon may write under another name than tmp_path (an
+                    # appended extension): the file it reports is the one checked
+                    # and, when short, removed.
+                    check_complete_download(
+                        landed if isinstance(landed, str) and landed else tmp_path,
+                        declared_document_size(message),
+                    )
+                    return landed
+                except ShortDownloadError as e:
+                    if attempt >= last:
+                        logger.warning(
+                            "Media download stopped early on all %d attempt(s) (%s); leaving it for a future backup run",
+                            attempt + 1,
+                            e,
+                        )
+                        raise
+                    logger.warning(
+                        "Media download stopped early (%s, attempt %d/%d); retrying",
+                        e,
+                        attempt + 1,
+                        MEDIA_REFRESH_MAX_ATTEMPTS,
                     )
                 except (FileReferenceExpiredError, RPCError) as e:
                     is_expired_ref = isinstance(e, FileReferenceExpiredError)
@@ -1098,6 +1129,14 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         """
         logger.info("=" * 60)
         logger.info("Starting media verification...")
+        if visible_media_root(self.config.media_path) is None:
+            # Every stored path would read as missing, and each file would be
+            # downloaded again beside the volume instead of onto it.
+            logger.warning(
+                "Media verification skipped: the media folder is missing, unreadable or empty here. Nothing was changed"
+            )
+            logger.info("=" * 60)
+            return
 
         media_records = await self.db.get_media_for_verification()
         logger.info(f"Found {len(media_records)} media records to verify")

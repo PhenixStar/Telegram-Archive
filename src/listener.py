@@ -37,6 +37,7 @@ from .avatar_utils import get_avatar_paths
 from .backup_media import media_download_allowed
 from .config import Config
 from .db import DatabaseAdapter, create_adapter
+from .media_integrity import check_complete_download, declared_document_size
 from .message_utils import (
     compute_file_hash,
     download_and_shard_media,
@@ -704,6 +705,11 @@ class TelegramListener:
             file_name = self._get_media_filename(message, media_type, telegram_file_id)
             file_path = os.path.join(chat_media_dir, file_name)
 
+            # Telegram's exact byte count for the file: a download that ends
+            # below it stopped early and is refused (removed, no media row),
+            # never stored as complete.
+            declared = declared_document_size(message)
+
             # Download with deduplication if enabled
             content_hash = None
             if getattr(self.config, "deduplicate_media", True):
@@ -712,7 +718,11 @@ class TelegramListener:
                 os.makedirs(shared_dir, exist_ok=True)
 
                 async def _download_fn(tmp_path):
-                    return await call_with_flood_retry(self.client.download_media, message, tmp_path, call_timeout=None)
+                    landed = await call_with_flood_retry(
+                        self.client.download_media, message, tmp_path, call_timeout=None
+                    )
+                    check_complete_download(landed if isinstance(landed, str) and landed else tmp_path, declared)
+                    return landed
 
                 shared_file_path, content_hash = await download_and_shard_media(
                     db=self.db,
@@ -735,6 +745,9 @@ class TelegramListener:
                     if os.path.exists(tmp_file_path):
                         os.remove(tmp_file_path)
                     actual_path = await call_with_flood_retry(self.client.download_media, message, tmp_file_path, call_timeout=None)
+                    check_complete_download(
+                        actual_path if isinstance(actual_path, str) and actual_path else tmp_file_path, declared
+                    )
                     file_path = finalize_atomic_download(
                         actual_path if isinstance(actual_path, str) else None,
                         tmp_file_path,

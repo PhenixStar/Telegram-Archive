@@ -24,7 +24,20 @@ Two repairs, both opt-in and both read-only against Telegram:
     ``--max-media-size-mb``, so small files can be caught up first and large ones
     after. Each size band keeps its own resume checkpoint.
 
-Both modes reuse the live capture code, so a repaired row is written exactly as a
+``--mode truncated``
+    Video and audio files recorded as downloaded whose download stopped early:
+    an MP4-family file (.mp4 .m4v .m4a .mov .3gp) whose boxes run past its end
+    or that holds no index, at a size a stopped Telethon download leaves (a
+    multiple of 128 KiB). The stored size cannot tell, since it was read from
+    the short file. The dry run lists them, plus "possibly damaged" files (no
+    index at another size), which are never touched. With --apply each one is
+    downloaded again into a private temporary file that must reach the size
+    Telegram declares, and replaces the short file in one rename only when the
+    short file's bytes are the start of the new ones, so nothing the archive
+    held is lost and every link to the file reads the complete bytes. On any
+    failure the short file stays exactly as it was.
+
+All modes reuse the live capture code, so a repaired row is written exactly as a
 normal backup would write it. The only thing ever deleted is a ZERO-BYTE media
 file (and its equally empty deduplication target), which has to go before the
 download will run again — a file with real bytes in it is never touched.
@@ -49,6 +62,10 @@ USAGE
 
     # Empty media files
     python scripts/refetch_incomplete_messages.py --mode media --apply
+
+    # Video/audio files whose download stopped early: list, then repair
+    python scripts/refetch_incomplete_messages.py --mode truncated
+    python scripts/refetch_incomplete_messages.py --mode truncated --apply
 
     # Not-downloaded media: everything up to 500 MB first, then the larger files
     python scripts/refetch_incomplete_messages.py --mode skipped --max-size-mb 500 --apply
@@ -77,6 +94,15 @@ from telethon import TelegramClient  # noqa: E402
 
 from src.config import Config, build_telegram_client_kwargs  # noqa: E402
 from src.db import DatabaseAdapter, init_database  # noqa: E402
+from src.media_integrity import (  # noqa: E402
+    SUSPICIOUS,
+    TRUNCATED,
+    ShortFileMismatchError,
+    cut_short_state,
+    declared_document_size,
+    ensure_prefix_of,
+    visible_media_root,
+)
 from src.message_utils import METADATA_ONLY_MEDIA_TYPES, normalize_media_path  # noqa: E402
 from src.telegram_backup import TelegramBackup, call_with_flood_retry  # noqa: E402
 
@@ -90,6 +116,13 @@ PROGRESS_KEY = "refetch_progress:{mode}"
 # Stored path of each empty media file, keyed by (chat_id, message_id), filled in
 # while selecting targets so the repair can clear the file before re-downloading.
 EMPTY_FILE_PATHS: dict[tuple[int, int], str] = {}
+
+# Real path of each cut-short file, keyed by (chat_id, message_id), filled in
+# while selecting targets so the repair replaces exactly the file it judged.
+TRUNCATED_FILE_PATHS: dict[tuple[int, int], str] = {}
+
+# Modes whose repair is a file on disk, counted by what actually landed.
+_FILE_MODES = ("media", "skipped", "truncated")
 
 # A message is "blank" only when nothing at all renders for it: no text, no media
 # row, and no raw_data payload the viewer draws something from. Service markers,
@@ -179,6 +212,26 @@ def _empty_on_disk(stored_path: str, media_root: str) -> bool:
         return True
 
 
+def _cut_short_file(stored_path: str, media_root: str) -> tuple[str | None, str | None]:
+    """(state, real path) of a stored media file judged by ``cut_short_state``.
+
+    The real file behind a deduplication link is judged, and only a plain file
+    inside the media root counts: a link out of the archive (an external store
+    such as git-annex) is not ours to replace.
+    """
+    relative = normalize_media_path(stored_path, media_root)
+    if relative is None:
+        return None, None
+    real = os.path.realpath(os.path.join(media_root, relative))
+    root = os.path.realpath(media_root)
+    try:
+        if os.path.commonpath([real, root]) != root or not os.path.isfile(real):
+            return None, None
+    except (OSError, ValueError):
+        return None, None
+    return cut_short_state(real), real
+
+
 async def _select_targets(
     db: DatabaseAdapter, config: Config, mode: str, size_band: tuple[int, int | None] = (0, None)
 ) -> dict[int, list[int]]:
@@ -203,16 +256,69 @@ async def _select_targets(
         return targets
 
     media_root = str(config.media_path)
+    suspicious = 0
     for chat_id, message_id, file_path, media_type in await _rows(db, DOWNLOADED_MEDIA_SQL):
         if media_type in METADATA_ONLY_MEDIA_TYPES:
             # A location, contact or poll is a message payload, not a file. Some
             # rows carry a file_path anyway, but there is nothing to download and
             # re-fetching them would only spend API calls.
             continue
+        if mode == "truncated":
+            state, real = _cut_short_file(file_path, media_root)
+            if state == TRUNCATED:
+                targets.setdefault(chat_id, []).append(message_id)
+                TRUNCATED_FILE_PATHS[(chat_id, message_id)] = real
+            elif state == SUSPICIOUS:
+                suspicious += 1
+            continue
         if _empty_on_disk(file_path, media_root):
             targets.setdefault(chat_id, []).append(message_id)
             EMPTY_FILE_PATHS[(chat_id, message_id)] = file_path
+    if suspicious:
+        logger.info(
+            "Possibly damaged: %d file(s) with no index at a size a stopped download does not leave (not touched)",
+            suspicious,
+        )
     return targets
+
+
+async def _replace_cut_short_file(backup: TelegramBackup, message, chat_id: int, short_path: str) -> bool:
+    """Download a cut-short file again and put the complete bytes under its path.
+
+    The download goes to a private temporary name beside the short file
+    through the live download path, which refuses a download shorter than
+    Telegram declares. The short file is replaced in one rename only when its
+    bytes are the start of the new ones (``ensure_prefix_of``), so no byte the
+    archive held is lost and every link to it reads the complete file. On any
+    failure the short file is left exactly as it was and False is returned.
+    """
+    tmp_path = f"{short_path}.{os.getpid()}.refetch.part"
+    declared = declared_document_size(message) or 0
+    landed = None
+    try:
+        try:
+            landed = await backup._download_media_to_path(message, tmp_path, declared, chat_id)
+        except Exception as e:
+            logger.warning("Could not download a cut-short file again (%s)", type(e).__name__)
+            return False
+        source = landed if isinstance(landed, str) and os.path.exists(landed) else tmp_path
+        if not os.path.exists(source):
+            logger.warning("Download of a cut-short file produced no file")
+            return False
+        try:
+            ensure_prefix_of(short_path, source)
+        except ShortFileMismatchError as e:
+            logger.warning("Kept a cut-short file as it is: %s", e)
+            return False
+        os.replace(source, short_path)
+        return True
+    finally:
+        for leftover in {tmp_path, landed if isinstance(landed, str) else tmp_path}:
+            if leftover != short_path and os.path.exists(leftover):
+                try:
+                    os.remove(leftover)
+                except OSError:
+                    pass
 
 
 async def _repair_chat(
@@ -248,11 +354,18 @@ async def _repair_chat(
                 stored = EMPTY_FILE_PATHS.get((chat_id, message_id))
                 if stored:
                     _clear_empty_file(stored, str(backup.config.media_path))
+            if mode == "truncated":
+                # Replace the short file in place first; the capture below then
+                # finds the complete file at its path and records its real size.
+                short_path = TRUNCATED_FILE_PATHS.get((chat_id, message_id))
+                if not short_path or not await _replace_cut_short_file(backup, message, chat_id, short_path):
+                    unavailable += 1
+                    continue
             data = await backup._process_message_isolated(message, chat_id)
             if data is None:
                 unavailable += 1
                 continue
-            if mode in ("media", "skipped") and not data.get("_media_data"):
+            if mode in _FILE_MODES and not data.get("_media_data"):
                 # Nothing to repair: the message no longer carries media.
                 unavailable += 1
                 gone.append(message_id)
@@ -261,7 +374,7 @@ async def _repair_chat(
 
         if processed:
             await backup._commit_batch(processed, chat_id)
-            if mode not in ("media", "skipped"):
+            if mode not in _FILE_MODES:
                 repaired += len(processed)
             else:
                 # A committed row is not a repair: only a file with bytes behind
@@ -297,6 +410,14 @@ async def run(args: argparse.Namespace) -> int:
         int(args.min_size_mb * mb),
         int(args.max_size_mb * mb) if args.max_size_mb is not None else None,
     )
+    if args.mode in ("media", "truncated") and visible_media_root(str(config.media_path)) is None:
+        # Every stored path would read as missing or unreadable, and every row
+        # would be selected and downloaded again beside the volume.
+        logger.error(
+            "The media folder %s is missing, unreadable or empty here; mount the media volume first. Nothing was changed.",
+            config.media_path,
+        )
+        return 1
     targets = await _select_targets(db, config, args.mode, size_band)
     total_messages = sum(len(ids) for ids in targets.values())
     logger.info("Found %d message(s) to repair across %d chat(s)", total_messages, len(targets))
@@ -373,7 +494,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=("blank", "media", "skipped"), required=True, help="What to repair")
+    parser.add_argument("--mode", choices=("blank", "media", "skipped", "truncated"), required=True, help="What to repair")
     parser.add_argument("--min-size-mb", type=float, default=0, help="skipped mode: smallest recorded size to include")
     parser.add_argument("--max-size-mb", type=float, default=None, help="skipped mode: largest recorded size to include")
     parser.add_argument(

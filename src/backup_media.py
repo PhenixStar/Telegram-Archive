@@ -14,6 +14,7 @@ from telethon.tl.types import (
 )
 
 from .avatar_utils import get_avatar_paths
+from .media_integrity import visible_media_root
 from .message_utils import METADATA_ONLY_MEDIA_TYPES, sanitize_media_filename
 from .parallel_download import (
     ParallelDownloader,
@@ -254,13 +255,23 @@ class BackupMediaMixin:
 
         # Download media (with optional global deduplication)
         try:
-            # Create chat-specific media directory
             chat_media_dir = os.path.join(self.config.media_path, str(chat_id))
-            os.makedirs(chat_media_dir, exist_ok=True)
-
             # Generate filename using file_id for automatic deduplication
             file_name = self._get_media_filename(message, media_type, telegram_file_id)
             file_path = os.path.join(chat_media_dir, file_name)
+
+            # Asked before the folder is created: creating it would make a
+            # missing media volume look present.
+            if not os.path.lexists(file_path) and await self._archived_file_not_provably_gone(
+                chat_id, message.id, chat_media_dir
+            ):
+                logger.warning(
+                    "Media folder for an archived file is not visible here; keeping its row as it is, no download"
+                )
+                return None
+
+            # Create chat-specific media directory
+            os.makedirs(chat_media_dir, exist_ok=True)
             # Set when this call fetched bytes; a link recorded by an earlier run
             # is kept as downloaded even if its target is unreachable (#143).
             attempted_download = False
@@ -395,6 +406,31 @@ class BackupMediaMixin:
                 "chat_id": chat_id,
                 "downloaded": False,
             }
+
+    async def _archived_file_not_provably_gone(self, chat_id: int, message_id: int, chat_media_dir: str) -> bool:
+        """True when the archive says this message's media is downloaded and its folder is not visibly here.
+
+        A media volume that is not mounted (or a share that dropped) makes every
+        file read as missing. Downloading then would land the file beside the
+        volume, and a failed download would be written back as not downloaded,
+        un-marking a file that is not gone. A missing file counts as gone only
+        when the media root is visibly there (exists and is not empty) and the
+        chat's folder exists under it. Otherwise a row that says downloaded is
+        left exactly as it is.
+
+        The database is asked only in that rare case, so the normal download
+        path costs nothing extra. When the row cannot be read the answer is
+        False and the download proceeds as before.
+        """
+        if visible_media_root(self.config.media_path) is not None and os.path.isdir(chat_media_dir):
+            return False
+        try:
+            existing = await self.db.get_media_for_message(chat_id, message_id)
+        except Exception as e:
+            logger.debug("Could not read the media row before a download (%s)", type(e).__name__)
+            return False
+        # Only a real row that says downloaded keeps the file out of a download.
+        return isinstance(existing, dict) and existing.get("downloaded") in (True, 1)
 
     def _should_parallelize(self, message, file_size: int) -> bool:
         """Decide whether this file should use the parallel chunked path.
