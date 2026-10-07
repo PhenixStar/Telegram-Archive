@@ -353,6 +353,13 @@ AUTH_SESSION_DAYS = int(os.getenv("AUTH_SESSION_DAYS", "30"))
 AUTH_SESSION_SECONDS = AUTH_SESSION_DAYS * 24 * 60 * 60
 _MAX_SESSIONS_PER_USER = 10
 _SESSION_CLEANUP_INTERVAL = 900  # 15 minutes
+# A cached session is checked against viewer_sessions again once this old, so a
+# session ended by another viewer process (or the end-all admin action run there)
+# stops working here too.
+_SESSION_REVALIDATE_SECONDS = 60
+# After a failed re-check the next one waits this long, so a database outage costs
+# one read per session every few seconds, not one per request.
+_SESSION_REVALIDATE_RETRY_SECONDS = 10
 _LOGIN_RATE_LIMIT = 15
 _LOGIN_RATE_WINDOW = 300
 
@@ -388,6 +395,7 @@ class SessionData:
     source_token_id: int | None = None
     created_at: float = field(default_factory=time.time)
     last_accessed: float = field(default_factory=time.time)
+    validated_at: float = field(default_factory=time.time)  # last time its database row was seen
 
 
 _sessions: dict[str, SessionData] = {}
@@ -558,11 +566,78 @@ def session_from_row(row: dict) -> SessionData | None:
     )
 
 
+async def _drop_cached_sessions(tokens) -> None:
+    """Forget cached sessions whose database rows are gone, and close their sockets."""
+    tokens = set(tokens)
+    for token in tokens:
+        _sessions.pop(token, None)
+    if manager is not None and tokens:
+        await manager.close_sessions(tokens)
+
+
+async def _revalidate_cached_session(auth_cookie: str, session: SessionData) -> SessionData | None:
+    """Return the cached session, or None once its database row is gone.
+
+    The cache is per process; another viewer on the same database deletes rows
+    this process still holds, so an entry older than _SESSION_REVALIDATE_SECONDS
+    is re-read. A missing row always means ended, including a login whose row
+    write failed: writing it back later would revive a session that an end-all
+    elsewhere already ended. A database error keeps the session and retries
+    after _SESSION_REVALIDATE_RETRY_SECONDS.
+    """
+    now = time.time()
+    if not db or now - session.validated_at < _SESSION_REVALIDATE_SECONDS:
+        return session
+    try:
+        row = await db.get_session(auth_cookie)
+    except Exception as e:
+        logger.warning(f"Session revalidation failed ({type(e).__name__}); keeping the cached session")
+        session.validated_at = now - _SESSION_REVALIDATE_SECONDS + _SESSION_REVALIDATE_RETRY_SECONDS
+        return session
+    if row is None:
+        await _drop_cached_sessions((auth_cookie,))
+        return None
+    session.validated_at = now
+    return session
+
+
+async def _revalidate_all_cached_sessions() -> None:
+    """Sweep twin of _revalidate_cached_session for sessions that make no requests.
+
+    A browser holding only a WebSocket never passes through _resolve_session, so
+    the periodic sweep checks every stale entry against one read of the table
+    and closes the sockets of those whose rows are gone.
+    """
+    if not db:
+        return
+    cutoff = time.time() - _SESSION_REVALIDATE_SECONDS
+    stale = {token: s for token, s in _sessions.items() if s.validated_at < cutoff}
+    if not stale:
+        return
+    try:
+        live = {row["token"] for row in await db.load_all_sessions()}
+    except Exception as e:
+        logger.warning(f"Session revalidation sweep failed ({type(e).__name__})")
+        return
+    now = time.time()
+    gone = []
+    for token, session in stale.items():
+        if _sessions.get(token) is not session:
+            continue  # replaced or removed while the table was read
+        if token in live:
+            session.validated_at = now
+        else:
+            gone.append(token)
+    await _drop_cached_sessions(gone)
+    if gone:
+        logger.info(f"Dropped {len(gone)} cached sessions whose database rows are gone")
+
+
 async def _resolve_session(auth_cookie: str) -> SessionData | None:
     """Look up session from in-memory cache, falling back to DB if needed."""
     session = _sessions.get(auth_cookie)
     if session:
-        return session
+        return await _revalidate_cached_session(auth_cookie, session)
 
     if not db:
         return None

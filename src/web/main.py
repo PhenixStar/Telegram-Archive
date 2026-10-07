@@ -192,7 +192,7 @@ async def _seed_ai_config_defaults():
 
 async def session_cleanup_task():
     """Periodically evict expired sessions, flush last_accessed, and clean stale rate limits."""
-    from .dependencies import _SESSION_CLEANUP_INTERVAL, _login_attempts
+    from .dependencies import _SESSION_CLEANUP_INTERVAL, _login_attempts, _revalidate_all_cached_sessions
 
     _last_flush_time = 0.0
 
@@ -227,6 +227,7 @@ async def session_cleanup_task():
                 except Exception as e:
                     logger.warning(f"Session last_accessed flush failed: {e}")
 
+            await _revalidate_all_cached_sessions()
             stale_ips = [ip for ip, ts in _login_attempts.items() if all(now - t > 300 for t in ts)]
             for ip in stale_ips:
                 _login_attempts.pop(ip, None)
@@ -557,6 +558,7 @@ if static_dir.exists():
 # ---------------------------------------------------------------------------
 
 from .routes_account_switch import router as account_switch_router
+from .routes_admin_sessions import router as admin_sessions_router
 from .routes_admin_settings import router as admin_settings_router
 from .routes_admin_users import router as admin_users_router
 from .routes_admin_vault import router as admin_vault_router
@@ -575,6 +577,7 @@ app.include_router(chat_router)
 app.include_router(changes_router)
 app.include_router(media_router)
 app.include_router(admin_users_router)
+app.include_router(admin_sessions_router)
 app.include_router(admin_settings_router)
 app.include_router(admin_vault_router)
 app.include_router(ai_router)

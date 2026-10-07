@@ -3576,6 +3576,9 @@
                             <button @click="adminActiveTab = 'audit'; loadAdminAudit()" :class="adminActiveTab === 'audit' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'audit' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
                                 Audit
                             </button>
+                            <button v-if="isMasterOrAbove" @click="adminActiveTab = 'sessions'" :class="adminActiveTab === 'sessions' ? 'border-current' + ' ' + 'text-[color:var(--tg-accent)]' : 'border-transparent'" :style="{color: adminActiveTab === 'sessions' ? '' : 'var(--tg-muted)'}" class="px-3 py-2 border-b-2 text-sm font-medium hover:opacity-80">
+                                Sessions
+                            </button>
                         </div>
                         <!-- AI Models Tab (admin only) -->
                         <div v-if="adminActiveTab === 'ai-models'" class="space-y-4">
@@ -4186,6 +4189,7 @@
                                     <option value="token_updated">Token updated</option>
                                     <option value="token_deleted">Token deleted</option>
                                     <option value="setting_updated">Setting updated</option>
+                                    <option value="sessions_ended_all">Every session ended</option>
                                 </select>
                             </div>
                             <div class="space-y-1">
@@ -4197,6 +4201,27 @@
                                     <span class="truncate w-28" style="color: var(--tg-muted); opacity: 0.6;">{{ log.ip_address }}</span>
                                 </div>
                                 <div v-if="adminAuditLogs.length === 0" class="text-sm text-center py-4" style="color: var(--tg-muted);">No audit logs yet</div>
+                            </div>
+                        </div>
+                        <!-- Sessions Tab: end every login at once, for example after a password change -->
+                        <div v-if="adminActiveTab === 'sessions' && isMasterOrAbove">
+                            <div class="rounded-lg p-4" style="background: var(--tg-bg);">
+                                <h3 class="text-sm font-medium mb-2" style="color: var(--tg-text);">End every session</h3>
+                                <p class="text-xs mb-3" style="color: var(--tg-muted);">
+                                    Logs out every browser of this archive: admins, viewer accounts and share links.
+                                    Use it after you change a password. Accounts and share tokens stay as they are.
+                                    Other archives you switch to keep their own sessions.
+                                </p>
+                                <div v-if="adminSessionsError" class="text-red-400 text-sm mb-3">{{ adminSessionsError }}</div>
+                                <div v-if="adminSessionsMessage" class="text-green-400 text-sm mb-3">{{ adminSessionsMessage }}</div>
+                                <div class="flex flex-wrap items-center gap-3">
+                                    <button @click="endAllSessions(false)" class="px-4 py-1.5 bg-red-700 hover:bg-red-600 text-white text-sm rounded">
+                                        End every session
+                                    </button>
+                                    <button @click="endAllSessions(true)" class="px-4 py-1.5 text-sm rounded hover:opacity-80" style="background: var(--tg-border); color: var(--tg-text);">
+                                        End all but this one
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <!-- Listener Settings Tab -->
@@ -10296,6 +10321,36 @@
                     } catch (e) { console.error('Failed to delete token:', e) }
                 }
 
+                // Ends every session of this archive. keepCurrent keeps this browser
+                // logged in; otherwise the server ends this session too and the page
+                // goes through the normal logout path back to the login card.
+                const adminSessionsError = ref('')
+                const adminSessionsMessage = ref('')
+                const endAllSessions = async (keepCurrent) => {
+                    const question = keepCurrent
+                        ? 'End every other session? Everyone else, including your other browsers, has to log in again.'
+                        : 'End every session, including this one? Everyone, you included, has to log in again.'
+                    if (!confirm(question)) return
+                    adminSessionsError.value = ''
+                    adminSessionsMessage.value = ''
+                    try {
+                        const res = await fetch(`/api/admin/sessions/end-all?keep_current=${keepCurrent ? 'true' : 'false'}`, {
+                            method: 'POST', credentials: 'include'
+                        })
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}))
+                            adminSessionsError.value = err.detail || 'Failed to end sessions'
+                            return
+                        }
+                        const data = await res.json()
+                        if (data.current_session_ended) {
+                            await performLogout()
+                            return
+                        }
+                        adminSessionsMessage.value = `Ended ${data.ended} session(s).`
+                    } catch (e) { adminSessionsError.value = 'Network error' }
+                }
+
                 return {
                     chats,
                     filteredChats,
@@ -10458,6 +10513,9 @@
                     adminChatFilter,
                     filteredAdminChats,
                     loadAdminAudit,
+                    adminSessionsError,
+                    adminSessionsMessage,
+                    endAllSessions,
                     // v7.2.0: Tokens
                     adminTokens,
                     adminTokenForm,
