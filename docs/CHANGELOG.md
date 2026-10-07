@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [7.17.0] - 2026-10-07
+
+Fork fix for gap-fill run time, plus semantic ports from upstream v8.17-v9.3.1
+(plan: plans/261007-0950-upstream-v9-port-and-gapfill-memory).
+
+### Fixed
+- **Gap-fill remembers gaps it already found empty** (migration `020`,
+  table `gap_fill_empty`). Every run used to re-ask Telegram about every
+  deleted-message range; on the live archive that took ~10h against a 6h
+  schedule, so runs were skipped and the healthcheck reported the backup stuck.
+  `fill-gaps --force` re-checks everything.
+- **Short downloads are refused** (backup and listener): a file smaller than
+  the size Telegram declares is deleted and retried, never recorded as downloaded.
+  `scripts/refetch_incomplete_messages.py --mode truncated [--apply]` finds and
+  repairs MP4-family files already kept short.
+- **An unmounted or empty media volume changes nothing**: VERIFY_MEDIA, the
+  refetch script and the backup no longer un-mark or re-download files when the
+  media folder is not visibly there.
+
+### Added
+- **End every viewer session** (`POST /api/admin/sessions/end-all`, Admin
+  Settings > Sessions; master and above). Other viewer processes drop ended
+  sessions within 60s. Hand-off tickets are not revoked (60s, single use);
+  rotate `VIEWER_HANDOFF_SECRET` to kill outstanding ones.
+- **Archive's own name in Telegram's device list** ("Telegram Archive";
+  override with `TELEGRAM_DEVICE_MODEL`).
+- **Animated (.tgs) and video (.webm) stickers play in the chat.** .tgs needs
+  the lottie-web 5.13.0 light canvas build in the static third-party folder
+  (`lottie_light_canvas-5.13.0.min.js`); without it .tgs falls back to a
+  download label.
+
 ## [Upstream remaining-candidates port] - 2026-09-27
 
 Semantic ports from the 79 previously untriaged upstream commits (report:
