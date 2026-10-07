@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, true, update
 
 from .adapter import retry_on_locked
 from .models import UserAccount, ViewerAccount, ViewerAuditLog, ViewerSession, ViewerToken
@@ -327,6 +327,35 @@ class ViewerMixin:
             result = await session.execute(delete(ViewerSession).where(ViewerSession.source_token_id == token_id))
             await session.commit()
             return result.rowcount
+
+    _SESSION_DELETE_CHUNK = 500
+
+    @retry_on_locked()
+    async def delete_all_sessions(self, *, keep_token: str | None = None) -> list[tuple[str, str]]:
+        """Delete every viewer session, or every one but ``keep_token``.
+
+        Returns ``(token, username)`` for each deleted row so the caller can
+        close the sockets those sessions hold. Where the dialect has DELETE ...
+        RETURNING, one statement deletes and reports, so no session is deleted
+        without being reported. Elsewhere (SQLite before 3.35) the rows are read
+        first and only those are deleted: a session created between the two
+        statements survives rather than vanishing unreported.
+        """
+        condition = ViewerSession.token != keep_token if keep_token is not None else true()
+        async with self.db_manager.async_session_factory() as session:
+            if self.db_manager.engine.dialect.delete_returning:
+                stmt = delete(ViewerSession).where(condition).returning(ViewerSession.token, ViewerSession.username)
+                deleted = [(row[0], row[1]) for row in (await session.execute(stmt)).all()]
+            else:
+                stmt = select(ViewerSession.token, ViewerSession.username).where(condition)
+                deleted = [(row[0], row[1]) for row in (await session.execute(stmt)).all()]
+                tokens = [token for token, _ in deleted]
+                # Chunked: those old SQLite builds also cap a statement at 999 bound variables.
+                for start in range(0, len(tokens), self._SESSION_DELETE_CHUNK):
+                    chunk = tokens[start : start + self._SESSION_DELETE_CHUNK]
+                    await session.execute(delete(ViewerSession).where(ViewerSession.token.in_(chunk)))
+            await session.commit()
+            return deleted
 
     @staticmethod
     def _viewer_session_to_dict(row: ViewerSession) -> dict[str, Any]:
