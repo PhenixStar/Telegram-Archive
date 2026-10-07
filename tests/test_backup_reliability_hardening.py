@@ -129,6 +129,7 @@ class TestHealOrEndRun:
         db = MagicMock()
         db.get_chats_with_messages = AsyncMock(return_value=[-1001, -1002])
         db.detect_message_gaps = AsyncMock(return_value=[(1, 5, 3)])
+        db.get_empty_gaps = AsyncMock(return_value=set())
         backup = _bare_backup(_connection=connection, db=db)
         backup.config = SimpleNamespace(gap_threshold=1, deletion_mode="hard")
         backup.client.get_entity = AsyncMock(side_effect=ConnectionError("Cannot send requests while disconnected"))

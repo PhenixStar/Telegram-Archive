@@ -162,6 +162,10 @@ For more information, visit: https://github.com/GeiserX/Telegram-Archive
         "-t", "--threshold", type=int, default=None,
         help="Minimum gap size to investigate (overrides GAP_THRESHOLD env var)",
     )
+    fill_gaps_parser.add_argument(
+        "--force", action="store_true",
+        help="Re-check gaps an earlier run already found empty (deleted messages)",
+    )
 
     return parser
 
@@ -226,35 +230,6 @@ async def run_list_chats(args) -> int:
         return 1
 
 
-async def run_fill_gaps_cmd(args) -> int:
-    """Run fill-gaps command."""
-    from .config import Config, setup_logging
-    from .telegram_backup import run_fill_gaps
-
-    try:
-        config = Config()
-        if args.threshold is not None:
-            config.gap_threshold = args.threshold
-        setup_logging(config)
-
-        summary = await run_fill_gaps(config, chat_id=args.chat_id)
-        print("\nGap-fill complete:")
-        print(f"  Chats scanned: {summary['chats_scanned']}")
-        print(f"  Chats with gaps: {summary['chats_with_gaps']}")
-        print(f"  Total gaps found: {summary['total_gaps']}")
-        print(f"  Messages recovered: {summary['total_recovered']}")
-        if summary["details"]:
-            for detail in summary["details"]:
-                print(
-                    f"  - {detail['chat_name']} (ID {detail['chat_id']}): "
-                    f"{detail['gaps']} gaps, {detail['recovered']} recovered"
-                )
-        return 0
-    except Exception as e:
-        print(f"Gap-fill failed: {e}", file=sys.stderr)
-        return 1
-
-
 async def run_import(args) -> int:
     """Run import command."""
     from .config import Config, setup_logging
@@ -302,11 +277,12 @@ async def run_fill_gaps_cmd(args) -> int:
             config.gap_threshold = args.threshold
         setup_logging(config)
 
-        summary = await run_fill_gaps(config, chat_id=args.chat_id)
+        summary = await run_fill_gaps(config, chat_id=args.chat_id, force=args.force)
         print("\nGap-fill complete:")
         print(f"  Chats scanned: {summary['chats_scanned']}")
         print(f"  Chats with gaps: {summary['chats_with_gaps']}")
         print(f"  Total gaps found: {summary['total_gaps']}")
+        print(f"  Gaps skipped (already found empty): {summary.get('known_empty_skipped', 0)}")
         print(f"  Messages recovered: {summary['total_recovered']}")
         if summary["details"]:
             for detail in summary["details"]:

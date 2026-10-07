@@ -19,6 +19,7 @@ from .models import (
     AvatarHistory,
     Chat,
     ChatFolderMember,
+    GapFillEmpty,
     Media,
     Message,
     MessageVersion,
@@ -508,6 +509,25 @@ class SyncMixin:
             """)
             result = await session.execute(query, {"chat_id": chat_id, "threshold": threshold})
             return [(row.gap_start, row.gap_end, row.gap_size) for row in result]
+
+    async def get_empty_gaps(self, chat_id: int) -> set[tuple[int, int]]:
+        """(gap_start, gap_end) pairs of this chat that gap-fill already found empty."""
+        async with self.db_manager.async_session_factory() as session:
+            stmt = select(GapFillEmpty.gap_start, GapFillEmpty.gap_end).where(GapFillEmpty.chat_id == chat_id)
+            result = await session.execute(stmt)
+            return {(row.gap_start, row.gap_end) for row in result}
+
+    @retry_on_locked()
+    async def mark_gap_empty(self, chat_id: int, gap_start: int, gap_end: int) -> None:
+        """Remember that a clean fetch of this exact gap returned no messages."""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        insert = sqlite_insert if self._is_sqlite else pg_insert
+        values = {"chat_id": chat_id, "gap_start": gap_start, "gap_end": gap_end, "checked_at": datetime.utcnow()}
+        async with self.db_manager.async_session_factory() as session:
+            await session.execute(insert(GapFillEmpty).values(**values).on_conflict_do_nothing())
+            await session.commit()
 
     async def get_chats_with_messages(self) -> list[int]:
         """Get all chat IDs that have at least one message."""

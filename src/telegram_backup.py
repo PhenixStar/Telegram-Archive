@@ -1619,11 +1619,15 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
         return total
 
-    async def _fill_gaps(self, chat_id: int | None = None) -> dict:
+    async def _fill_gaps(self, chat_id: int | None = None, force: bool = False) -> dict:
         """Detect and fill message gaps for backed-up chats.
+
+        Gaps a previous run fetched cleanly and found empty (deleted messages)
+        are skipped, so each run only asks Telegram about new or changed gaps.
 
         Args:
             chat_id: If provided, scan only this chat. Otherwise scan all.
+            force: Re-check gaps already recorded as empty.
 
         Returns:
             Summary dict with total_gaps, total_recovered, per_chat details.
@@ -1637,10 +1641,16 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
 
         total_gaps = 0
         total_recovered = 0
+        known_empty_skipped = 0
         per_chat: list[dict] = []
 
         for cid in chat_ids:
             gaps = await self.db.detect_message_gaps(cid, threshold)
+            if gaps and not force:
+                known_empty = await self.db.get_empty_gaps(cid)
+                unchecked = [g for g in gaps if (g[0], g[1]) not in known_empty]
+                known_empty_skipped += len(gaps) - len(unchecked)
+                gaps = unchecked
             if not gaps:
                 continue
 
@@ -1688,6 +1698,8 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
                         logger.info(f"    Recovered {recovered} messages")
                     else:
                         logger.info("    No messages found (likely deleted)")
+                        # Only a fetch that finished without error proves the gap is empty
+                        await self.db.mark_gap_empty(cid, gap_start, gap_end)
                 except (TimeoutError, RPCError, ConnectionError, OSError) as e:
                     logger.error(f"    Connection error filling gap: {e}")
                     await self._heal_or_end_run()
@@ -1706,6 +1718,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
             "chats_scanned": len(chat_ids),
             "chats_with_gaps": len(per_chat),
             "total_gaps": total_gaps,
+            "known_empty_skipped": known_empty_skipped,
             "total_recovered": total_recovered,
             "details": per_chat,
         }
@@ -1715,6 +1728,7 @@ class TelegramBackup(BackupMediaMixin, BackupExtractionMixin):
         logger.info(f"Chats scanned: {summary['chats_scanned']}")
         logger.info(f"Chats with gaps: {summary['chats_with_gaps']}")
         logger.info(f"Total gaps: {summary['total_gaps']}")
+        logger.info(f"Gaps skipped (already found empty): {known_empty_skipped}")
         logger.info(f"Messages recovered: {summary['total_recovered']}")
         logger.info("=" * 60)
 
@@ -2332,6 +2346,7 @@ async def run_fill_gaps(
     client: TelegramClient | None = None,
     chat_id: int | None = None,
     connection: TelegramConnection | None = None,
+    force: bool = False,
 ) -> dict:
     """Run gap-fill operation.
 
@@ -2340,11 +2355,12 @@ async def run_fill_gaps(
         client: Optional shared TelegramClient.
         chat_id: If provided, fill gaps only for this chat.
         connection: Optional TelegramConnection for mid-run reconnect healing.
+        force: Re-check gaps already recorded as empty.
     """
     backup = await TelegramBackup.create(config, client=client, connection=connection)
     try:
         await backup.connect()
-        return await backup._fill_gaps(chat_id=chat_id)
+        return await backup._fill_gaps(chat_id=chat_id, force=force)
     finally:
         await backup.disconnect()
         await backup.db.close()

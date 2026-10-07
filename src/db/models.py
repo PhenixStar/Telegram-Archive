@@ -601,3 +601,22 @@ class AvatarHistory(Base):
     seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)
 
     __table_args__ = (Index("ix_avatar_history_chat_seen", "chat_id", "seen_at"),)
+
+
+class GapFillEmpty(Base):
+    """A message-id gap the gap-fill already asked Telegram about and found empty (020).
+
+    Deleted messages never come back, so a gap whose exact bounds were fetched
+    cleanly with nothing returned stays empty; remembering it stops every
+    scheduled run re-asking Telegram about thousands of deleted ranges. The
+    bounds are real message ids on both sides, so a gap that later shrinks or
+    merges has new bounds and gets checked once more. Only a fetch that finished
+    without error is recorded; ``fill-gaps --force`` ignores these rows.
+    """
+
+    __tablename__ = "gap_fill_empty"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    gap_start: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    gap_end: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)
