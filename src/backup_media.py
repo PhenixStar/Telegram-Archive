@@ -300,7 +300,7 @@ class BackupMediaMixin:
                             # Symlink failed (e.g., Windows / unsupported FS).
                             # The shared file already exists, so copy it into
                             # the chat dir instead of re-downloading.
-                            logger.warning(f"Symlink failed, copying shared file: {e}")
+                            logger.warning(f"Symlink failed, copying shared file: {type(e).__name__}")
                             import shutil
 
                             shutil.copy2(shared_file_path, file_path)
@@ -322,11 +322,13 @@ class BackupMediaMixin:
                             rel_path = os.path.relpath(shared_file_path, chat_media_dir)
                             os.symlink(rel_path, file_path)
                         except OSError as e:
-                            # Symlink failed - move file to chat dir instead
-                            logger.warning(f"Symlink failed, using direct path: {e}")
+                            # Symlink failed - copy, never move: the blob is already
+                            # published in _shared, so another chat may link to it and a
+                            # move would leave that link pointing at nothing.
+                            logger.warning(f"Symlink failed, copying shared file: {type(e).__name__}")
                             import shutil
 
-                            shutil.move(shared_file_path, file_path)
+                            shutil.copy2(shared_file_path, file_path)
 
                 # Update file_size with actual size from disk (follow symlinks)
                 actual_path = shared_file_path if os.path.exists(shared_file_path) else file_path

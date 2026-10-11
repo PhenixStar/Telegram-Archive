@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [7.18.0] - 2026-10-12
+
+Fork port of upstream v9 location/contact capture, plus the shared-media safety
+fix (upstream v9.3.1) and the Mako/multidict advisories (upstream v9.3.2).
+
+### Added
+- **Locations and contacts keep their payload.** A plain location stored only a
+  `geo` media-row label and a contact only `contact`; the coordinates, name and
+  phone number were never kept. Capture (backup and listener) now writes them to
+  `raw_data["geo"]` / `raw_data["contact"]` and the viewer shows a Location /
+  Contact chip. No schema change.
+- `scripts/refetch_incomplete_messages.py --mode payload [--apply]` fills the
+  payload in for messages archived before this release.
+
+### Fixed
+- A chat symlink that cannot be created now copies the shared file instead of
+  moving it out of `_shared/`, which left every other chat's link to it dangling.
+- Mako 1.3.12 -> 1.4.3 and multidict 6.7.1 -> 6.9.1 (security advisories).
+
 ## [7.17.0] - 2026-10-07
 
 Fork fix for gap-fill run time, plus semantic ports from upstream v8.17-v9.3.1

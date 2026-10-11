@@ -8533,6 +8533,8 @@
                 // first key present decides the chip; nothing here is ever rendered as
                 // HTML, so the values stay inert text.
                 const EXTENDED_MEDIA_KINDS = [
+                    { key: 'geo', icon: 'fas fa-location-dot', label: 'Location' },
+                    { key: 'contact', icon: 'fas fa-address-card', label: 'Contact' },
                     { key: 'venue', icon: 'fas fa-map-marker-alt', label: 'Venue' },
                     { key: 'dice', icon: 'fas fa-dice', label: 'Dice' },
                     { key: 'invoice', icon: 'fas fa-file-invoice-dollar', label: 'Invoice' },
@@ -8567,6 +8569,10 @@
                     const coords = () => (data.lat != null && data.long != null)
                         ? `${Number(data.lat).toFixed(5)}, ${Number(data.long).toFixed(5)}` : ''
                     switch (kind) {
+                        case 'geo':
+                            return coords()
+                        case 'contact':
+                            return [[data.first_name, data.last_name].filter(Boolean).join(' '), data.phone_number].filter(Boolean).join(' — ')
                         case 'venue':
                             return [data.title, data.address].filter(Boolean).join(' — ') || coords()
                         case 'dice':

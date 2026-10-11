@@ -157,3 +157,48 @@ class TestDetails:
 
     def test_a_downloadable_kind_returns_nothing(self):
         assert extract_extended_media_details(MessageMediaPhoto(photo=None)) is None
+
+
+class TestLocationAndContactPayload:
+    """A plain location or contact kept only a media-row label; the payload is the point."""
+
+    def test_geo_and_contact_are_classified(self):
+        from telethon.tl.types import MessageMediaContact, MessageMediaGeo
+
+        assert classify_extended_media(MessageMediaGeo(geo=_geo())) == "geo"
+        contact = MessageMediaContact(
+            phone_number="+639171234567", first_name="Ana", last_name="Cruz", vcard="", user_id=42
+        )
+        assert classify_extended_media(contact) == "contact"
+
+    def test_a_live_location_is_not_mistaken_for_a_plain_one(self):
+        # Exact class-name match: GeoLive must keep its own chip and period.
+        assert classify_extended_media(MessageMediaGeoLive(geo=_geo(), period=60)) == "geo_live"
+
+    def test_geo_keeps_coordinates(self):
+        from telethon.tl.types import MessageMediaGeo
+
+        kind, details = extract_extended_media_details(MessageMediaGeo(geo=_geo(14.5995, 120.9842)))
+        assert kind == "geo"
+        assert details == {"lat": 14.5995, "long": 120.9842}
+
+    def test_contact_keeps_name_number_and_user(self):
+        from telethon.tl.types import MessageMediaContact
+
+        kind, details = extract_extended_media_details(
+            MessageMediaContact(phone_number="+639171234567", first_name="Ana", last_name="Cruz", vcard="", user_id=42)
+        )
+        assert kind == "contact"
+        assert details == {
+            "first_name": "Ana",
+            "last_name": "Cruz",
+            "phone_number": "+639171234567",
+            "user_id": 42,
+        }
+
+    def test_an_empty_geo_degrades_to_an_empty_payload(self):
+        # A location Telegram could not resolve (GeoPointEmpty has no lat/long).
+        from telethon.tl.types import GeoPointEmpty, MessageMediaGeo
+
+        kind, details = extract_extended_media_details(MessageMediaGeo(geo=GeoPointEmpty()))
+        assert (kind, details) == ("geo", {})

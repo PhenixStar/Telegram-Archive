@@ -6,7 +6,7 @@ Covers:
 - Telethon download_media return value capture (.mp4 extension)
 - _process_media dedup path with symlink replacement
 - _verify_and_redownload_media cleanup of dangling symlinks
-- shutil.move fallback when symlink creation fails (non-EEXIST)
+- copy fallback (never a move) when symlink creation fails (non-EEXIST)
 """
 
 import asyncio
@@ -423,7 +423,7 @@ class TestVerifyCleanupDanglingSymlink(unittest.TestCase):
 
 
 class TestShutilMoveFallback(unittest.TestCase):
-    """Test that shutil.move is only used when symlink creation fails with non-EEXIST error."""
+    """When a chat symlink cannot be made the shared blob is copied, never moved out of _shared."""
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -461,12 +461,12 @@ class TestShutilMoveFallback(unittest.TestCase):
         msg.reply_to = None
         return msg
 
-    def test_shutil_move_fallback_only_when_symlink_unsupported(self):
-        """shutil.move is called when os.symlink raises a non-EEXIST OSError (e.g., Windows).
+    def test_copy_fallback_leaves_the_shared_blob_in_place(self):
+        """A failed symlink copies the blob into the chat folder and keeps the shared one.
 
-        This exercises the first-download branch (Path B) where the shared file does NOT
-        exist initially. download_media creates it, then os.symlink fails with EPERM,
-        triggering the shutil.move fallback.
+        First-download branch: download_media creates the shared file, then os.symlink
+        fails with EPERM. The blob is already published under its final name, so a move
+        would orphan every other chat's link to it.
         """
         shared_dir = os.path.join(self.media_path, "_shared")
         chat_dir = os.path.join(self.media_path, "400")
@@ -474,11 +474,8 @@ class TestShutilMoveFallback(unittest.TestCase):
         os.makedirs(chat_dir)
 
         file_name = "fallback_file.jpg"
-        shared_file = os.path.join(shared_dir, file_name)
         chat_file = os.path.join(chat_dir, file_name)
 
-        # Shared file must NOT exist initially (first-download branch).
-        # download_media creates it as a side effect.
         def fake_download(message, path):
             with open(path, "wb") as f:
                 f.write(b"image data for fallback test")
@@ -491,22 +488,20 @@ class TestShutilMoveFallback(unittest.TestCase):
 
         msg = self._make_message()
 
-        # Patch os.symlink to raise EPERM (simulating Windows / unsupported FS).
-        # The code does `import shutil; shutil.move(...)` inside the except block,
-        # so we patch shutil.move on the shutil module itself.
         symlink_error = OSError(errno.EPERM, "Operation not permitted")
-        real_move = shutil.move
-        with patch("os.symlink", side_effect=symlink_error), patch("shutil.move", side_effect=real_move) as mock_move:
+        with patch("os.symlink", side_effect=symlink_error), patch("shutil.move") as mock_move:
             result = self._run(self.backup._process_media(msg, 400))
 
         self.assertIsNotNone(result)
         self.assertTrue(result["downloaded"])
-        # shutil.move should have been called with the sharded path as source
-        mock_move.assert_called_once()
-        call_args = mock_move.call_args[0]
-        self.assertTrue(call_args[0].startswith(shared_dir))
-        self.assertIn("fallback_file.jpg", call_args[0])
-        self.assertEqual(call_args[1], chat_file)
+        mock_move.assert_not_called()
+        self.assertTrue(os.path.isfile(chat_file))
+        self.assertFalse(os.path.islink(chat_file))
+        # The shared blob is still there for any other chat that links to it.
+        shared_blobs = [os.path.join(r, f) for r, _, fs in os.walk(shared_dir) for f in fs if f == file_name]
+        self.assertEqual(len(shared_blobs), 1)
+        with open(shared_blobs[0], "rb") as f, open(chat_file, "rb") as g:
+            self.assertEqual(f.read(), g.read())
 
     def test_no_shutil_move_when_symlink_succeeds(self):
         """shutil.move is NOT called when os.symlink succeeds normally."""

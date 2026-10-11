@@ -79,6 +79,79 @@ class TestQueries:
         assert "file_path IS NOT NULL" in refetch.DOWNLOADED_MEDIA_SQL
 
 
+class TestPayloadMode:
+    """Locations and contacts stored before their payload was captured."""
+
+    @staticmethod
+    def _db():
+        import sqlite3
+
+        con = sqlite3.connect(":memory:")
+        con.executescript(
+            """
+            CREATE TABLE messages (chat_id INT, id INT, raw_data TEXT);
+            CREATE TABLE media (chat_id INT, message_id INT, type TEXT);
+            INSERT INTO messages VALUES (1, 1, '{"forward_from_name": "x"}');   -- geo, no payload
+            INSERT INTO messages VALUES (1, 2, '{"geo": {"lat": 1.0}}');         -- geo, repaired
+            INSERT INTO messages VALUES (1, 3, '{}');                            -- contact, no payload
+            INSERT INTO messages VALUES (1, 4, '{"contact": {"phone_number": "1"}}');
+            INSERT INTO messages VALUES (1, 5, NULL);                            -- geo, no raw_data at all
+            INSERT INTO messages VALUES (1, 6, '{}');                            -- a photo, never a target
+            INSERT INTO media VALUES (1, 1, 'geo'), (1, 2, 'geo'), (1, 3, 'contact'),
+                                     (1, 4, 'contact'), (1, 5, 'geo'), (1, 6, 'photo');
+            """
+        )
+        return con
+
+    def test_only_rows_still_missing_their_payload_are_selected(self):
+        rows = self._db().execute(refetch.PAYLOAD_MESSAGES_SQL).fetchall()
+        assert rows == [(1, 1), (1, 3), (1, 5)]
+
+    def test_a_geo_payload_does_not_hide_a_contact_missing_its_own(self):
+        con = self._db()
+        con.execute("UPDATE messages SET raw_data = '{\"geo\": {}}' WHERE id = 3")
+        assert (1, 3) in con.execute(refetch.PAYLOAD_MESSAGES_SQL).fetchall()
+
+    @pytest.mark.asyncio
+    async def test_selection_groups_by_chat(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+
+        async def fake_rows(_db, sql):
+            assert sql == refetch.PAYLOAD_MESSAGES_SQL
+            return [(-100, 1), (-100, 3), (-200, 9)]
+
+        monkeypatch.setattr(refetch, "_rows", fake_rows)
+        targets = await refetch._select_targets(object(), SimpleNamespace(media_path=str(tmp_path)), "payload")
+        assert targets == {-100: [1, 3], -200: [9]}
+
+    @pytest.mark.asyncio
+    async def test_only_a_row_that_gained_its_payload_counts_as_repaired(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        async def passthrough(fn, *args, **kwargs):
+            return await fn(*args, **kwargs)
+
+        monkeypatch.setattr(refetch, "call_with_flood_retry", passthrough)
+
+        async def process(message, chat_id):
+            # Message 2 no longer carries a location or contact.
+            return {"id": message.id, "raw_data": {"geo": {"lat": 1.0}} if message.id == 1 else {}}
+
+        backup = SimpleNamespace(
+            client=SimpleNamespace(
+                get_entity=AsyncMock(return_value=object()),
+                get_messages=AsyncMock(return_value=[SimpleNamespace(id=1), SimpleNamespace(id=2)]),
+            ),
+            _process_message_isolated=process,
+            _commit_batch=AsyncMock(),
+            db=SimpleNamespace(),
+            config=SimpleNamespace(media_path=str(tmp_path)),
+        )
+        repaired, unavailable = await refetch._repair_chat(backup, 126, [1, 2], "payload", 0)
+        assert (repaired, unavailable) == (1, 1)
+
+
 class TestSelection:
     @pytest.mark.asyncio
     async def test_targets_are_grouped_by_chat(self, monkeypatch, tmp_path):

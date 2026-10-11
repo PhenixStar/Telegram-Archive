@@ -378,13 +378,14 @@ async def download_and_shard_media(
             os.unlink(file_path)
         os.symlink(rel_path, file_path)
     except OSError as e:
-        logger.warning(f"Symlink not supported, using direct path: {e}")
+        # Type only: OSError embeds the offending path, and media paths carry
+        # the chat-id folder. The blob stays in _shared even when it was just
+        # downloaded: it is already published under its final name, so another
+        # chat may link to it, and moving it out would leave that link dangling.
+        logger.warning(f"Symlink not supported, copying shared file: {type(e).__name__}")
         import shutil
 
-        if reused:
-            shutil.copy2(shared_file_path, file_path)
-        else:
-            shutil.move(shared_file_path, file_path)
+        shutil.copy2(shared_file_path, file_path)
 
     return shared_file_path, content_hash
 
@@ -466,6 +467,8 @@ METADATA_ONLY_MEDIA_TYPES = frozenset(
 # service_action_type idiom. GeoLive must precede Geo checks at call sites —
 # handled here by exact class-name match, which cannot collide.
 _EXTENDED_MEDIA_TYPES = {
+    "MessageMediaGeo": "geo",
+    "MessageMediaContact": "contact",
     "MessageMediaVenue": "venue",
     "MessageMediaDice": "dice",
     "MessageMediaInvoice": "invoice",
@@ -479,7 +482,12 @@ _EXTENDED_MEDIA_TYPES = {
 
 
 def classify_extended_media(media: object) -> str | None:
-    """The nine metadata-only kinds _get_media_type's isinstance ladder misses."""
+    """The metadata-only kinds whose payload the capture stores in raw_data.
+
+    Nine of them are kinds _get_media_type's isinstance ladder misses. ``geo``
+    and ``contact`` it does name (as bare media-row labels), but the row alone
+    kept no coordinates, name or number, so the payload is stored here too.
+    """
     if media is None:
         return None
     return _EXTENDED_MEDIA_TYPES.get(type(media).__name__)
@@ -541,6 +549,20 @@ def extract_extended_media_details(media: object) -> tuple[str, dict] | None:
             details = {
                 "winners_count": getattr(media, "winners_count", None),
                 "months": getattr(media, "months", None),
+            }
+        elif kind == "geo":
+            geo = getattr(media, "geo", None)
+            details = {
+                "lat": getattr(geo, "lat", None),
+                "long": getattr(geo, "long", None),
+                "accuracy_radius": getattr(geo, "accuracy_radius", None),
+            }
+        elif kind == "contact":
+            details = {
+                "first_name": getattr(media, "first_name", None),
+                "last_name": getattr(media, "last_name", None),
+                "phone_number": getattr(media, "phone_number", None),
+                "user_id": getattr(media, "user_id", None),
             }
         elif kind == "geo_live":
             geo = getattr(media, "geo", None)

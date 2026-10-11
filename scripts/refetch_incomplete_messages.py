@@ -11,6 +11,11 @@ Two repairs, both opt-in and both read-only against Telegram:
     forward provenance and link previews added in 7.14.0, since all of that is
     captured at write time.
 
+``--mode payload``
+    Locations and contacts captured before their coordinates, name and number
+    were stored: the media row exists but ``raw_data`` has no ``geo``/``contact``
+    payload for the viewer to draw. Re-fetches the message so the capture fills it.
+
 ``--mode media``
     Media rows the database records as downloaded whose file is empty or missing
     on disk. Interrupted downloads leave these behind; the September 2026 storage
@@ -140,6 +145,20 @@ BLANK_MESSAGES_SQL = """
     ORDER BY g.chat_id, g.id
 """.format(renderable=" AND ".join(f"g.raw_data NOT LIKE '%\"{key}\"%'" for key in _RENDERABLE_RAW_DATA_KEYS))
 
+# Locations and contacts captured before their payload was stored in raw_data: the
+# media row says "geo"/"contact" but the coordinates, name and number were never
+# kept. A repaired row carries the raw_data key, so it drops out of this query.
+PAYLOAD_MESSAGES_SQL = """
+    SELECT m.chat_id, m.message_id
+    FROM media m
+    JOIN messages g ON g.chat_id = m.chat_id AND g.id = m.message_id
+    WHERE m.type IN ('geo', 'contact')
+      AND (g.raw_data IS NULL
+           OR (m.type = 'geo' AND g.raw_data NOT LIKE '%"geo":%')
+           OR (m.type = 'contact' AND g.raw_data NOT LIKE '%"contact":%'))
+    ORDER BY m.chat_id, m.message_id
+"""
+
 DOWNLOADED_MEDIA_SQL = """
     SELECT chat_id, message_id, file_path, type
     FROM media
@@ -250,8 +269,9 @@ async def _select_targets(
             targets.setdefault(chat_id, []).append(message_id)
         return targets
 
-    if mode == "blank":
-        for chat_id, message_id in await _rows(db, BLANK_MESSAGES_SQL):
+    if mode in ("blank", "payload"):
+        sql = BLANK_MESSAGES_SQL if mode == "blank" else PAYLOAD_MESSAGES_SQL
+        for chat_id, message_id in await _rows(db, sql):
             targets.setdefault(chat_id, []).append(message_id)
         return targets
 
@@ -374,7 +394,16 @@ async def _repair_chat(
 
         if processed:
             await backup._commit_batch(processed, chat_id)
-            if mode not in _FILE_MODES:
+            if mode == "payload":
+                # Count a row only when the capture produced the payload; a message
+                # whose media no longer is a location or contact stays unrepaired.
+                for data in processed:
+                    raw = data.get("raw_data") or {}
+                    if "geo" in raw or "contact" in raw:
+                        repaired += 1
+                    else:
+                        unavailable += 1
+            elif mode not in _FILE_MODES:
                 repaired += len(processed)
             else:
                 # A committed row is not a repair: only a file with bytes behind
@@ -494,7 +523,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--mode", choices=("blank", "media", "skipped", "truncated"), required=True, help="What to repair")
+    parser.add_argument("--mode", choices=("blank", "payload", "media", "skipped", "truncated"), required=True, help="What to repair")
     parser.add_argument("--min-size-mb", type=float, default=0, help="skipped mode: smallest recorded size to include")
     parser.add_argument("--max-size-mb", type=float, default=None, help="skipped mode: largest recorded size to include")
     parser.add_argument(
