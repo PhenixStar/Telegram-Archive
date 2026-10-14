@@ -538,6 +538,35 @@ class SyncMixin:
 
     # ========== Statistics ==========
 
+    async def get_visible_media_bytes(self, chat_ids: set[int]) -> int:
+        """Size of the distinct downloaded files held by the given chats.
+
+        The archive stores one blob per (content_hash, file_name) and links it
+        into every chat that holds it, so a file reposted across the viewer's
+        chats counts once. Rows with no content hash cannot be matched to a blob
+        and count for themselves. A viewer's blobs are a subset of the archive's,
+        so this never exceeds the archive-wide figure.
+        """
+        if not chat_ids:
+            return 0
+        blobs: dict[tuple[str, str | None], int] = {}
+        unhashed = 0
+        async with self.db_manager.async_session_factory() as session:
+            result = await session.stream(
+                select(
+                    Media.content_hash,
+                    Media.file_name,
+                    func.coalesce(Media.file_size, 0),
+                ).where(Media.downloaded == 1, Media.chat_id.in_(chat_ids))
+            )
+            async for content_hash, file_name, size in result:
+                if content_hash:
+                    key = (content_hash, file_name)
+                    blobs[key] = max(blobs.get(key, 0), int(size))
+                else:
+                    unhashed += int(size)
+        return unhashed + sum(blobs.values())
+
     async def get_statistics(self) -> dict[str, Any]:
         """Get statistics - alias for get_cached_statistics for backwards compatibility."""
         return await self.get_cached_statistics()

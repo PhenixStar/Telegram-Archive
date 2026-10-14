@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 For upgrade instructions, see [Upgrading](#upgrading) at the bottom.
 
+## [7.18.1] - 2026-10-14
+
+### Fixed
+- A restricted viewer's storage figure counts each distinct file once. It used
+  to add up per-chat sizes, so a file reposted across the viewer's chats was
+  counted once per chat. The figure never exceeds the archive-wide total.
+
 ## [7.18.0] - 2026-10-12
 
 Fork port of upstream v9 location/contact capture, plus the shared-media safety

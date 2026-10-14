@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import time
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -532,12 +533,44 @@ def _scope_stats_to_user(stats: dict, visible: set[int] | None) -> None:
         stats["total_size_mb"] = float(round(sum(media_bytes.values()) / (1024 * 1024), 2))
 
 
+_VISIBLE_BYTES_TTL_SECONDS = 300
+_visible_bytes_cache: dict[frozenset[int], tuple[float, int]] = {}
+
+
+async def _distinct_visible_size_mb(visible: set[int], archive_mb: object) -> float:
+    """A restricted viewer's storage as its own distinct files, in MB.
+
+    The per-chat byte maps count a file once per chat it appears in, so summing
+    them overstates a viewer whose chats repost the same media. The scan reads
+    every media row of the viewer's chats, hence the short cache. Declared sizes
+    can run past real disk use, so the figure never exceeds the archive total.
+    """
+    key = frozenset(visible)
+    now = time.monotonic()
+    hit = _visible_bytes_cache.get(key)
+    if hit is not None and now - hit[0] < _VISIBLE_BYTES_TTL_SECONDS:
+        visible_bytes = hit[1]
+    else:
+        visible_bytes = await deps.db.get_visible_media_bytes(set(visible))
+        if len(_visible_bytes_cache) > 256:
+            _visible_bytes_cache.clear()
+        _visible_bytes_cache[key] = (now, visible_bytes)
+    visible_mb = float(round(visible_bytes / (1024 * 1024), 2))
+    if isinstance(archive_mb, (int, float)) and not isinstance(archive_mb, bool):
+        visible_mb = min(visible_mb, float(archive_mb))
+    return visible_mb
+
+
 @router.get("/api/stats")
 async def get_stats(user: UserContext = Depends(require_auth)):
     """Get cached backup statistics (fast, calculated daily)."""
     try:
         stats = await deps.db.get_cached_statistics()
-        _scope_stats_to_user(stats, deps.get_user_chat_ids(user))
+        visible = deps.get_user_chat_ids(user)
+        archive_mb = stats.get("total_size_mb")
+        _scope_stats_to_user(stats, visible)
+        if visible is not None and "total_size_mb" in stats:
+            stats["total_size_mb"] = await _distinct_visible_size_mb(visible, archive_mb)
         stats["timezone"] = deps.config.viewer_timezone
         stats["stats_calculation_hour"] = deps.config.stats_calculation_hour
         stats["show_stats"] = deps.config.show_stats
